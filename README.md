@@ -15,5 +15,5 @@ password generator, [activated by a phrase of "Hi, cutie~"
 ](https://twitter.com/traexecutive/status/1424809156297568257)
 if seen by the bot in direct messages or in a group chat it is in.
 
-It can also be used inline, or produce a different response
+It can also be used inline, and produces a different response
 activated by the phrase "Hi Herbert!".
