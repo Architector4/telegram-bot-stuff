@@ -54,8 +54,8 @@ async fn lol() {
     let bot = Bot::new(key);
 
     lazy_static! {
-        static ref REGEXMOMENT: regex::Regex = Regex::new("hi,? +cutie.*").unwrap();
-        static ref REGEXMOMENT_HERBERT: regex::Regex = Regex::new("hi,? +herbert.*").unwrap();
+        static ref REGEXMOMENT: regex::Regex = Regex::new("hi+,? +cutie.*").unwrap();
+        static ref REGEXMOMENT_HERBERT: regex::Regex = Regex::new("hi+,? +herbert.*").unwrap();
         // Hardcoded file ID
         static ref MOW_FILE_ID: String =
             String::from("AwACAgIAAxkDAAIDJ2N3tP7v2E5m3XaD33yBSDRasamhAAI1IQACUYzBSyvEssWVfZM2KwQ");
