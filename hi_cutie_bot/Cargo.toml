@@ -1,0 +1,17 @@
+[package]
+name = "hi_cutie_bot"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+arch_bot_commons = { version = "0.1.0", path = "../arch_bot_commons" }
+lazy_static = "1.4.0"
+log = "0.4.17"
+pretty_env_logger = "0.4.0"
+rand = "0.8.5"
+regex = "1.7.0"
+teloxide = "0.11.1"
+tokio = { version = "1.21.2", features = ["full"] }
+url = "2.3.1"

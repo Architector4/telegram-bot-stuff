@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+	"hi_cutie_bot",
+	"arch_bot_commons",
+]
