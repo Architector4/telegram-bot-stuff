@@ -392,8 +392,8 @@ name = "hi_cutie_bot"
 version = "0.1.0"
 dependencies = [
  "arch_bot_commons",
- "lazy_static",
  "log",
+ "once_cell",
  "pretty_env_logger",
  "rand",
  "regex",

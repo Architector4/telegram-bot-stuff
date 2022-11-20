@@ -7,8 +7,8 @@ edition = "2021"
 
 [dependencies]
 arch_bot_commons = { version = "0.1.0", path = "../arch_bot_commons" }
-lazy_static = "1.4.0"
 log = "0.4.17"
+once_cell = "1.16.0"
 pretty_env_logger = "0.4.0"
 rand = "0.8.5"
 regex = "1.7.0"

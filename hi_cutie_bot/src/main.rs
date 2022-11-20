@@ -1,4 +1,3 @@
-use lazy_static::lazy_static;
 use rand::{seq::SliceRandom, Rng};
 use regex::Regex;
 use std::fs;
@@ -11,23 +10,22 @@ use teloxide::{
 };
 
 use arch_bot_commons::*;
+use once_cell::sync::Lazy;
 use tokio::time::{sleep, Duration};
 
 fn gen_password() -> String {
-    lazy_static! {
-        static ref ALPHABET: Vec<char> = (b'a'..=b'z').map(|c| c as char).collect::<Vec<_>>();
-        static ref RESPONSES: Vec<&'static str> = vec![
-            " hi",
-            " hhi",
-            " hhhi",
-            " hh",
-            " STOP",
-            " omg",
-            " aaaaa",
-            " aaaaaaaaaaaaaaaa",
-        ];
-    }
-
+    static ALPHABET: Lazy<Vec<char>> =
+        Lazy::new(|| (b'a'..=b'z').map(|c| c as char).collect::<Vec<_>>());
+    static RESPONSES: &[&str] = &[
+        " hi",
+        " hhi",
+        " hhhi",
+        " hh",
+        " STOP",
+        " omg",
+        " aaaaa",
+        " aaaaaaaaaaaaaaaa",
+    ];
     let mut rng = rand::thread_rng();
     let length = rng.gen_range(8..69);
 
@@ -53,13 +51,13 @@ async fn lol() {
 
     let bot = Bot::new(key);
 
-    lazy_static! {
-        static ref REGEXMOMENT: regex::Regex = Regex::new("hi+,? +cutie.*").unwrap();
-        static ref REGEXMOMENT_HERBERT: regex::Regex = Regex::new("hi+,? +herbert.*").unwrap();
-        // Hardcoded file ID
-        static ref MOW_FILE_ID: String =
-            String::from("AwACAgIAAxkDAAIDJ2N3tP7v2E5m3XaD33yBSDRasamhAAI1IQACUYzBSyvEssWVfZM2KwQ");
-    }
+    static REGEXMOMENT: Lazy<regex::Regex> = Lazy::new(|| Regex::new("hi+,? +cutie.*").unwrap());
+    static REGEXMOMENT_HERBERT: Lazy<regex::Regex> =
+        Lazy::new(|| Regex::new("hi+,? +herbert.*").unwrap());
+    // Hardcoded file ID
+    static MOW_FILE_ID: Lazy<String> = Lazy::new(|| {
+        String::from("AwACAgIAAxkDAAIDJ2N3tP7v2E5m3XaD33yBSDRasamhAAI1IQACUYzBSyvEssWVfZM2KwQ")
+    });
 
     log::info!("Creating the handler...");
 
@@ -94,13 +92,11 @@ async fn lol() {
         )
         .branch(Update::filter_message().endpoint(
             |bot: Bot, username: String, msg: Message| async move {
-                lazy_static! {
-                    static ref HELP: &'static str =
-                        "(this bot answers to \"hi, cutie!\" messages in DMs and group chats)";
-                }
+                static HELP: &str =
+                    "(this bot answers to \"hi, cutie!\" messages in DMs and group chats)";
                 if let Some(text) = msg.text() {
                     if msg.chat.is_private() && text == "/start" {
-                        bot.send_message(msg.chat.id, *HELP)
+                        bot.send_message(msg.chat.id, HELP)
                             .reply_to_message_id(msg.id)
                             .await?;
                     } else {
