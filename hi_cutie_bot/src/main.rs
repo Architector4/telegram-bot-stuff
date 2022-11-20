@@ -4,10 +4,11 @@ use std::fs;
 use teloxide::{
     prelude::*,
     types::{
-        InlineQueryResult, InlineQueryResultArticle, InlineQueryResultCachedVoice, InputFile,
+        InlineQueryResult, InlineQueryResultArticle, InlineQueryResultVoice, InputFile,
         InputMessageContent, InputMessageContentText,
     },
 };
+use url::Url;
 
 use arch_bot_commons::*;
 use once_cell::sync::Lazy;
@@ -55,9 +56,8 @@ async fn lol() {
     static REGEXMOMENT_HERBERT: Lazy<regex::Regex> =
         Lazy::new(|| Regex::new("hi+,? +herbert.*").unwrap());
     // Hardcoded file ID
-    static MOW_FILE_ID: Lazy<String> = Lazy::new(|| {
-        String::from("AwACAgIAAxkDAAIDJ2N3tP7v2E5m3XaD33yBSDRasamhAAI1IQACUYzBSyvEssWVfZM2KwQ")
-    });
+    static MOW_URL: Lazy<Url> =
+        Lazy::new(|| Url::parse("https://architector4.tilde.team/stuff/mow.ogg").unwrap());
 
     log::info!("Creating the handler...");
 
@@ -76,13 +76,11 @@ async fn lol() {
                         })
                         .collect::<Vec<_>>();
                     if REGEXMOMENT_HERBERT.is_match(&q.query) {
-                        results.push(InlineQueryResult::CachedVoice(
-                            InlineQueryResultCachedVoice::new(
-                                "mow",
-                                MOW_FILE_ID.to_owned(),
-                                "meow",
-                            ),
-                        ));
+                        results.push(InlineQueryResult::Voice(InlineQueryResultVoice::new(
+                            "mow",
+                            MOW_URL.to_owned(),
+                            "meow",
+                        )));
                     }
                     results
                 })
@@ -113,7 +111,7 @@ async fn lol() {
                                 .reply_to_message_id(msg.id)
                                 .await?;
                         } else if REGEXMOMENT_HERBERT.is_match(text) {
-                            bot.send_voice(msg.chat.id, InputFile::file_id(MOW_FILE_ID.to_owned()))
+                            bot.send_voice(msg.chat.id, InputFile::file_id(MOW_URL.to_owned()))
                                 .reply_to_message_id(msg.id)
                                 .await?;
                         }
