@@ -3,6 +3,8 @@
 
 use std::future::Future;
 
+use teloxide::prelude::*;
+
 // this is cursed lol
 //pub async fn make_interruptible(f: impl Future) {
 //    use tokio::select;
@@ -44,4 +46,19 @@ pub fn start_everything(closure: impl Future<Output = ()>) {
         .build()
         .unwrap()
         .block_on(closure);
+}
+
+/// Find out if a user of this ID is an admin of the specified chat of that ID.
+/// If so, returns the `ChatMember` object describing their permissions,
+/// otherwise `None`.
+pub async fn get_admin_of(
+    bot: &Bot,
+    user: UserId,
+    chat: ChatId,
+) -> Result<Option<teloxide::types::ChatMember>, teloxide::RequestError> {
+    Ok(bot
+        .get_chat_administrators(chat)
+        .await?
+        .into_iter()
+        .find(|x| x.user.id == user))
 }
