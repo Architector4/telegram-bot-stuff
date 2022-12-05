@@ -26,8 +26,9 @@ dependencies = [
 
 [[package]]
 name = "arch_bot_commons"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
+ "futures",
  "log",
  "pretty_env_logger",
  "teloxide",

@@ -5,6 +5,8 @@ use std::future::Future;
 
 use teloxide::prelude::*;
 
+pub mod user_resolving;
+
 // this is cursed lol
 //pub async fn make_interruptible(f: impl Future) {
 //    use tokio::select;
