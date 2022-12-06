@@ -1,6 +1,6 @@
 use teloxide::{
     requests::Requester,
-    types::{Chat, Message, Update, UpdateKind, User, UserId},
+    types::{ChatId, Message, Update, UpdateKind, User, UserId},
     Bot, RequestError,
 };
 
@@ -76,12 +76,12 @@ pub enum UserLike {
 pub async fn resolve_to_users(
     what: Vec<UserLike>,
     bot: &Bot,
-    chat: &Chat,
+    chat: ChatId,
 ) -> Result<Vec<User>, RequestError> {
     futures::future::try_join_all(what.into_iter().map(|ulike| async move {
         match ulike {
             UserLike::User(user) => Ok(user),
-            UserLike::Id(uid) => bot.get_chat_member(chat.id, uid).await.map(|m| m.user),
+            UserLike::Id(uid) => bot.get_chat_member(chat, uid).await.map(|m| m.user),
         }
     }))
     .await
