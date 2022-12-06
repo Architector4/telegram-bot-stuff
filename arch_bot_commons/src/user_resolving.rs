@@ -77,8 +77,8 @@ pub async fn resolve_to_users(
     what: Vec<UserLike>,
     bot: &Bot,
     chat: ChatId,
-) -> Result<Vec<User>, RequestError> {
-    futures::future::try_join_all(what.into_iter().map(|ulike| async move {
+) -> Vec<Result<User, RequestError>> {
+    futures::future::join_all(what.into_iter().map(|ulike| async move {
         match ulike {
             UserLike::User(user) => Ok(user),
             UserLike::Id(uid) => bot.get_chat_member(chat, uid).await.map(|m| m.user),
