@@ -63,35 +63,57 @@ fn get_text_mentioned_users(message: &Message) -> Vec<&str> {
     output
 }
 
-/// An object that is either a user or an ID of one,
-/// or an unresolved username.
+/// An object that represents an attempt of resolving a
+/// mention of a user to a user object, going through the
+/// `resolve_to_users` function.
+#[derive(Clone, Debug)]
+pub enum UserResolveResult {
+    User(User),
+    // using a &str may be better but  ggggoodddddd i'm tired
+    UnresolvedUsername(String),
+    UnresolvedUserID(UserId),
+}
+
+/// Resolves all `UserLike` objects to `UserResolveResult` objects
+/// using the specified chat to find users as members of.
+pub async fn resolve_to_users(
+    what: Vec<UserLike>,
+    bot: &Bot,
+    chat: ChatId,
+) -> Vec<Result<UserResolveResult, RequestError>> {
+    futures::future::join_all(what.into_iter().map(|ulike| async move {
+        match ulike {
+            // try to resolve the user id
+            UserLike::Id(uid) => match bot
+                .get_chat_member(chat, uid)
+                .await
+                .map(|m| m.user)
+                .map(UserResolveResult::User)
+            {
+                Ok(u) => Ok(u),
+                Err(error) => match error {
+                    RequestError::Api(teloxide::ApiError::UserNotFound) => {
+                        Ok(UserResolveResult::UnresolvedUserID(uid))
+                    }
+                    other => Err(other),
+                },
+            },
+            UserLike::User(u) => Ok(UserResolveResult::User(u)),
+            UserLike::UnresolvedUsername(u) => Ok(UserResolveResult::UnresolvedUsername(u)),
+        }
+    }))
+    .await
+}
+
+/// An object that is either a user or an ID of one.
+/// Represents best possible result of resolving mentioned
+/// users purely from a message by a database.
 #[derive(Clone, Debug)]
 pub enum UserLike {
     User(User),
     Id(UserId),
     // using a &str may be better but  ggggoodddddd i'm tired
     UnresolvedUsername(String),
-}
-
-/// Resolves all `UserLike::Id` objects to `UserLike::User` objects
-/// using the specified chat to find users as members of.
-pub async fn resolve_to_users(
-    what: Vec<UserLike>,
-    bot: &Bot,
-    chat: ChatId,
-) -> Vec<Result<UserLike, RequestError>> {
-    futures::future::join_all(what.into_iter().map(|ulike| async move {
-        match ulike {
-            UserLike::Id(uid) => bot
-                .get_chat_member(chat, uid)
-                .await
-                .map(|m| m.user)
-                .map(UserLike::User),
-            UserLike::User(_) => Ok(ulike),
-            UserLike::UnresolvedUsername(_) => Ok(ulike),
-        }
-    }))
-    .await
 }
 
 pub trait MentionResolver {
