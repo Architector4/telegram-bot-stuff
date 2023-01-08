@@ -65,6 +65,7 @@ fn get_text_mentioned_users(message: &Message) -> Vec<&str> {
 
 /// An object that is either a user or an ID of one,
 /// or an unresolved username.
+#[derive(Clone, Debug)]
 pub enum UserLike {
     User(User),
     Id(UserId),
