@@ -63,25 +63,31 @@ fn get_text_mentioned_users(message: &Message) -> Vec<&str> {
     output
 }
 
-/// An object that is either a user or an ID of one
+/// An object that is either a user or an ID of one,
+/// or an unresolved username.
 pub enum UserLike {
     User(User),
     Id(UserId),
-    // Unneeded for my purposes and would just add more pain
-    //Username(&'a str)
+    // using a &str may be better but  ggggoodddddd i'm tired
+    UnresolvedUsername(String),
 }
 
-/// Resolves all `UserLike` objects to `User` objects using
-/// the specified chat to find users as members of.
+/// Resolves all `UserLike::Id` objects to `UserLike::User` objects
+/// using the specified chat to find users as members of.
 pub async fn resolve_to_users(
     what: Vec<UserLike>,
     bot: &Bot,
     chat: ChatId,
-) -> Vec<Result<User, RequestError>> {
+) -> Vec<Result<UserLike, RequestError>> {
     futures::future::join_all(what.into_iter().map(|ulike| async move {
         match ulike {
-            UserLike::User(user) => Ok(user),
-            UserLike::Id(uid) => bot.get_chat_member(chat, uid).await.map(|m| m.user),
+            UserLike::Id(uid) => bot
+                .get_chat_member(chat, uid)
+                .await
+                .map(|m| m.user)
+                .map(UserLike::User),
+            UserLike::User(_) => Ok(ulike),
+            UserLike::UnresolvedUsername(_) => Ok(ulike),
         }
     }))
     .await
@@ -101,13 +107,16 @@ pub trait MentionResolver {
         for user in get_linkable_mentioned_users(message) {
             output.push(UserLike::User(user.to_owned()))
         }
-        for uid in get_potential_userids(message).into_iter().chain(
-            get_text_mentioned_users(message)
-                .into_iter()
-                .flat_map(|mention| self.username_to_userid(mention)),
-        ) {
+        for uid in get_potential_userids(message) {
             output.push(UserLike::Id(uid))
-            //output.push(bot.get_chat_member(message.chat.id, uid).await?.user)
+        }
+
+        for username in get_text_mentioned_users(message) {
+            if let Some(uid) = self.username_to_userid(username) {
+                output.push(UserLike::Id(uid));
+            } else {
+                output.push(UserLike::UnresolvedUsername(String::from(username)));
+            }
         }
         output
     }
