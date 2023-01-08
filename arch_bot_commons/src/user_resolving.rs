@@ -100,8 +100,8 @@ pub trait MentionResolver {
     /// Resolve a username to a user ID, if one is found in this logger
     fn username_to_userid(&self, name: &str) -> Option<UserId>;
 
-    /// Get all users mentioned by this message that this resolver can resolve.
-    /// This skips usernames mentions that are unknown to this resolver.
+    /// Get all users mentioned by this message that this resolver can resolve,
+    /// as well as unresolved username mentions.
     fn get_mentioned_users(&self, message: &Message) -> Vec<UserLike> {
         let mut output = vec![];
 
