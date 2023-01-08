@@ -105,7 +105,7 @@ async fn lol() {
                             bot.send_chat_action(msg.chat.id, teloxide::types::ChatAction::Typing)
                                 .await?;
 
-                            sleep(Duration::from_secs_f64(rand::random::<f64>() * 2.0 + 5.5)).await;
+                            sleep(Duration::from_secs_f64(rand::random::<f64>() * 3.0 + 2.0)).await;
 
                             bot.send_message(msg.chat.id, gen_password())
                                 .reply_to_message_id(msg.id)
