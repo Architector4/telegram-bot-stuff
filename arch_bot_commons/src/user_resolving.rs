@@ -74,6 +74,17 @@ pub enum UserResolveResult {
     UnresolvedUserID(UserId),
 }
 
+impl UserResolveResult {
+    /// Converts from `UserResolveResult` to `Option<User>`.
+    /// Unresolved results are returned as `None`.
+    pub fn ok(self) -> Option<User> {
+        match self {
+            UserResolveResult::User(user) => Some(user),
+            _ => None
+        }
+    }
+}
+
 /// Resolves all `UserLike` objects to `UserResolveResult` objects
 /// using the specified chat to find users as members of.
 pub async fn resolve_to_users(
