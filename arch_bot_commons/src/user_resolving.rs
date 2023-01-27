@@ -80,7 +80,7 @@ impl UserResolveResult {
     pub fn ok(self) -> Option<User> {
         match self {
             UserResolveResult::User(user) => Some(user),
-            _ => None
+            _ => None,
         }
     }
 }
