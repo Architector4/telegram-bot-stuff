@@ -130,3 +130,20 @@ pub fn print_sender(message: &Message) -> (String, Option<MessageEntity>) {
         ),
     }
 }
+
+pub fn append_with_message_entities(
+    (text, entities): (&mut String, &mut Vec<MessageEntity>),
+    (text_to_append, entities_to_append): (&str, &Vec<MessageEntity>),
+) {
+    text.push_str(text_to_append);
+
+    // the offset in MessageEntity is a count of UTF-16 code units
+    let additional_offset = text.encode_utf16().count();
+
+    entities.reserve(entities_to_append.len());
+    for e in entities_to_append {
+        let mut new = e.clone();
+        new.offset += additional_offset;
+        entities.push(new);
+    }
+}
