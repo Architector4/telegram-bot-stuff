@@ -5,7 +5,7 @@ use std::future::Future;
 
 use teloxide::{
     prelude::*,
-    types::{MessageEntity, User},
+    types::{Chat, MessageEntity, User},
 };
 
 pub mod user_resolving;
@@ -95,17 +95,38 @@ pub fn print_user(user: &User) -> (String, Option<MessageEntity>) {
 }
 
 /// Create a string that can be used in a message to refer to
+/// a chat or a channel. Will be clickable only for public ones.
+pub fn print_chat(chat: &Chat) -> Option<String> {
+    match chat.username() {
+        Some(x) => Some(format!("@{}", x)),
+        None => chat.title().map(String::from),
+    }
+}
+
+/// Create a string that can be used in a message to refer to
 /// the sender of this message. Guaranteed to tag them, unless they
 /// are posting anonymously or as a channel.
 pub fn print_sender(message: &Message) -> (String, Option<MessageEntity>) {
     match message.from() {
         Some(user) => print_user(user),
-        None => {
-            let name = match message.author_signature() {
-                None => String::from("Anonymous admin"),
-                Some(sig) => String::from(sig),
-            };
-            (name, None)
-        }
+        None => (
+            {
+                static ANONYMOUS_ADMIN: &str = "Anonymous admin";
+                match message.author_signature() {
+                    None => match message.sender_chat() {
+                        None => ANONYMOUS_ADMIN.into(),
+                        Some(chat) => {
+                            if chat.id == message.chat.id {
+                                "Some channel".into()
+                            } else {
+                                print_chat(chat).unwrap_or_else(|| ANONYMOUS_ADMIN.into())
+                            }
+                        }
+                    },
+                    Some(sig) => String::from(sig),
+                }
+            },
+            None,
+        ),
     }
 }
