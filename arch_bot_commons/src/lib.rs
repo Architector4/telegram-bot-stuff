@@ -3,7 +3,7 @@
 
 use std::future::Future;
 
-use teloxide::prelude::*;
+use teloxide::{prelude::*, types::MessageEntity};
 
 pub mod user_resolving;
 
@@ -63,4 +63,40 @@ pub async fn get_admin_of(
         .await?
         .into_iter()
         .find(|x| x.user.id == user))
+}
+
+/// Create a string that can be used in a message to refer to
+/// the sender of this message. Guaranteed to tag them, unless they
+/// are posting anonymously or as a channel.
+pub fn print_sender(message: &Message) -> (String, Option<MessageEntity>) {
+    match message.from() {
+        Some(user) => match user.username {
+            Some(ref username) => {
+                let mut output = String::with_capacity(username.len() + 1);
+                output.push('@');
+                output.push_str(username.as_str());
+                (output, None)
+            }
+            None => {
+                let first_name = user.first_name.clone();
+                let last_name = &user.last_name;
+                let full_name = match last_name {
+                    None => first_name,
+                    Some(last_name) => first_name + " " + last_name,
+                };
+                let len = full_name.len();
+                (
+                    full_name,
+                    Some(MessageEntity::text_mention(user.to_owned(), 0, len)),
+                )
+            }
+        },
+        None => {
+            let name = match message.author_signature() {
+                None => String::from("Anonymous admin"),
+                Some(sig) => String::from(sig),
+            };
+            (name, None)
+        }
+    }
 }
