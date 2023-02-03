@@ -13,7 +13,7 @@ async fn run_bot_to_fetch_file() {
     let bot = Bot::new(key);
 
     let handler = Update::filter_message().endpoint(|_bot: Bot, msg: Message| async move {
-        println!("{:#?}", msg);
+        println!("{msg:#?}");
         respond(())
     });
 

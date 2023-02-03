@@ -98,7 +98,7 @@ pub fn print_user(user: &User) -> (String, Option<MessageEntity>) {
 /// a chat or a channel. Will be clickable only for public ones.
 pub fn print_chat(chat: &Chat) -> Option<String> {
     match chat.username() {
-        Some(x) => Some(format!("@{}", x)),
+        Some(x) => Some(format!("@{x}")),
         None => chat.title().map(String::from),
     }
 }
