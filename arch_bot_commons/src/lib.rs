@@ -25,7 +25,7 @@ pub mod user_resolving;
 /// [pretty_env_logger][] internally, see its documentation for more details.
 ///
 /// [pretty_env_logger]: https://docs.rs/pretty_env_logger
-pub fn start_everything(closure: impl Future<Output = ()>) {
+pub fn start_everything<T>(closure: impl Future<Output = T>) -> T {
     let log_level = std::env::var_os("RUST_LOG")
         .unwrap_or_else(|| std::ffi::OsString::from("info"))
         .into_string()
@@ -50,7 +50,7 @@ pub fn start_everything(closure: impl Future<Output = ()>) {
         .enable_all()
         .build()
         .unwrap()
-        .block_on(closure);
+        .block_on(closure)
 }
 
 /// Find out if a user of this ID is an admin of the specified chat of that ID.
