@@ -26,6 +26,7 @@ fn gen_password() -> String {
         " omg",
         " aaaaa",
         " aaaaaaaaaaaaaaaa",
+        " pls 🥺",
     ];
     let mut rng = rand::thread_rng();
     let length = rng.gen_range(8..69);
