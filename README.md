@@ -17,3 +17,5 @@ if seen by the bot in direct messages or in a group chat it is in.
 
 It can also be used inline, and produces a different response
 activated by the phrase "Hi Herbert!".
+
+Current profile picture is from here: https://www.extremelyfungible.com/vivi-heads
