@@ -5,7 +5,7 @@ use teloxide::{
     prelude::*,
     types::{
         InlineQueryResult, InlineQueryResultArticle, InlineQueryResultVoice, InputFile,
-        InputMessageContent, InputMessageContentText,
+        InputMessageContent, InputMessageContentText, Me,
     },
 };
 use url::Url;
@@ -89,8 +89,8 @@ async fn lol() {
                 respond(())
             }),
         )
-        .branch(Update::filter_message().endpoint(
-            |bot: Bot, username: String, msg: Message| async move {
+        .branch(
+            Update::filter_message().endpoint(|bot: Bot, me: Me, msg: Message| async move {
                 static HELP: &str =
                     "(this bot answers to \"hi, cutie!\" messages in DMs and group chats)";
                 if let Some(text) = msg.text() {
@@ -99,6 +99,7 @@ async fn lol() {
                             .reply_to_message_id(msg.id)
                             .await?;
                     } else {
+                        let username = String::from("@") + me.username();
                         let text = text.to_lowercase().replace(username.as_str(), "");
                         let text = text.trim();
 
@@ -119,15 +120,12 @@ async fn lol() {
                     }
                 }
                 respond(())
-            },
-        ));
+            }),
+        );
 
     log::info!("Dispatching the dispatcher!");
 
-    let username = String::from("@") + bot.get_me().await.unwrap().username();
-
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![username])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
