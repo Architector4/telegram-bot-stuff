@@ -19,7 +19,7 @@ fn get_potential_userids(message: &Message) -> Vec<UserId> {
 /// Looks through the message for any and all users it's directed at, whether by reply or by link
 /// mentions. This does not return the sender, the person the message is forwarded from, or users
 /// mentioned by username like `@Architector_4`.
-fn get_linkable_mentioned_users(message: &Message) -> Vec<&User> {
+pub fn get_linkable_mentioned_users(message: &Message) -> Vec<&User> {
     let mut output = vec![];
     if let Some(repliee) = message.reply_to_message().and_then(|m| m.from()) {
         output.push(repliee);
