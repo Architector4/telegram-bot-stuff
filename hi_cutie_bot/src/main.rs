@@ -53,7 +53,7 @@ async fn lol() {
 
     let bot = Bot::new(key);
 
-    static REGEXMOMENT: Lazy<regex::Regex> = Lazy::new(|| Regex::new("hi+,? +cutie.*").unwrap());
+    static REGEXMOMENT: Lazy<regex::Regex> = Lazy::new(|| Regex::new("(hi|hey)+,? +cutie.*").unwrap());
     static REGEXMOMENT_HERBERT: Lazy<regex::Regex> =
         Lazy::new(|| Regex::new("hi+,? +herbert.*").unwrap());
     // Hardcoded file ID
