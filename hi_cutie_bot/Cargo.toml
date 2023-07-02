@@ -12,6 +12,6 @@ once_cell = "1.16.0"
 pretty_env_logger = "0.4.0"
 rand = "0.8.5"
 regex = "1.7.0"
-teloxide = "0.12.2"
+teloxide = { version = "0.12.2", features = ["throttle"]}
 tokio = { version = "1.21.2", features = ["full"] }
 url = "2.3.1"
