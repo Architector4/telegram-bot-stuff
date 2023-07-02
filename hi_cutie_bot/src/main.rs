@@ -2,6 +2,7 @@ use rand::{seq::SliceRandom, Rng};
 use regex::Regex;
 use std::fs;
 use teloxide::{
+    adaptors::throttle::{Limits, Throttle},
     prelude::*,
     types::{
         InlineQueryResult, InlineQueryResultArticle, InlineQueryResultVoice, InputFile,
@@ -51,7 +52,7 @@ async fn lol() {
     })
     .expect("Could not load bot key file!");
 
-    let bot = Bot::new(key);
+    let bot = Bot::new(key).throttle(Limits::default());
 
     static REGEXMOMENT: Lazy<regex::Regex> = Lazy::new(|| Regex::new("(hi|hey)+,? +cutie.*").unwrap());
     static REGEXMOMENT_HERBERT: Lazy<regex::Regex> =
@@ -64,7 +65,7 @@ async fn lol() {
 
     let handler = dptree::entry()
         .branch(
-            Update::filter_inline_query().endpoint(|bot: Bot, q: InlineQuery| async move {
+            Update::filter_inline_query().endpoint(|bot: Throttle<Bot>, q: InlineQuery| async move {
                 bot.answer_inline_query(&q.id, {
                     let mut results = (0..10)
                         .map(|i| {
@@ -90,7 +91,7 @@ async fn lol() {
             }),
         )
         .branch(
-            Update::filter_message().endpoint(|bot: Bot, me: Me, msg: Message| async move {
+            Update::filter_message().endpoint(|bot: Throttle<Bot>, me: Me, msg: Message| async move {
                 static HELP: &str =
                     "(this bot answers to \"hi, cutie!\" messages in DMs and group chats)";
                 if let Some(text) = msg.text() {
