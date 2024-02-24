@@ -21,9 +21,6 @@ fn is_spam_html(text: &str) -> bool {
 }
 
 pub async fn is_spam(url: &Url) -> Result<IsSpam, Error> {
-    if url.domain() == Some("example.com") {
-        return Ok(IsSpam::Yes);
-    }
     // Default policy is to follow up to 10 redirects.
     let client = reqwest::Client::builder()
         .user_agent("GoogleOther")
