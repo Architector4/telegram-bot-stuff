@@ -86,38 +86,38 @@ pub async fn handle_message(
         } else {
             match bot.delete_message(message.chat.id, message.id).await {
                 Ok(_) => {
-                    //// Make a string, either a @username or full name,
-                    //// describing the offending user.
-                    //let offending_user_name = {
-                    //    if let Some(user) = message.from() {
-                    //        if let Some(username) = &user.username {
-                    //            format!("@{}", username)
-                    //        } else {
-                    //            user.full_name()
-                    //        }
-                    //    } else if let Some(chat) = message.sender_chat() {
-                    //        if let Some(username) = chat.username() {
-                    //            format!("@{}", username)
-                    //        } else if let Some(title) = chat.title() {
-                    //            title.to_string()
-                    //        } else {
-                    //            // Shouldn't happen, but eh.
-                    //            "a private user".to_string()
-                    //        }
-                    //    } else {
-                    //        // Shouldn't happen either, but eh.
-                    //        "a private user".to_string()
-                    //    }
-                    //};
+                    // Make a string, either a @username or full name,
+                    // describing the offending user.
+                    let offending_user_name = {
+                        if let Some(user) = message.from() {
+                            if let Some(username) = &user.username {
+                                format!("@{}", username)
+                            } else {
+                                user.full_name()
+                            }
+                        } else if let Some(chat) = message.sender_chat() {
+                            if let Some(username) = chat.username() {
+                                format!("@{}", username)
+                            } else if let Some(title) = chat.title() {
+                                title.to_string()
+                            } else {
+                                // Shouldn't happen, but eh.
+                                "a private user".to_string()
+                            }
+                        } else {
+                            // Shouldn't happen either, but eh.
+                            "a private user".to_string()
+                        }
+                    };
 
-                    //bot.send_message(
-                    //    message.chat.id,
-                    //    format!(
-                    //        "Removed a message from {} containing a spam link.",
-                    //        offending_user_name
-                    //    ),
-                    //)
-                    //.await?;
+                    bot.send_message(
+                        message.chat.id,
+                        format!(
+                            "Removed a message from {} containing a spam link.",
+                            offending_user_name
+                        ),
+                    )
+                    .await?;
                 }
                 Err(_) => {
                     bot.send_message(
@@ -155,9 +155,9 @@ pub async fn parse_command(bot: Bot, me: Me, message: Message) -> Result<(), Req
     let username = format!("@{}", me.username());
     let command = command.trim_end_matches(username.as_str()).to_lowercase();
 
-    bot.send_message(message.chat.id, format!("Seen command: {}", command))
-        .reply_to_message_id(message.id)
-        .await?;
+    //bot.send_message(message.chat.id, format!("Seen command: {}", command))
+    //    .reply_to_message_id(message.id)
+    //    .await?;
 
     Ok(())
 }
