@@ -1,0 +1,20 @@
+[package]
+name = "anti_nft_spam_bot"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+arch_bot_commons = { version = "0.6.5", path = "../arch_bot_commons" }
+chrono = "0.4.34"
+log = "0.4.17"
+reqwest = "0.11.24"
+sqlx = { version = "0.7.3", features = [
+	"sqlite",
+	"chrono",
+	"runtime-tokio-rustls",
+] }
+teloxide = "0.12.0"
+tokio = { version = "1.21.2", features = ["full"] }
+url = "2.3.1"
