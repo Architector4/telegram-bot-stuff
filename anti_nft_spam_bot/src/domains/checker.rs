@@ -5,19 +5,9 @@ use url::Url;
 use super::types::IsSpam;
 
 fn is_spam_html(text: &str) -> bool {
-    if !text.contains("cdnjs.cloudflare.com/ajax/libs/ethers") {
-        return false;
-    }
-
-    if !text.contains("ethereumjs") {
-        return false;
-    }
-
-    if !text.contains("web3.min.js") {
-        return false;
-    }
-
-    true
+    text.contains("cdnjs.cloudflare.com/ajax/libs/ethers")
+        || text.contains("ethereumjs")
+        || text.contains("web3.min.js")
 }
 
 pub async fn is_spam(url: &Url) -> Result<IsSpam, Error> {
