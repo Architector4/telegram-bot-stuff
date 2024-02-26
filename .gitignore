@@ -3,3 +3,5 @@
 */key_debug
 */*sqlite*
 */deploy.sh
+
+.DS_Store
