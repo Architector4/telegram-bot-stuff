@@ -17,7 +17,12 @@ pub async fn handle_message(
     message: Message,
     database: Arc<Database>,
 ) -> Result<(), RequestError> {
-    // First check if it has any links we want to ban.
+    // First check if it's a private message.
+    if message.chat.is_private() {
+        return handle_private_message(bot, me, message, database).await;
+    }
+
+    // Check if it has any links we want to ban.
 
     // Get message "entities".
     let Some(entities) = message
@@ -132,13 +137,18 @@ pub async fn handle_message(
             }
         }
     } else {
-        parse_command(bot, me, message).await?;
+        parse_command(bot, me, message, database).await?;
     }
 
     Ok(())
 }
 
-pub async fn parse_command(bot: Bot, me: Me, message: Message) -> Result<(), RequestError> {
+pub async fn parse_command(
+    _bot: Bot,
+    me: Me,
+    message: Message,
+    _database: Arc<Database>,
+) -> Result<(), RequestError> {
     // Get text of the message.
     let Some(text) = message.text() else {
         return Ok(());
@@ -159,5 +169,27 @@ pub async fn parse_command(bot: Bot, me: Me, message: Message) -> Result<(), Req
     //    .reply_to_message_id(message.id)
     //    .await?;
 
+    Ok(())
+}
+
+pub async fn handle_private_message(
+    bot: Bot,
+    _me: Me,
+    message: Message,
+    _database: Arc<Database>,
+) -> Result<(), RequestError> {
+    // Telegram automatically trims preceding and following newlines, so this is fine.
+    bot.send_message(
+        message.chat.id,
+        "
+This bot is made to combat the currently ongoing wave of NFT spam experienced by chats with linked channels.
+
+To use this bot, add it to a chat and give it administrator status with \"Remove messages\" permission.
+
+No further setup is required. A message will be sent when spam is removed.
+
+This bot may have more commands in the future, but not yet.",
+    )
+    .await?;
     Ok(())
 }
