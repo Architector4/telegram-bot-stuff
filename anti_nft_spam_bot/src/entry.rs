@@ -18,8 +18,6 @@ pub async fn entry() {
         Err(e) => panic!("Failure creating the database! {:?}", e),
     };
 
-    log::debug!("woot");
-
     log::info!("Creating the handler...");
 
     let handler =
