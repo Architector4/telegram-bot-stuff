@@ -163,7 +163,8 @@ pub async fn parse_command(
     };
     // Trim the bot's username from the command and convert to lowercase.
     let username = format!("@{}", me.username());
-    let command = command.trim_end_matches(username.as_str()).to_lowercase();
+    let _command = command.trim_end_matches(username.as_str()).to_lowercase();
+    // TODO: this lol
 
     //bot.send_message(message.chat.id, format!("Seen command: {}", command))
     //    .reply_to_message_id(message.id)

@@ -1,4 +1,9 @@
-use std::{str::FromStr, sync::atomic::AtomicBool};
+mod list_watcher;
+
+use std::{
+    str::FromStr,
+    sync::{atomic::AtomicBool, Arc},
+};
 
 pub use sqlx::Error;
 use sqlx::{
@@ -6,6 +11,8 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
     Executor, Row, Sqlite,
 };
+use teloxide::Bot;
+use tokio::sync::watch;
 use url::Url;
 
 use super::types::{Domain, IsSpam};
@@ -16,10 +23,12 @@ static WAS_CONSTRUCTED: AtomicBool = AtomicBool::new(false);
 
 pub struct Database {
     pool: Pool,
+    drop_watch: (watch::Sender<()>, watch::Receiver<()>),
+    bot: Bot,
 }
 
 impl Database {
-    pub async fn new() -> Result<Database, Error> {
+    pub async fn new(bot: Bot) -> Result<Arc<Database>, Error> {
         assert!(
             !WAS_CONSTRUCTED.swap(true, std::sync::atomic::Ordering::SeqCst),
             "Second database was constructed. This is not allowed."
@@ -56,7 +65,16 @@ impl Database {
         ))
         .await?;
 
-        Ok(Database { pool })
+        let db_arc = Arc::new(Database {
+            pool,
+            bot,
+            drop_watch: watch::channel(()),
+        });
+
+        // Spawn the watcher.
+        tokio::spawn(list_watcher::watch_list(db_arc.clone()));
+
+        Ok(db_arc)
     }
 
     /// Check if a domain is a spam domain or not, according to the database.
@@ -83,6 +101,8 @@ impl Database {
             UPDATE SET example_url=COALESCE(?, example_url), is_spam=?;",
         )
         .bind(domain.as_str())
+        .bind(example_url.map(Url::as_str))
+        .bind::<u8>(is_spam.into())
         .bind(example_url.map(Url::as_str))
         .bind::<u8>(is_spam.into())
         .execute(&self.pool)

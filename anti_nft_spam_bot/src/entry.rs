@@ -13,10 +13,7 @@ pub async fn entry() {
 
     let bot = Bot::new(key);
 
-    let db = match Database::new().await {
-        Ok(db) => Arc::new(db),
-        Err(e) => panic!("Failure creating the database! {:?}", e),
-    };
+    let db: Arc<Database> = Database::new(bot.clone()).await.unwrap();
 
     log::info!("Creating the handler...");
 
