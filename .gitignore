@@ -2,6 +2,6 @@
 */key
 */key_debug
 */*sqlite*
-*/deploy.sh
+*/deploy*.sh
 
 .DS_Store
