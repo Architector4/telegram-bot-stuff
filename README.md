@@ -7,6 +7,18 @@ Some stuff of my Telegram bots, written in Rust with the
 A crate of common functions; so far it's just a
 "start logging and run the closure" function lol
 
+## anti_nft_spam_bot
+
+The code of [@Anti_NFT_Spam_Bot](https://t.me/Anti_NFT_Spam_Bot).
+This bot is made to combat the currently ongoing wave of
+NFT scam spam experienced by Telegram chats with linked channels.
+DM it for instructions.
+
+It's not fully done yet, but it's functional enough to catch most of it.
+
+Current profile picture is taken from one of the scam websites
+and edited to be crossed out.
+
 ## hi_cutie_bot
 
 The code of [@hi_cutie_bot](https://t.me/hi_cutie_bot).
