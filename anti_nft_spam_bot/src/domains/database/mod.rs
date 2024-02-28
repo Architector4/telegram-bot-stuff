@@ -54,16 +54,27 @@ impl Database {
         // example_url (string)
         // is_spam (0 for no, 1 for yes, 2 for unknown and needs review)
         // last_sent_to_review (date+time in UTC)
+        // manually_reviewed (0 for no, 1 for yes)
         pool.execute(sqlx::query(
             "
                 CREATE TABLE IF NOT EXISTS domains (
                     domain TEXT PRIMARY KEY NOT NULL COLLATE NOCASE,
                     example_url TEXT NULL,
                     is_spam INTEGER NOT NULL,
-                    last_sent_to_review TEXT NULL
+                    last_sent_to_review TEXT NULL,
+                    manually_reviewed INTEGER NOT NULL DEFAULT 0
                 ) STRICT;",
         ))
         .await?;
+
+        // Transparent database migration lololol
+        // Will fail harmlessly if the column already exists.
+        let _ = sqlx::query(
+            "ALTER TABLE domains
+        ADD COLUMN manually_reviewed INTEGER NOT NULL DEFAULT 0;",
+        )
+        .execute(&pool)
+        .await;
 
         let db_arc = Arc::new(Database {
             pool,
@@ -88,6 +99,7 @@ impl Database {
     }
 
     /// Inserts a domain into the database and tag it as spam or not.
+    /// Overwrites the domain if it already exists.
     pub async fn add_domain(
         &self,
         domain: &Domain,
@@ -105,6 +117,28 @@ impl Database {
         .bind::<u8>(is_spam.into())
         .bind(example_url.map(Url::as_str))
         .bind::<u8>(is_spam.into())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Mark a domain as maybe spam, if it's not already marked as spam
+    /// and wasn't manually reviewed.
+    pub async fn mark_domain_sus(
+        &self,
+        domain: &Domain,
+        example_url: Option<&Url>,
+    ) -> Result<(), Error> {
+        sqlx::query(
+            "INSERT INTO domains(domain, example_url, is_spam)
+            VALUES (?, ?, 2)
+        ON CONFLICT DO
+            UPDATE SET example_url=COALESCE(?, example_url), is_spam=2
+        WHERE is_spam=0 AND manually_reviewed=0;",
+        )
+        .bind(domain.as_str())
+        .bind(example_url.map(Url::as_str))
+        .bind(example_url.map(Url::as_str))
         .execute(&self.pool)
         .await?;
         Ok(())
