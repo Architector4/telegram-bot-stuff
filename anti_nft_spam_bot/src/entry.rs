@@ -1,7 +1,7 @@
 use std::{fs, sync::Arc};
 use teloxide::{dptree::deps, prelude::*};
 
-use crate::domains::database::Database;
+use crate::database::Database;
 
 pub async fn entry() {
     log::info!("ASYNC WOOOO");

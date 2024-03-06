@@ -5,7 +5,7 @@ use std::{
 
 use url::Url;
 
-use crate::{domains::types::Domain, parse_url_like_telegram};
+use crate::{parse_url_like_telegram, types::Domain};
 
 #[derive(Debug)]
 pub struct Parser {

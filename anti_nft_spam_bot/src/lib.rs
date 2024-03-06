@@ -1,11 +1,13 @@
+mod database;
+mod domain_checker;
 mod entry;
+mod handlers;
+mod types;
+
 pub use entry::*;
+
 use teloxide::types::ChatId;
 use url::Url;
-
-mod handlers;
-
-mod domains;
 
 /// An ID of a private chat with the developers of the bot,
 /// as well as volunteers who partake in manual review of links for spam.

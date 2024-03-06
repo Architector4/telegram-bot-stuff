@@ -8,7 +8,7 @@ use std::{
 
 use notify::{RecursiveMode, Watcher};
 
-use crate::domains::types::IsSpam;
+use crate::types::IsSpam;
 use parser::Line;
 
 static LIST_FILE: &str = "spam_website_list.txt";

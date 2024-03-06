@@ -8,11 +8,9 @@ use teloxide::{
 use url::Url;
 
 use crate::{
-    domains::{
-        database::Database,
-        types::{Domain, IsSpam},
-    },
+    database::Database,
     parse_url_like_telegram,
+    types::{Domain, IsSpam},
 };
 
 /// Get a domain and a URL from this entity, if available.
@@ -72,7 +70,7 @@ pub async fn handle_message(
         };
         log::debug!("Spotted URL with domain {}", domain);
 
-        let Some(is_spam) = crate::domains::check(&database, &domain, &url).await else {
+        let Some(is_spam) = crate::domain_checker::check(&database, &domain, &url).await else {
             continue;
         };
 
