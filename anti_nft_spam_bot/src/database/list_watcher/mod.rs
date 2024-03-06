@@ -82,6 +82,8 @@ async fn ingest_list_to_database(database: &super::Database) -> std::io::Result<
 
     let mut error_counter: u8 = 0;
 
+    let mut cleaned_previous_entries = false;
+
     while let Some(line) = parser.next_line() {
         let line = match line {
             Ok(Some(line)) => line,
@@ -109,17 +111,27 @@ async fn ingest_list_to_database(database: &super::Database) -> std::io::Result<
 
         // NOW that we finally have a line...
 
-        let database_result = match line {
-            Line::Url(url) => database.add_url(&url, IsSpam::Yes).await,
-            Line::Domain {
-                domain,
-                example_url,
-            } => {
-                database
-                    .add_domain(&domain, Some(&example_url), IsSpam::Yes)
-                    .await
-            }
-        };
+        let mut database_result = Ok(());
+
+        if !cleaned_previous_entries {
+            log::info!("Cleaning previous entries...");
+            database_result = database.clean_all_from_spam_list().await;
+            cleaned_previous_entries = true;
+        }
+
+        if database_result.is_ok() {
+            database_result = match line {
+                Line::Url(url) => database.add_url(&url, IsSpam::Yes, true).await,
+                Line::Domain {
+                    domain,
+                    example_url,
+                } => {
+                    database
+                        .add_domain(&domain, Some(&example_url), IsSpam::Yes, true)
+                        .await
+                }
+            };
+        }
 
         if let Err(e) = database_result {
             let error_message = format!("Failed to ingest spam list to database:\n{}", e);

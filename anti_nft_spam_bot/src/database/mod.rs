@@ -55,6 +55,7 @@ impl Database {
         // is_spam (0 for no, 1 for yes, 2 for unknown and needs review)
         // last_sent_to_review (date+time in UTC)
         // manually_reviewed (0 for no, 1 for yes)
+        // from_spam_list (0 for no, 1 for yes)
         pool.execute(sqlx::query(
             "
                 CREATE TABLE IF NOT EXISTS domains (
@@ -62,7 +63,8 @@ impl Database {
                     example_url TEXT NULL,
                     is_spam INTEGER NOT NULL,
                     last_sent_to_review TEXT NULL,
-                    manually_reviewed INTEGER NOT NULL DEFAULT 0
+                    manually_reviewed INTEGER NOT NULL DEFAULT 0,
+                    from_spam_list INTEGER NOT NULL DEFAULT 0
                 ) STRICT;",
         ))
         .await?;
@@ -72,13 +74,15 @@ impl Database {
         // is_spam (0 for no, 1 for yes, 2 for unknown and needs review)
         // last_sent_to_review (date+time in UTC)
         // manually_reviewed (0 for no, 1 for yes)
+        // from_spam_list (0 for no, 1 for yes)
         pool.execute(sqlx::query(
             "
                 CREATE TABLE IF NOT EXISTS urls (
                     url TEXT PRIMARY KEY NOT NULL COLLATE NOCASE,
                     is_spam INTEGER NOT NULL,
                     last_sent_to_review TEXT NULL,
-                    manually_reviewed INTEGER NOT NULL DEFAULT 0
+                    manually_reviewed INTEGER NOT NULL DEFAULT 0,
+                    from_spam_list INTEGER NOT NULL DEFAULT 0
                 ) STRICT;",
         ))
         .await?;
@@ -88,6 +92,18 @@ impl Database {
         let _ = sqlx::query(
             "ALTER TABLE domains
         ADD COLUMN manually_reviewed INTEGER NOT NULL DEFAULT 0;",
+        )
+        .execute(&pool)
+        .await;
+        let _ = sqlx::query(
+            "ALTER TABLE domains
+        ADD COLUMN from_spam_list INTEGER NOT NULL DEFAULT 0;",
+        )
+        .execute(&pool)
+        .await;
+        let _ = sqlx::query(
+            "ALTER TABLE urls
+        ADD COLUMN from_spam_list INTEGER NOT NULL DEFAULT 0;",
         )
         .execute(&pool)
         .await;
@@ -178,18 +194,21 @@ impl Database {
         domain: &Domain,
         example_url: Option<&Url>,
         is_spam: IsSpam,
+        from_spam_list: bool,
     ) -> Result<(), Error> {
         sqlx::query(
-            "INSERT INTO domains(domain, example_url, is_spam)
-            VALUES (?, ?, ?)
+            "INSERT INTO domains(domain, example_url, is_spam, from_spam_list)
+            VALUES (?, ?, ?, ?)
         ON CONFLICT DO
-            UPDATE SET example_url=COALESCE(?, example_url), is_spam=?;",
+            UPDATE SET example_url=COALESCE(?, example_url), is_spam=?, from_spam_list=?;",
         )
         .bind(domain.as_str())
         .bind(example_url.map(Url::as_str))
         .bind::<u8>(is_spam.into())
+        .bind(from_spam_list)
         .bind(example_url.map(Url::as_str))
         .bind::<u8>(is_spam.into())
+        .bind(from_spam_list)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -219,16 +238,23 @@ impl Database {
 
     /// Inserts a URL into the database and tags it as spam or not.
     /// Overwrites the URL if it already exists.
-    pub async fn add_url(&self, url: &Url, is_spam: IsSpam) -> Result<(), Error> {
+    pub async fn add_url(
+        &self,
+        url: &Url,
+        is_spam: IsSpam,
+        from_spam_list: bool,
+    ) -> Result<(), Error> {
         sqlx::query(
-            "INSERT INTO urls(url, is_spam)
-            VALUES (?, ?)
+            "INSERT INTO urls(url, is_spam, from_spam_list)
+            VALUES (?, ?, ?)
         ON CONFLICT DO
-            UPDATE SET is_spam=?;",
+            UPDATE SET is_spam=?, from_spam_list=?;",
         )
         .bind(url.as_str())
         .bind::<u8>(is_spam.into())
+        .bind(from_spam_list)
         .bind::<u8>(is_spam.into())
+        .bind(from_spam_list)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -265,6 +291,17 @@ impl Database {
             self.mark_domain_sus(domain, Some(url)).await?;
         }
 
+        Ok(())
+    }
+
+    /// Delete all entries added from the spam list.
+    pub async fn clean_all_from_spam_list(&self) -> Result<(), Error> {
+        sqlx::query("DELETE FROM domains WHERE from_spam_list=1")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM urls WHERE from_spam_list=1")
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }
