@@ -15,9 +15,7 @@ static LIST_FILE: &str = "spam_website_list.txt";
 
 pub async fn watch_list(db_arc: Arc<super::Database>) {
     // First ingest ASAP...
-    if let Err(e) = ingest_list_to_database(&db_arc).await {
-        log::warn!("Failed to ingest spam list to database: {}", e);
-    };
+    let _ = ingest_list_to_database(&db_arc).await;
 
     let mut receiver = db_arc.drop_watch.0.subscribe();
     let database = Arc::downgrade(&db_arc);
@@ -55,9 +53,7 @@ pub async fn watch_list(db_arc: Arc<super::Database>) {
                     break;
                 };
 
-                if let Err(e) = ingest_list_to_database(&database).await {
-                    log::warn!("Failed to ingest spam list to database: {}", e);
-                };
+                let _ = ingest_list_to_database(&database).await;
 
             },
             e = receiver.changed() => {
@@ -114,7 +110,7 @@ async fn ingest_list_to_database(database: &super::Database) -> std::io::Result<
         // NOW that we finally have a line...
 
         let database_result = match line {
-            Line::Url(_) => todo!(),
+            Line::Url(url) => database.add_url(&url, IsSpam::Yes).await,
             Line::Domain {
                 domain,
                 example_url,
@@ -126,9 +122,19 @@ async fn ingest_list_to_database(database: &super::Database) -> std::io::Result<
         };
 
         if let Err(e) = database_result {
+            let error_message = format!("Failed to ingest spam list to database:\n{}", e);
+            log::warn!("{}", error_message);
+            // Don't care if this fails. What can we do, log it?
+            // The error above will show up in the log anyway lol
+            let _ = database
+                .bot
+                .send_message(crate::CONTROL_CHAT_ID, error_message)
+                .await;
             return Err(Error::new(ErrorKind::BrokenPipe, e));
         }
     }
+
+    log::info!("Ingested list successfully.");
 
     Ok(())
 }

@@ -7,13 +7,13 @@ use crate::{
     types::{Domain, IsSpam},
 };
 
-/// Check the link against the database, or by visiting, as needed.
+/// Check the link's domain against the database, or by visiting, as needed.
 ///
 /// Returns [`None`] if both checking methods failed.
 pub async fn check(database: &Database, domain: &Domain, url: &Url) -> Option<IsSpam> {
     // Check the database...
     if let Some(is_spam) = database
-        .is_domain_spam(domain)
+        .is_spam(url, Some(domain))
         .await
         .expect("Database died!")
     {
@@ -22,7 +22,7 @@ pub async fn check(database: &Database, domain: &Domain, url: &Url) -> Option<Is
     } else {
         log::debug!("URL is not in database...");
         // Not in the database. Check for real...
-        if let Ok(is_spam) = is_spam(url).await {
+        if let Ok(is_spam) = visit_and_check_if_spam(url).await {
             // Add it to the database.
             log::debug!("Visited {} and got: {:?}", url, is_spam);
             database
@@ -40,7 +40,7 @@ pub async fn check(database: &Database, domain: &Domain, url: &Url) -> Option<Is
 }
 
 /// Check if a website served by the given URL is spam or not by visiting it.
-pub async fn is_spam(url: &Url) -> Result<IsSpam, Error> {
+pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, Error> {
     // Default policy is to follow up to 10 redirects.
     let client = reqwest::Client::builder()
         .user_agent("GoogleOther")

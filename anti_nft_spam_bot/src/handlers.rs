@@ -194,10 +194,10 @@ async fn gather_suspicion(message: &Message, database: &Database) {
                 continue;
             };
 
-            log::debug!("Marking {} as sus...", domain);
+            log::debug!("Marking {} and its domain as sus...", url);
 
             database
-                .mark_domain_sus(&domain, Some(&url))
+                .mark_sus(&url, Some(&domain))
                 .await
                 .expect("Database died!");
         }

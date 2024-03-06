@@ -122,12 +122,8 @@ impl Parser {
 #[derive(Debug, Clone)]
 pub enum Line {
     // It's fine for now...
-    #[allow(dead_code)]
     Url(Url),
-    Domain {
-        domain: Domain,
-        example_url: Url,
-    },
+    Domain { domain: Domain, example_url: Url },
 }
 
 impl TryFrom<(&str, Url)> for Line {
@@ -141,8 +137,7 @@ impl TryFrom<(&str, Url)> for Line {
                 }),
                 None => Err("No domain in URL"),
             },
-            // TODO: enable this when it's done...
-            //"url" => Ok(Self::Url(url)),
+            "url" => Ok(Self::Url(url)),
             _ => Err("Unknown line type"),
         }
     }
