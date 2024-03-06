@@ -2,6 +2,8 @@ use std::fmt::Display;
 
 use url::Url;
 
+use crate::parse_url_like_telegram;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IsSpam {
     No = 0,
@@ -35,26 +37,10 @@ impl Domain {
     pub fn from_url(url: &Url) -> Option<Self> {
         url.domain().map(|x| Self(x.to_lowercase()))
     }
-    /// Try to parse a string as a URL or a plain domain name into
-    /// the [`Url`] type.
-    pub fn preparse(string: &str) -> Result<Url, url::ParseError> {
-        match Url::parse(string) {
-            Ok(url) => Ok(url),
-            Err(e) => {
-                // We want to return this original error if the next step fails.
-                if let Ok(url) = Url::parse(&format!("http://{}", string)) {
-                    Ok(url)
-                } else {
-                    Err(e)
-                }
-            }
-        }
-    }
-
     /// Convenience function to try and parse a string directly to a domain name.
     #[allow(unused)]
     pub fn from_str(string: &str) -> Option<Self> {
-        Self::preparse(string)
+        parse_url_like_telegram(string)
             .ok()
             .as_ref()
             .and_then(Self::from_url)

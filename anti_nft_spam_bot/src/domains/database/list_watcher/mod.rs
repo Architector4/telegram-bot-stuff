@@ -9,8 +9,9 @@ use std::{
 use notify::{RecursiveMode, Watcher};
 
 use crate::domains::types::IsSpam;
+use parser::Line;
 
-static LIST_FILE: &str = "scam-website-domain-list.kdc";
+static LIST_FILE: &str = "spam_website_list.txt";
 
 pub async fn watch_list(db_arc: Arc<super::Database>) {
     // First ingest ASAP...
@@ -112,10 +113,19 @@ async fn ingest_list_to_database(database: &super::Database) -> std::io::Result<
 
         // NOW that we finally have a line...
 
-        if let Err(e) = database
-            .add_domain(&line.domain, line.example_url.as_ref(), IsSpam::Yes)
-            .await
-        {
+        let database_result = match line {
+            Line::Url(_) => todo!(),
+            Line::Domain {
+                domain,
+                example_url,
+            } => {
+                database
+                    .add_domain(&domain, Some(&example_url), IsSpam::Yes)
+                    .await
+            }
+        };
+
+        if let Err(e) = database_result {
             return Err(Error::new(ErrorKind::BrokenPipe, e));
         }
     }

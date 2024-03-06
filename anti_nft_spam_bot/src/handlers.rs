@@ -7,16 +7,19 @@ use teloxide::{
 };
 use url::Url;
 
-use crate::domains::{
-    database::Database,
-    types::{Domain, IsSpam},
+use crate::{
+    domains::{
+        database::Database,
+        types::{Domain, IsSpam},
+    },
+    parse_url_like_telegram,
 };
 
 /// Get a domain and a URL from this entity, if available.
 fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
     let url = match entity.kind() {
         MessageEntityKind::Url => {
-            if let Ok(url) = Domain::preparse(entity.text()) {
+            if let Ok(url) = parse_url_like_telegram(entity.text()) {
                 url
             } else {
                 // Does not parse as a URL anyway. Shouldn't happen, but eh.

@@ -1,0 +1,41 @@
+#
+# A list of domains known to host crypto scams
+#
+# Compiled by Ky Leggiero, rucuca
+#
+# Syntax: not fully detailed yet
+
+
+###########################################
+# NFT-collectable-monsters-style websites #
+###########################################
+
+domain eoro.io       # Year of the Dragon
+domain fluffa.io     # What The Fluff
+domain pipu.io       # Year of the Dragon
+domain porqo.io      # Year of the Dragon
+domain xelx.io       # Year of the Dragon
+domain xexu.io       # Year of the Dragon
+domain xibe.io       # What The Fluff
+domain xibu.io       # Year of the Dragon
+domain xudi.io       # What The Fluff
+domain xuxi.io       # Year of the Dragon
+
+# Marked by Chrome as deceptive! 🎉
+domain xles.io       # What The Fluff?
+
+# These seem to have been taken down! 🎉
+domain cewun.com
+domain flaff.io
+domain hafi.io
+domain sawub.com
+
+
+
+###########################
+# Crypto investment scams #
+###########################
+
+domain puwus.com                                                       # Etherium staking
+domain srut.io                                                         # "SRUT" is a series of Etherium NFTs, like Bored Ape
+domain https://app.terraclassic.net/?ref=d7pad51m                      # Thin & ambiguous classic ETH scam

@@ -5,7 +5,7 @@ use std::{
 
 use url::Url;
 
-use crate::domains::types::Domain;
+use crate::{domains::types::Domain, parse_url_like_telegram};
 
 #[derive(Debug)]
 pub struct Parser {
@@ -57,17 +57,23 @@ impl Parser {
         let line = &line[0..comment_start];
 
         let mut split = line.split_whitespace();
-        let Some(domain_str) = split.next() else {
+        let Some(line_type) = split.next() else {
             // Empty line. Meh.
             return Some(Ok(None));
         };
 
-        if domain_str.as_bytes()[0] == b'#' {
+        if line_type.as_bytes()[0] == b'#' {
             // Comment line. Meh.
             return Some(Ok(None));
         }
 
-        let example_url_str = split.next();
+        let Some(url_str) = split.next() else {
+            // Only a type but no data? No good, line is weird lol
+            return Some(Err(Error::new(
+                ErrorKind::InvalidData,
+                format!("No URL in line {}:\n{}", self.line_counter, self.buffer),
+            )));
+        };
 
         if split.next().is_some() {
             // Third parameter? Not good, line is weird lol
@@ -80,43 +86,66 @@ impl Parser {
             )));
         }
 
-        // We now have a domain name and an example URL, as strings...
-
-        let Some(domain) = Domain::from_str(domain_str) else {
-            return Some(Err(Error::new(
-                ErrorKind::InvalidData,
-                format!(
-                    "Could not parse domain in line {}:\n{}",
-                    self.line_counter, self.buffer
-                ),
-            )));
+        let url = match parse_url_like_telegram(url_str) {
+            Ok(url) => url,
+            Err(e) => {
+                return Some(Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!(
+                        "Could not parse URL in line {}:\n{}\n{}",
+                        self.line_counter, self.buffer, e
+                    ),
+                )));
+            }
         };
 
-        let example_url = example_url_str.map(Url::parse);
+        // We now have a type of line, and a URL.
 
-        if let Some(Err(_)) = example_url {
-            return Some(Err(Error::new(
-                ErrorKind::InvalidData,
-                format!(
-                    "Could not parse example URL in line {}:\n{}",
-                    self.line_counter, self.buffer
-                ),
-            )));
+        let line = match Line::try_from((line_type, url)) {
+            Ok(line) => line,
+            Err(e) => {
+                // Failed to parse line type...
+                return Some(Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!(
+                        "Failed to parse type in line {}:\n{}\n{}",
+                        self.line_counter, self.buffer, e
+                    ),
+                )));
+            }
         };
 
-        let example_url = example_url.map(Result::unwrap);
-
-        Some(Ok(Some(Line {
-            domain,
-            example_url,
-        })))
+        Some(Ok(Some(line)))
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Line {
-    pub domain: Domain,
-    pub example_url: Option<Url>,
+pub enum Line {
+    // It's fine for now...
+    #[allow(dead_code)]
+    Url(Url),
+    Domain {
+        domain: Domain,
+        example_url: Url,
+    },
+}
+
+impl TryFrom<(&str, Url)> for Line {
+    type Error = &'static str;
+    fn try_from((line_type, url): (&str, Url)) -> Result<Self, Self::Error> {
+        match line_type {
+            "domain" => match Domain::from_url(&url) {
+                Some(domain) => Ok(Self::Domain {
+                    domain,
+                    example_url: url,
+                }),
+                None => Err("No domain in URL"),
+            },
+            // TODO: enable this when it's done...
+            //"url" => Ok(Self::Url(url)),
+            _ => Err("Unknown line type"),
+        }
+    }
 }
 
 #[cfg(test)]
