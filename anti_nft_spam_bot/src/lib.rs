@@ -13,6 +13,11 @@ use url::Url;
 /// as well as volunteers who partake in manual review of links for spam.
 pub static CONTROL_CHAT_ID: ChatId = ChatId(-1002065680710);
 
+/// An ID of a private channel used for logging manual reviews of URLs.
+/// This is primarily to spot abuse and to note which URLs the bot
+/// could have caught automatically but did not.
+pub static REVIEW_LOG_CHANNEL_ID: ChatId = ChatId(-1002128704357);
+
 /// Try to parse a string as a [`Url`] in a way that telegram parses it,
 /// with allowing an implicit `http://` prefix.
 pub fn parse_url_like_telegram(string: &str) -> Result<Url, url::ParseError> {

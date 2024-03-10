@@ -13,6 +13,10 @@ use crate::{
     types::{Domain, IsSpam},
 };
 
+use self::reviews::handle_review_command;
+
+mod reviews;
+
 /// Get a domain and a URL from this entity, if available.
 fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
     let url = match entity.kind() {
@@ -158,7 +162,6 @@ pub async fn handle_message(
     } else {
         // It's not spam. Do the other things.
         gather_suspicion(&message, &database).await;
-        parse_command(bot, me, message, database).await?;
     }
 
     Ok(())
@@ -204,43 +207,67 @@ async fn gather_suspicion(message: &Message, database: &Database) {
     }
 }
 
-async fn parse_command(
-    _bot: Bot,
-    me: Me,
-    message: Message,
-    _database: Arc<Database>,
-) -> Result<(), RequestError> {
+/// Returns `true` if a command was parsed and responded to.
+async fn handle_command(
+    bot: &Bot,
+    me: &Me,
+    message: &Message,
+    database: &Database,
+) -> Result<bool, RequestError> {
     // Get text of the message.
     let Some(text) = message.text() else {
-        return Ok(());
+        return Ok(false);
     };
     // Check if it starts with "/", like how a command should.
     if !text.starts_with('/') {
-        return Ok(());
+        return Ok(false);
     }
     // Get first word in the message, the command itself.
     let Some(command) = text.split_whitespace().next() else {
-        return Ok(());
+        return Ok(false);
     };
+
+    let command_full_len = command.len();
+
     // Trim the bot's username from the command and convert to lowercase.
     let username = format!("@{}", me.username());
-    let _command = command.trim_end_matches(username.as_str()).to_lowercase();
-    // TODO: this lol
+    let command = command.trim_end_matches(username.as_str()).to_lowercase();
+    let _params = &text[command_full_len..].trim_start();
 
-    //bot.send_message(message.chat.id, format!("Seen command: {}", command))
-    //    .reply_to_message_id(message.id)
-    //    .await?;
+    //bot.send_message(
+    //    message.chat.id,
+    //    format!(
+    //        "Seen command: {}\nWith params of length {}: {}",
+    //        command,
+    //        params.len(),
+    //        params
+    //    ),
+    //)
+    //.reply_to_message_id(message.id)
+    //.await?;
 
-    Ok(())
+    let command_processed: bool = match command.as_str() {
+        "/review" => handle_review_command(bot, me, message, database).await?,
+        // Any kind of "/start", "/help" commands would yield false and
+        // hence cause the help message to be printed.
+        _ => false,
+    };
+
+    Ok(command_processed)
 }
 
 pub async fn handle_private_message(
     bot: Bot,
-    _me: Me,
+    me: Me,
     message: Message,
-    _database: Arc<Database>,
+    database: Arc<Database>,
 ) -> Result<(), RequestError> {
     // Telegram automatically trims preceding and following newlines, so this is fine.
+
+    if handle_command(&bot, &me, &message, &database).await? {
+        return Ok(());
+    }
+
     bot.send_message(
         message.chat.id,
         "

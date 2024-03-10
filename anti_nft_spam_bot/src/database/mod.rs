@@ -5,6 +5,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
+use chrono::Utc;
 pub use sqlx::Error;
 use sqlx::{
     migrate::MigrateDatabase,
@@ -12,8 +13,10 @@ use sqlx::{
     Executor, Row, Sqlite,
 };
 use teloxide::Bot;
-use tokio::sync::watch;
+use tokio::sync::{watch, Mutex};
 use url::Url;
+
+use crate::parse_url_like_telegram;
 
 use super::types::{Domain, IsSpam};
 
@@ -25,6 +28,9 @@ pub struct Database {
     pool: Pool,
     drop_watch: (watch::Sender<()>, watch::Receiver<()>),
     bot: Bot,
+    // Mutexes are bad. However, this will only be used for reviews,
+    // which can only be done by a few people in the control chat.
+    review_lock: Mutex<()>,
 }
 
 impl Database {
@@ -53,7 +59,7 @@ impl Database {
         // domain (unique primary key, string)
         // example_url (string)
         // is_spam (0 for no, 1 for yes, 2 for unknown and needs review)
-        // last_sent_to_review (date+time in UTC)
+        // last_sent_to_review (date+time in UTC timezone in ISO 8601 format)
         // manually_reviewed (0 for no, 1 for yes)
         // from_spam_list (0 for no, 1 for yes)
         pool.execute(sqlx::query(
@@ -72,7 +78,7 @@ impl Database {
         // URLS:
         // url (unique primary key, string)
         // is_spam (0 for no, 1 for yes, 2 for unknown and needs review)
-        // last_sent_to_review (date+time in UTC)
+        // last_sent_to_review (date+time in UTC timezone in ISO 8601 format)
         // manually_reviewed (0 for no, 1 for yes)
         // from_spam_list (0 for no, 1 for yes)
         pool.execute(sqlx::query(
@@ -111,6 +117,7 @@ impl Database {
         let db_arc = Arc::new(Database {
             pool,
             bot,
+            review_lock: Mutex::new(()),
             drop_watch: watch::channel(()),
         });
 
@@ -211,6 +218,15 @@ impl Database {
         .bind(from_spam_list)
         .execute(&self.pool)
         .await?;
+
+        // If we know for a fact that this URL and its domain is
+        // spam, we don't need an entry in the `urls` table for it.
+        if let Some(url) = example_url {
+            sqlx::query("DELETE FROM urls WHERE url=?;")
+                .bind(url.as_str())
+                .execute(&self.pool)
+                .await?;
+        }
         Ok(())
     }
 
@@ -303,5 +319,96 @@ impl Database {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    /// Get a URL for review and its state in the database.
+    pub async fn get_url_for_review(&self) -> Result<Option<(Url, IsSpam)>, Error> {
+        // I don't like repeating myself much, so here goes this.
+        // This should be used with a query that returns three values:
+        // a URL, is_spam, and a "key" string.
+        // The "key" is for writing back the time when this URL was sent to reviews.
+        macro_rules! try_get_url {
+            ($query:expr) => {
+                sqlx::query($query)
+                    .map(|row: SqliteRow| {
+                        (
+                            parse_url_like_telegram(row.get(0))
+                                .expect("Database has invalid URL data!"),
+                            IsSpam::from(row.get::<u8, _>("is_spam")),
+                            row.get::<String, _>("key"),
+                        )
+                    })
+                    .fetch_optional(&self.pool)
+                    .await?
+            };
+        }
+
+        // If this is true, the URL was gotten from the "urls" table; if false, "domains" table.
+        let mut url_from_urls_table;
+
+        // Get the mutex. It'll be unlocked at the end of the function
+        // automatically due to RAII.
+        let _the_mutex = self.review_lock.lock();
+
+        // Check the URLs table for a "maybe spam" URL we can grab first.
+        url_from_urls_table = true;
+        let mut db_result: Option<(Url, IsSpam, String)> = try_get_url!(
+            "SELECT url, url AS key, is_spam FROM urls
+            WHERE is_spam=2 AND from_spam_list=0
+            ORDER BY manually_reviewed, last_sent_to_review LIMIT 1;"
+        );
+
+        if db_result.is_none() {
+            // Check the domains table for a "maybe spam" URL?
+            url_from_urls_table = false;
+            db_result = try_get_url!(
+                "SELECT COALESCE(example_url, domain), domain AS key, is_spam
+                FROM domains WHERE is_spam=2 AND from_spam_list=0
+                ORDER BY manually_reviewed, last_sent_to_review LIMIT 1;"
+            );
+
+            if db_result.is_none() {
+                // Rehash URLs that are marked as spam, just in case they are falsely marked,
+                // and then URLs that are marked as not spam.
+                // Check the URLs table...
+                url_from_urls_table = true;
+                db_result = try_get_url!(
+                    "SELECT url, url AS key, is_spam
+                    FROM urls WHERE is_spam IN (0,1) AND from_spam_list=0
+                    ORDER BY manually_reviewed, last_sent_to_review, is_spam LIMIT 1;"
+                );
+                if db_result.is_none() {
+                    // Check the domains table for rehashing...
+                    url_from_urls_table = false;
+                    db_result = try_get_url!(
+                        "SELECT COALESCE(example_url, domain), domain AS key, is_spam
+                        FROM domains WHERE is_spam IN (0,1) AND from_spam_list=0
+                        ORDER BY manually_reviewed, last_sent_to_review, is_spam DESC LIMIT 1;"
+                    );
+                }
+            }
+        }
+
+        let Some((url, is_spam, db_key)) = db_result else {
+            // Well dang.
+            return Ok(None);
+        };
+
+        let db_query = if url_from_urls_table {
+            "UPDATE urls SET last_sent_to_review=? WHERE url=?;"
+        } else {
+            "UPDATE domains SET last_sent_to_review=? WHERE domain=?;"
+        };
+
+        // Mark this URL or domain in the database as sent to review.
+        let time = Utc::now();
+        sqlx::query(db_query)
+            .bind(time)
+            .bind(db_key.as_str())
+            .execute(&self.pool)
+            .await?;
+
+        // Pass it on.
+        Ok(Some((url, is_spam)))
     }
 }
