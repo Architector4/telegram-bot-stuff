@@ -54,8 +54,9 @@ pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, Error> {
         return Ok(IsSpam::Yes);
     }
 
-    if text.contains("<title>Just a moment...</title>")
-        && text.contains("Enable JavaScript and cookies to continue")
+    if (text.contains("<title>Just a moment...</title>")
+        && text.contains("Enable JavaScript and cookies to continue"))
+        || text.contains("Attention Required! | Cloudflare")
     {
         // Cloudflare captcha.
         return Ok(IsSpam::Maybe);
