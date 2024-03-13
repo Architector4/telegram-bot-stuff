@@ -371,7 +371,7 @@ impl Database {
         .fetch_optional(&self.pool)
         .await?;
 
-        let Some((url, mut is_spam, rowid, from_urls_table)) = db_result else {
+        let Some((url, is_spam, rowid, from_urls_table)) = db_result else {
             // Well dang.
             return Ok(None);
         };
