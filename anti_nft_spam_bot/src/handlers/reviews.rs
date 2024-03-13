@@ -1,27 +1,23 @@
+use std::sync::Arc;
+
 use teloxide::{
-    payloads::SendMessageSetters,
+    payloads::{AnswerCallbackQuerySetters, EditMessageTextSetters, SendMessageSetters},
     requests::Requester,
-    types::{Me, Message},
-    Bot, RequestError,
+    types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, UserId},
+    ApiError, Bot, RequestError,
 };
 
-use crate::{database::Database, CONTROL_CHAT_ID};
+use crate::{
+    database::Database,
+    types::{IsSpam, ReviewResponse},
+    CONTROL_CHAT_ID, REVIEW_LOG_CHANNEL_ID,
+};
 
-/// Returns true if the command was processed, or false if it was ignored.
-pub async fn handle_review_command(
-    bot: &Bot,
-    _me: &Me,
-    message: &Message,
-    database: &Database,
-) -> Result<bool, RequestError> {
-    // Check if it's sent by a user. Otherwise, we don't care.
-    let Some(user) = message.from() else {
-        return Ok(false);
-    };
-
-    // Check if that user is anyone in the control chat...
-    let member = bot.get_chat_member(CONTROL_CHAT_ID, user.id).await?;
-    if !member.is_present() {
+/// Check if this user is in the control chat and can do reviews, and
+/// delay their requests if appropriate.
+async fn authenticate_control(bot: &Bot, id: UserId) -> Result<bool, RequestError> {
+    let control = bot.get_chat_member(CONTROL_CHAT_ID, id).await?.is_present();
+    if !control {
         // Not a member.
         // Now, facts:
         // 1. This function will only be run in context of a private chat.
@@ -44,6 +40,24 @@ pub async fn handle_review_command(
         //
         // With that in mind, delay this user from accessing this bot for 5 seconds.
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
+    Ok(control)
+}
+
+/// Returns true if the command was processed, or false if it was ignored.
+pub async fn handle_review_command(
+    bot: &Bot,
+    message: &Message,
+    database: &Database,
+) -> Result<bool, RequestError> {
+    // Check if it's sent by a user. Otherwise, we don't care.
+    let Some(user) = message.from() else {
+        return Ok(false);
+    };
+
+    // Check if that user is anyone in the control chat...
+
+    if !authenticate_control(bot, user.id).await? {
         return Ok(false);
     }
 
@@ -64,16 +78,154 @@ async fn edit_message_into_a_review(
     database: &Database,
     message: &Message,
 ) -> Result<(), RequestError> {
-    let Some(review) = database.get_url_for_review().await.expect("Database died!") else {
-        bot.edit_message_text(message.chat.id, message.id, "There are URLs to review.")
-            .await?;
+    let Some((url, table_name, rowid, is_spam)) =
+        database.get_url_for_review().await.expect("Database died!")
+    else {
+        bot.edit_message_text(
+            message.chat.id,
+            message.id,
+            "There are no more URLs to review.",
+        )
+        .reply_markup(InlineKeyboardMarkup {
+            inline_keyboard: Vec::new(),
+        })
+        .await?;
         return Ok(());
     };
 
-    let text = format!("Got URL {}\nand IsSpam {:?}", review.0, review.1);
+    let title = match is_spam {
+        IsSpam::Maybe => "<b>REVIEW:</b>\n\n",
+        IsSpam::No | IsSpam::Yes => concat!(
+            "<b>REHASHING: </b>\n",
+            "There are no more URLs to review right now, ",
+            "so existing entries are shown to weed out ",
+            "any potential false positives.\n\n"
+        ),
+    };
 
-    bot.edit_message_text(message.chat.id, message.id, text)
+    let considered = match is_spam {
+        IsSpam::No => concat!(
+            "This URL is currently <b>NOT</b> considered as spam, ",
+            "but is presented for review in case it's wrong.\n\n"
+        ),
+        IsSpam::Yes => concat!(
+            "This URL is currently <b>considered as spam</b>, ",
+            "but is presented for review in case it's a false positive.\n\n"
+        ),
+        IsSpam::Maybe => "",
+    };
+
+    let text = format!("{}{}{}\n\nWhat is spam here?", title, considered, url);
+
+    let keyboard = InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback(
+                "Just the URL".to_string(),
+                format!("URL_SPAM {} {}", table_name, rowid),
+            ),
+            InlineKeyboardButton::callback(
+                "Entire DOMAIN".to_string(),
+                format!("DOMAIN_SPAM {} {}", table_name, rowid),
+            ),
+        ],
+        vec![
+            InlineKeyboardButton::callback(
+                "Not spam".to_string(),
+                format!("NOT_SPAM {} {}", table_name, rowid),
+            ),
+            InlineKeyboardButton::callback("Skip".to_string(), "SKIP".to_string()),
+        ],
+    ]);
+
+    let edit_result = bot
+        .edit_message_text(message.chat.id, message.id, text)
+        .parse_mode(teloxide::types::ParseMode::Html)
+        .reply_markup(keyboard)
+        .await;
+
+    // If we get this error, that means that the message was modified to the
+    // exact same thing as it was before. This means we're getting the same thing.
+    if let Err(RequestError::Api(ApiError::MessageNotModified)) = edit_result {
+        bot.edit_message_text(
+            message.chat.id,
+            message.id,
+            "There are no more URLs to review.",
+        )
+        .reply_markup(InlineKeyboardMarkup {
+            inline_keyboard: Vec::new(),
+        })
         .await?;
+        return Ok(());
+    };
 
+    edit_result?;
     Ok(())
+}
+
+pub async fn parse_callback_query(
+    bot: Bot,
+    query: CallbackQuery,
+    db: Arc<Database>,
+) -> Result<(), RequestError> {
+    macro_rules! goodbye {
+        ($text:expr) => {
+            bot.answer_callback_query(query.id).text($text).await?;
+            return Ok(());
+        };
+        () => {
+            bot.answer_callback_query(query.id).await?;
+            return Ok(());
+        };
+    }
+
+    let Some(query_data) = query.data else {
+        goodbye!("No query data.");
+    };
+
+    let user = query.from;
+    if !authenticate_control(&bot, user.id).await? {
+        goodbye!("Access denied.");
+    }
+
+    let response = match ReviewResponse::from_str(query_data.as_str(), &db).await {
+        Ok(r) => r,
+        Err(e) => {
+            goodbye!(&format!("Invalid query data: {}", e));
+        }
+    };
+
+    if response
+        .conflicts_with_db(&db)
+        .await
+        .expect("Database died!")
+    {
+        // Something wasn't marked as spam, but now will be.
+        // This warrants logging.
+
+        let name = if let Some(username) = &user.username {
+            format!("@{}", username)
+        } else {
+            user.full_name()
+        };
+
+        let log_message = format!("{} (userid {})\n{}", name, user.id, response);
+
+        bot.send_message(REVIEW_LOG_CHANNEL_ID, log_message)
+            .disable_web_page_preview(true)
+            .await?;
+    }
+
+    // Ingest it into the database...
+
+    db.read_review_response(&response)
+        .await
+        .expect("Database died!");
+
+    let Some(message) = query.message else {
+        // May happen if the message is too old
+        goodbye!("Review taken. Please send /review to perform more reviews.");
+    };
+
+    edit_message_into_a_review(&bot, &db, &message).await?;
+    goodbye!();
 }

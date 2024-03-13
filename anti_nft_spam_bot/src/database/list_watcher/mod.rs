@@ -121,13 +121,13 @@ async fn ingest_list_to_database(database: &super::Database) -> std::io::Result<
 
         if database_result.is_ok() {
             database_result = match line {
-                Line::Url(url) => database.add_url(&url, IsSpam::Yes, true).await,
+                Line::Url(url) => database.add_url(&url, IsSpam::Yes, true, false).await,
                 Line::Domain {
                     domain,
                     example_url,
                 } => {
                     database
-                        .add_domain(&domain, Some(&example_url), IsSpam::Yes, true)
+                        .add_domain(&domain, Some(&example_url), IsSpam::Yes, true, false)
                         .await
                 }
             };

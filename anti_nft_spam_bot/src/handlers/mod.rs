@@ -15,7 +15,7 @@ use crate::{
 
 use self::reviews::handle_review_command;
 
-mod reviews;
+pub mod reviews;
 
 /// Get a domain and a URL from this entity, if available.
 fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
@@ -247,7 +247,7 @@ async fn handle_command(
     //.await?;
 
     let command_processed: bool = match command.as_str() {
-        "/review" => handle_review_command(bot, me, message, database).await?,
+        "/review" => handle_review_command(bot, message, database).await?,
         // Any kind of "/start", "/help" commands would yield false and
         // hence cause the help message to be printed.
         _ => false,

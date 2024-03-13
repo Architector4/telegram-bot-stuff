@@ -1,7 +1,7 @@
 use std::{fs, sync::Arc};
 use teloxide::{dptree::deps, prelude::*};
 
-use crate::database::Database;
+use crate::{database::Database, handlers::reviews::parse_callback_query};
 
 pub async fn entry() {
     log::info!("ASYNC WOOOO");
@@ -17,8 +17,9 @@ pub async fn entry() {
 
     log::info!("Creating the handler...");
 
-    let handler =
-        Update::filter_message().branch(dptree::endpoint(crate::handlers::handle_message));
+    let handler = dptree::entry()
+        .branch(Update::filter_message().branch(dptree::endpoint(crate::handlers::handle_message)))
+        .branch(Update::filter_callback_query().endpoint(parse_callback_query));
 
     log::info!("Dispatching the dispatcher!");
 

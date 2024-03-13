@@ -26,7 +26,7 @@ pub async fn check(database: &Database, domain: &Domain, url: &Url) -> Option<Is
             // Add it to the database.
             log::debug!("Visited {} and got: {:?}", url, is_spam);
             database
-                .add_domain(domain, Some(url), is_spam, false)
+                .add_domain(domain, Some(url), is_spam, false, false)
                 .await
                 .expect("Database died!");
 
