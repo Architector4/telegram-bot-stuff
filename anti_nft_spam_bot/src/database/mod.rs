@@ -301,6 +301,15 @@ impl Database {
 
     /// Convenience function to mark both a URL and its domain as maybe spam.
     pub async fn mark_sus(&self, url: &Url, mut domain: Option<&Domain>) -> Result<(), Error> {
+
+        // Check current stance in the database.
+        if let Some(is_spam_in_db) = self.is_spam(url, domain).await? {
+            if is_spam_in_db == IsSpam::Yes {
+                // Nothing needs to be done, it's already banned.
+                return Ok(());
+            }
+        };
+
         self.mark_url_sus(url).await?;
 
         // If no provided domain, try to get one from the URL.
@@ -362,7 +371,7 @@ impl Database {
         .fetch_optional(&self.pool)
         .await?;
 
-        let Some((url, is_spam, rowid, from_urls_table)) = db_result else {
+        let Some((url, mut is_spam, rowid, from_urls_table)) = db_result else {
             // Well dang.
             return Ok(None);
         };
