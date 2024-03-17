@@ -136,21 +136,21 @@ mod tests {
     #[test]
     fn test_spam_bot_url() {
         let random_url = Url::parse("https://www.amogus.com/").unwrap();
-        assert!(matches!(is_spam_telegram_url(&random_url), IsSpam::No));
+        assert!(is_spam_telegram_url(&random_url).is_none());
 
         let random_telegram_url = Url::parse("https://t.me/Architector_4_Channel").unwrap();
         assert!(matches!(
             is_spam_telegram_url(&random_telegram_url),
-            IsSpam::No
+            Some(IsSpam::No)
         ));
 
         let random_telegram_bot_url = Url::parse("https://t.me/Anti_NFT_Spam_Bot").unwrap();
         assert!(matches!(
             is_spam_telegram_url(&random_telegram_bot_url),
-            IsSpam::Maybe
+            Some(IsSpam::Maybe)
         ));
 
         let spam_url = Url::parse("https://t.me/FawunBot/claim").unwrap();
-        assert!(matches!(is_spam_telegram_url(&spam_url), IsSpam::Yes));
+        assert!(matches!(is_spam_telegram_url(&spam_url), Some(IsSpam::Yes)));
     }
 }
