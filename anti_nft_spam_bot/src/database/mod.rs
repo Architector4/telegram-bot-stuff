@@ -301,7 +301,6 @@ impl Database {
 
     /// Convenience function to mark both a URL and its domain as maybe spam.
     pub async fn mark_sus(&self, url: &Url, mut domain: Option<&Domain>) -> Result<(), Error> {
-
         // Check current stance in the database.
         if let Some(is_spam_in_db) = self.is_spam(url, domain).await? {
             if is_spam_in_db == IsSpam::Yes {
