@@ -3,7 +3,7 @@ use std::sync::Arc;
 use teloxide::{
     payloads::{AnswerCallbackQuerySetters, EditMessageTextSetters, SendMessageSetters},
     requests::Requester,
-    types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, UserId},
+    types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, User},
     ApiError, Bot, RequestError,
 };
 
@@ -15,9 +15,23 @@ use crate::{
 
 /// Check if this user is in the control chat and can do reviews, and
 /// delay their requests if appropriate.
-async fn authenticate_control(bot: &Bot, id: UserId) -> Result<bool, RequestError> {
-    let control = bot.get_chat_member(CONTROL_CHAT_ID, id).await?.is_present();
+async fn authenticate_control(bot: &Bot, user: &User) -> Result<bool, RequestError> {
+    let control = bot
+        .get_chat_member(CONTROL_CHAT_ID, user.id)
+        .await?
+        .is_present();
     if !control {
+        let name = if let Some(username) = &user.username {
+            format!("@{}", username)
+        } else {
+            user.full_name()
+        };
+
+        log::info!(
+            "Unauthorized user trying to access reviews: {} (userid {})",
+            name,
+            user.id
+        );
         // Not a member.
         // Now, facts:
         // 1. This function will only be run in context of a private chat.
@@ -57,7 +71,7 @@ pub async fn handle_review_command(
 
     // Check if that user is anyone in the control chat...
 
-    if !authenticate_control(bot, user.id).await? {
+    if !authenticate_control(bot, &user).await? {
         return Ok(false);
     }
 
@@ -183,7 +197,7 @@ pub async fn parse_callback_query(
     };
 
     let user = query.from;
-    if !authenticate_control(&bot, user.id).await? {
+    if !authenticate_control(&bot, &user).await? {
         goodbye!("Access denied.");
     }
 
