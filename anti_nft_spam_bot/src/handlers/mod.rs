@@ -161,7 +161,7 @@ pub async fn handle_message(
         }
     } else {
         // It's not spam. Do the other things.
-        gather_suspicion(&message, &database).await;
+        gather_suspicion(&bot, &message, &database).await?;
     }
 
     Ok(())
@@ -170,15 +170,19 @@ pub async fn handle_message(
 /// Handler to intuit suspicious links based on them being replied to.
 /// For example, if someone replies "spam" or "admin" to a message
 /// with links, then those links may be spam. Send them to the database lol
-async fn gather_suspicion(message: &Message, database: &Database) {
+async fn gather_suspicion(
+    bot: &Bot,
+    message: &Message,
+    database: &Database,
+) -> Result<(), RequestError> {
     let Some(text) = message.text() else {
-        return;
+        return Ok(());
     };
 
     let text = text.to_lowercase();
 
     let Some(replied_message) = message.reply_to_message() else {
-        return;
+        return Ok(());
     };
 
     if text.contains("spam") || text.contains("admin") || text.contains("begone") {
@@ -189,8 +193,10 @@ async fn gather_suspicion(message: &Message, database: &Database) {
             .parse_entities()
             .or_else(|| replied_message.parse_caption_entities())
         else {
-            return;
+            return Ok(());
         };
+
+        let mut marked_anything_as_sus = false;
 
         for entity in &entities {
             let Some((url, domain)) = get_entity_url_domain(entity) else {
@@ -198,13 +204,28 @@ async fn gather_suspicion(message: &Message, database: &Database) {
             };
 
             log::debug!("Marking {} and its domain as sus...", url);
+            marked_anything_as_sus = true;
 
             database
                 .mark_sus(&url, Some(&domain))
                 .await
                 .expect("Database died!");
         }
+
+        if marked_anything_as_sus {
+            // That's the bot command, most likely.
+            if text.starts_with("/spam") {
+                bot.send_message(
+                    message.chat.id,
+                    "Thank you, links in the message you replied to will be reviewed for spam.",
+                )
+                .reply_to_message_id(message.id)
+                .await?;
+            }
+        }
     }
+
+    Ok(())
 }
 
 /// Returns `true` if a command was parsed and responded to.
