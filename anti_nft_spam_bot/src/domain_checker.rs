@@ -87,21 +87,28 @@ fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
     };
 
     // Check if it's a telegram domain...
-    if !matches!(domain, "t.me" | "telegram.me" | "telegram.dog") {
+    if !matches!(
+        domain.to_lowercase().as_str(),
+        "t.me" | "telegram.me" | "telegram.dog"
+    ) {
         return None;
     };
 
-    let Some(mut segments) = url.path_segments() else {
+    // Ripping out Url::path_segments() body here lol
+    let Some(path) = url.path().strip_prefix('/') else {
         // Shouldn't happen but eh
         return Some(IsSpam::No);
     };
+
+    let path_lower = path.to_lowercase();
+    let mut segments = path_lower.split('/');
 
     let Some(username) = segments.next() else {
         // Someone just linked t.me? lol
         return Some(IsSpam::No);
     };
 
-    if !username.to_ascii_lowercase().ends_with("bot") {
+    if !username.ends_with("bot") {
         // Not a telegram bot.
         return Some(IsSpam::No);
     };
