@@ -113,7 +113,7 @@ fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
         return Some(IsSpam::Maybe);
     };
 
-    if params.contains("claim") {
+    if ["claim", "drop"].iter().any(|x| params.contains(x)) {
         // Who else would post a bot with params of "claim" than spammers anyway?
         return Some(IsSpam::Yes);
     }
