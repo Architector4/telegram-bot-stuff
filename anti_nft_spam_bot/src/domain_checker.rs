@@ -61,6 +61,7 @@ pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, Error> {
 
     // Gather some specifics relevant to cloudflare captchas...
     let header_powered_by = result.headers().get("x-powered-by").is_some();
+    let header_cf_ray = result.headers().get("cf-ray").is_some();
     let header_cache = result.headers().get("cf-cache-status").is_some();
     let header_content_length = result.headers().get("content-length").is_some();
     let cf_mitigated_challenge = result
@@ -88,6 +89,7 @@ pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, Error> {
             && !header_powered_by
             && !header_cache
             && cf_mitigated_challenge
+            && header_cf_ray
             && header_content_length
             && !text.contains('\n')
         {
