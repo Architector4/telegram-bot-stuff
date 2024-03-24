@@ -357,7 +357,7 @@ impl Database {
                     FROM domains
                     WHERE from_spam_list=0
                 )
-            ORDER BY manually_reviewed, is_spam DESC, last_sent_to_review DESC LIMIT 1;",
+            ORDER BY manually_reviewed, is_spam DESC, last_sent_to_review LIMIT 1;",
         )
         .map(|row: SqliteRow| {
             (
