@@ -1,4 +1,4 @@
-use reqwest::Error;
+use reqwest::{Error, StatusCode};
 use std::time::Duration;
 use url::Url;
 
@@ -57,7 +57,20 @@ pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, Error> {
         .connect_timeout(Duration::from_secs(7))
         .build()?;
 
-    let text = client.get(url.as_str()).send().await?.text().await?;
+    let result = client.get(url.as_str()).send().await?;
+
+    // Gather some specifics relevant to cloudflare captchas...
+    let header_powered_by = result.headers().get("x-powered-by").is_some();
+    let header_cache = result.headers().get("cf-cache-status").is_some();
+    let header_content_length = result.headers().get("content-length").is_some();
+    let cf_mitigated_challenge = result
+        .headers()
+        .get("cf-mitigated")
+        .and_then(|x| x.to_str().ok())
+        .is_some_and(|x| x == "challenge");
+    let status_code_forbidden = result.status() == StatusCode::FORBIDDEN;
+
+    let text = result.text().await?;
 
     if is_spam_html(&text) {
         return Ok(IsSpam::Yes);
@@ -66,9 +79,26 @@ pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, Error> {
     if (text.contains("<title>Just a moment...</title>")
         && text.contains("Enable JavaScript and cookies to continue"))
         || text.contains("Attention Required! | Cloudflare")
+        || (text.contains("cloudflare") && text.contains("erify that you are a human"))
     {
         // Cloudflare captcha.
-        return Ok(IsSpam::Maybe);
+
+        // Check validity of it being a *real* cloudflare captcha.
+        if status_code_forbidden
+            && !header_powered_by
+            && !header_cache
+            && cf_mitigated_challenge
+            && header_content_length
+            && !text.contains('\n')
+        {
+            // Good enough lol
+            return Ok(IsSpam::Maybe);
+        }
+
+        // Fake cloudflare captcha.
+        // Can't believe we got lied to. So sad :(
+
+        return Ok(IsSpam::Yes);
     }
 
     Ok(IsSpam::No)
