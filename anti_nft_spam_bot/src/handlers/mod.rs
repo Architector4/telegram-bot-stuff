@@ -50,6 +50,13 @@ pub async fn handle_message(
     message: Message,
     database: Arc<Database>,
 ) -> Result<(), RequestError> {
+    if let Some(sender) = message.from() {
+        if sender.id == me.id {
+            // Ignore messages sent by ourselves.
+            return Ok(());
+        }
+    }
+    
     // First check if it's a private message.
     if message.chat.is_private() {
         return handle_private_message(bot, me, message, database).await;
