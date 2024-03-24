@@ -56,7 +56,7 @@ pub async fn handle_message(
             return Ok(());
         }
     }
-    
+
     // First check if it's a private message.
     if message.chat.is_private() {
         return handle_private_message(bot, me, message, database).await;

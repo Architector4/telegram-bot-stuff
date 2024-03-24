@@ -71,7 +71,7 @@ pub async fn handle_review_command(
 
     // Check if that user is anyone in the control chat...
 
-    if !authenticate_control(bot, &user).await? {
+    if !authenticate_control(bot, user).await? {
         return Ok(false);
     }
 

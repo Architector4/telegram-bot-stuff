@@ -112,9 +112,7 @@ fn is_spam_html(text: &str) -> bool {
 
 /// Returns `None` if it's not a telegram URL.
 fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
-    let Some(domain) = url.domain() else {
-        return None;
-    };
+    let domain = url.domain()?;
 
     // Check if it's a telegram domain...
     if !matches!(
