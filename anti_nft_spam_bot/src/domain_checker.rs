@@ -150,6 +150,11 @@ fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
         return Some(IsSpam::Maybe);
     };
 
+    if username.ends_with("drop_bot") {
+        // No way in hell a "...drop_bot" is anything other than spam, right?
+        return Some(IsSpam::Yes);
+    };
+
     if ["claim", "drop"].iter().any(|x| params.contains(x)) {
         // Who else would post a bot with params of "claim" than spammers anyway?
         return Some(IsSpam::Yes);
