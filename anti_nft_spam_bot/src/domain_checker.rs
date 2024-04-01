@@ -91,11 +91,6 @@ pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, Error> {
     let header_cf_ray = result.headers().get("cf-ray").is_some();
     let header_cache = result.headers().get("cf-cache-status").is_some();
     let header_content_length = result.headers().get("content-length").is_some();
-    let cf_mitigated_challenge = result
-        .headers()
-        .get("cf-mitigated")
-        .and_then(|x| x.to_str().ok())
-        .is_some_and(|x| x == "challenge");
     let status_code_forbidden = result.status() == StatusCode::FORBIDDEN;
 
     let text = result.text().await?;
@@ -115,10 +110,8 @@ pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, Error> {
         if status_code_forbidden
             && !header_powered_by
             && !header_cache
-            && cf_mitigated_challenge
             && header_cf_ray
             && header_content_length
-            && !text.contains('\n')
         {
             // Good enough lol
             return Ok(IsSpam::Maybe);
