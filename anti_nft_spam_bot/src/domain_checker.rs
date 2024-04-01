@@ -194,5 +194,10 @@ mod tests {
 
         let spam_url = Url::parse("https://t.me/FawunBot/claim").unwrap();
         assert!(matches!(is_spam_telegram_url(&spam_url), Some(IsSpam::Yes)));
+
+        let spam_url =
+            Url::parse("https://t.me/stonksdrop_bot?start=bd658555-7bc6-4652-8afb-e69fdd3d4c0d")
+                .unwrap();
+        assert!(matches!(is_spam_telegram_url(&spam_url), Some(IsSpam::Yes)));
     }
 }
