@@ -143,16 +143,16 @@ fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
         return Some(IsSpam::No);
     };
 
+    if username.ends_with("drop_bot") {
+        // No way in hell a "...drop_bot" is anything other than spam, right?
+        return Some(IsSpam::Yes);
+    };
+
     let Some(params) = segments.next() else {
         // It's a bot, but no params. They use params.
         // If you're reading this:
         // don't worry, we'll review and patch as needed lol
         return Some(IsSpam::Maybe);
-    };
-
-    if username.ends_with("drop_bot") {
-        // No way in hell a "...drop_bot" is anything other than spam, right?
-        return Some(IsSpam::Yes);
     };
 
     if ["claim", "drop"].iter().any(|x| params.contains(x)) {
