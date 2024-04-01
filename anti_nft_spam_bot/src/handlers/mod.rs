@@ -192,7 +192,11 @@ async fn gather_suspicion(
         return Ok(());
     };
 
-    if text.contains("spam") || text.contains("admin") || text.contains("begone") {
+    if text.contains("spam")
+        || text.contains("scam")
+        || text.contains("admin")
+        || text.contains("begone")
+    {
         // Replied-to message is sus. Mark its links.
 
         // Get message "entities".
@@ -204,6 +208,7 @@ async fn gather_suspicion(
         };
 
         let mut marked_anything_as_sus = false;
+        let mut had_links = false;
 
         for entity in &entities {
             let Some((url, domain)) = get_entity_url_domain(entity) else {
@@ -211,20 +216,33 @@ async fn gather_suspicion(
             };
 
             log::debug!("Marking {} and its domain as sus...", url);
-            marked_anything_as_sus = true;
 
-            database
+            had_links = true;
+
+            if database
                 .mark_sus(&url, Some(&domain))
                 .await
-                .expect("Database died!");
+                .expect("Database died!")
+            {
+                marked_anything_as_sus = true;
+            }
         }
 
-        if marked_anything_as_sus {
-            // That's the bot command, most likely.
-            if text.starts_with("/spam") {
+        // That's the bot command, most likely.
+        if text.starts_with("/spam") | text.starts_with("/scam") {
+            if marked_anything_as_sus {
                 bot.send_message(
                     message.chat.id,
                     "Thank you, links in the message you replied to will be reviewed for spam.",
+                )
+                .reply_to_message_id(message.id)
+                .await?;
+            } else if had_links {
+                // Didn't mark anything as sus, but the message had links.
+                // Deductively, this means the links it had are already marked as spam.
+                bot.send_message(
+                    message.chat.id,
+                    "Thank you, but the links in the message you replied to are already marked as spam..",
                 )
                 .reply_to_message_id(message.id)
                 .await?;
