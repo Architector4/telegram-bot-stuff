@@ -565,8 +565,7 @@ impl Database {
             // after task B checked the hash set but before it awaits the Notify.
             //
             // This is accomplished with the visited_lock: the hash set is locked
-            // for checking, then Notify is awaited on in a separate task,
-            // and only then it's unlocked.
+            // for checking, then Notify is awaited on, and only then it's unlocked.
 
             let mut visited_lock = self.domains_currently_being_visited.lock().await;
 
@@ -574,13 +573,10 @@ impl Database {
             if contains {
                 // It's being visited. Wait on notify and check again.
                 was_visited = true;
-
-                let db_arc_clone = self.clone();
-                let notify_waiter =
-                    tokio::spawn(async move { db_arc_clone.domains_visit_notify.notified().await });
-
+                // Notified immediately starts listening as it is created.
+                let notify_waiter = self.domains_visit_notify.notified();
                 drop(visited_lock);
-                notify_waiter.await.unwrap();
+                notify_waiter.await;
             } else {
                 // It is not or no longer being visited.
                 // Add it to the list and return the guard.
