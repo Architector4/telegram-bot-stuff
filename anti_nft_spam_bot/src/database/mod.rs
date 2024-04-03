@@ -541,9 +541,6 @@ impl Drop for DomainVisitDebounceGuard {
 }
 
 impl Database {
-    // False diagnostic. I ensure the code below always drops
-    // the mutex guard before the await and it still complains lol
-    #[allow(clippy::await_holding_lock)]
     pub async fn domain_visit_debounce(
         self: &Arc<Database>,
         domain: Domain,
