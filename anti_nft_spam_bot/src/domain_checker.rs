@@ -60,11 +60,11 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
             Some(is_telegram_spam)
         } else {
             // No database result. We're going to visit the URL and log by the domain.
-            log::debug!("Will try to visit {}...", url);
+            log::debug!("{} Is not in the database. Debouncing...", url);
             let visit_guard = database.domain_visit_debounce(domain.clone()).await;
 
             if visit_guard.was_visited {
-                log::debug!("{} was already visited. Debouncing to the database.", url);
+                log::debug!("{} was just visited. Trying the database.", url);
                 // Oh no nevermind, someone else visited it.
                 // Just get the database result.
                 drop(visit_guard);
