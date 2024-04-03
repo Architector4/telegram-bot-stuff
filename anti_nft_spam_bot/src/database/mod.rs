@@ -1,6 +1,7 @@
 mod list_watcher;
 
 use std::{
+    collections::HashSet,
     str::FromStr,
     sync::{atomic::AtomicBool, Arc},
 };
@@ -13,7 +14,7 @@ use sqlx::{
     Executor, Row, Sqlite,
 };
 use teloxide::Bot;
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{watch, Mutex, Notify};
 use url::Url;
 
 use crate::{parse_url_like_telegram, types::ReviewResponse};
@@ -31,6 +32,13 @@ pub struct Database {
     // Mutexes are bad. However, this will only be used for reviews,
     // which can only be done by a few people in the control chat.
     review_lock: Mutex<()>,
+    /// A list of domains that are currently being visited by other tasks.
+    /// For the reason the Mutex is used, see code of [`Self::domain_visit_debounce`]
+    // I'd make this a std::sync::Mutex but Rust incorrectly assumes it lives after
+    // the drop and doesn't let it compile lol
+    domains_currently_being_visited: Mutex<HashSet<Domain>>,
+    /// A [`Notify`] used to wake up tasks waiting on other tasks to visit some domain.
+    domains_visit_notify: Notify,
 }
 
 impl Database {
@@ -119,6 +127,8 @@ impl Database {
             bot,
             review_lock: Mutex::new(()),
             drop_watch: watch::channel(()),
+            domains_currently_being_visited: Default::default(),
+            domains_visit_notify: Notify::new(),
         });
 
         // Spawn the watcher.
@@ -501,5 +511,92 @@ impl Database {
         }
 
         Ok(())
+    }
+}
+
+pub struct DomainVisitDebounceGuard {
+    database: Arc<Database>,
+    domain: Domain,
+    /// True if this result is returned after the domain was just visited.
+    pub was_visited: bool,
+}
+
+impl Drop for DomainVisitDebounceGuard {
+    fn drop(&mut self) {
+        let tokio_handle = tokio::runtime::Handle::current();
+        let database = self.database.clone();
+        let mut domain = Domain::new_invalid_unchecked();
+
+        std::mem::swap(&mut self.domain, &mut domain);
+
+        tokio_handle.spawn(async move {
+            database
+                .domains_currently_being_visited
+                .lock()
+                .await
+                .remove(&domain);
+            database.domains_visit_notify.notify_waiters();
+        });
+    }
+}
+
+impl Database {
+    // False diagnostic. I ensure the code below always drops
+    // the mutex guard before the await and it still complains lol
+    #[allow(clippy::await_holding_lock)]
+    pub async fn domain_visit_debounce(
+        self: &Arc<Database>,
+        domain: Domain,
+    ) -> DomainVisitDebounceGuard {
+        // This is set to true if this domain was spotted to be in the process of being visited.
+        let mut was_visited = false;
+
+        // Check if it's already being visited on loop until it's no longer being visited.
+        loop {
+            // Code below looks a bit weird, but it's to avoid a race condition.
+            // Consider the following scenario:
+            // 1. Task A is currently visiting a domain.
+            // 2. Task B runs this function to check it.
+            // 3. Task B finds the domain in the hash set in the check above.
+            // 4. Task A finishes visiting the domain and removes it from the
+            // hash set.
+            // 5. Task A then punts the Notify.
+            // 6. Task B, awaits the Notify *after* that.
+            // 7. Task B locks up until something else happens to punt the Notify.
+            //
+            // For this reason, task B has to ensure that task A can't punt the Notify
+            // after task B checked the hash set but before it awaits the Notify.
+            //
+            // This is accomplished with the visited_lock: the hash set is locked
+            // for checking, then Notify is awaited on in a separate task,
+            // and only then it's unlocked.
+
+            let mut visited_lock = self.domains_currently_being_visited.lock().await;
+
+            let contains = visited_lock.contains(&domain);
+            if contains {
+                // It's being visited. Wait on notify and check again.
+                was_visited = true;
+
+                let db_arc_clone = self.clone();
+                let notify_waiter =
+                    tokio::spawn(async move { db_arc_clone.domains_visit_notify.notified().await });
+
+                drop(visited_lock);
+                notify_waiter.await.unwrap();
+            } else {
+                // It is not or no longer being visited.
+                // Add it to the list and return the guard.
+
+                visited_lock.insert(domain.clone());
+                drop(visited_lock);
+
+                break DomainVisitDebounceGuard {
+                    database: self.clone(),
+                    domain,
+                    was_visited,
+                };
+            }
+        }
     }
 }

@@ -33,7 +33,7 @@ impl From<IsSpam> for u8 {
 }
 
 /// A single domain name.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Domain(String);
 
 impl Domain {
@@ -51,6 +51,10 @@ impl Domain {
 
     pub fn as_str(&self) -> &str {
         self.as_ref()
+    }
+
+    pub(crate) fn new_invalid_unchecked() -> Domain {
+        Domain(String::new())
     }
 }
 

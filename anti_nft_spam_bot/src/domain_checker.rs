@@ -1,5 +1,5 @@
 use reqwest::{Error, StatusCode};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use url::Url;
 
 use crate::{
@@ -10,7 +10,7 @@ use crate::{
 /// Check the link's domain against the database, or by visiting, as needed.
 ///
 /// Returns [`None`] if both checking methods failed.
-pub async fn check(database: &Database, domain: &Domain, url: &Url) -> Option<IsSpam> {
+pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Option<IsSpam> {
     // Check the database...
     if let Some(is_spam) = database
         .is_spam(url, Some(domain))
@@ -58,19 +58,34 @@ pub async fn check(database: &Database, domain: &Domain, url: &Url) -> Option<Is
                 .await
                 .expect("Database died!");
             Some(is_telegram_spam)
-        } else if let Ok(is_spam) = visit_and_check_if_spam(url).await {
-            // Add it to the database.
-            log::debug!("Visited {} and got: {:?}", url, is_spam);
-            database
-                .add_domain(domain, Some(url), is_spam, false, false)
-                .await
-                .expect("Database died!");
-
-            Some(is_spam)
         } else {
-            // Probably timed out or something. Meh.
-            log::debug!("{} timed out", domain);
-            None
+            // No database result. We're going to visit the URL and log by the domain.
+            log::debug!("Will try to visit {}...", url);
+            let visit_guard = database.domain_visit_debounce(domain.clone()).await;
+
+            if visit_guard.was_visited {
+                log::debug!("{} was already visited. Debouncing to the database.", url);
+                // Oh no nevermind, someone else visited it.
+                // Just get the database result.
+                drop(visit_guard);
+                database
+                    .is_domain_spam(domain)
+                    .await
+                    .expect("Database died!")
+            } else if let Ok(is_spam) = visit_and_check_if_spam(url).await {
+                // Add it to the database.
+                log::debug!("Visited {} and got: {:?}", url, is_spam);
+                database
+                    .add_domain(domain, Some(url), is_spam, false, false)
+                    .await
+                    .expect("Database died!");
+
+                Some(is_spam)
+            } else {
+                // The visit probably timed out or something. Meh.
+                log::debug!("{} timed out", url);
+                None
+            }
         }
     }
 }
