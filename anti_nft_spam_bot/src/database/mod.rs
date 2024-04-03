@@ -554,7 +554,7 @@ impl Database {
             // Consider the following scenario:
             // 1. Task A is currently visiting a domain.
             // 2. Task B runs this function to check it.
-            // 3. Task B finds the domain in the hash set in the check above.
+            // 3. Task B finds the domain in the hash set in the check below.
             // 4. Task A finishes visiting the domain and removes it from the
             // hash set.
             // 5. Task A then punts the Notify.
