@@ -517,8 +517,6 @@ impl Database {
 pub struct DomainVisitDebounceGuard {
     database: Arc<Database>,
     domain: Domain,
-    /// True if this result is returned after the domain was just visited.
-    pub was_visited: bool,
 }
 
 impl Drop for DomainVisitDebounceGuard {
@@ -541,10 +539,12 @@ impl Drop for DomainVisitDebounceGuard {
 }
 
 impl Database {
+    /// Returns [`DomainVisitDebounceGuard`] if this domain isn't being visited,
+    /// or, if it is, blocks until that is done and then returns [`None`].
     pub async fn domain_visit_debounce(
         self: &Arc<Database>,
         domain: Domain,
-    ) -> DomainVisitDebounceGuard {
+    ) -> Option<DomainVisitDebounceGuard> {
         // This is set to true if this domain was spotted to be in the process of being visited.
         let mut was_visited = false;
 
@@ -581,14 +581,17 @@ impl Database {
                 // It is not or no longer being visited.
                 // Add it to the list and return the guard.
 
-                visited_lock.insert(domain.clone());
-                drop(visited_lock);
+                if was_visited {
+                    break None;
+                } else {
+                    visited_lock.insert(domain.clone());
+                    drop(visited_lock);
 
-                break DomainVisitDebounceGuard {
-                    database: self.clone(),
-                    domain,
-                    was_visited,
-                };
+                    break Some(DomainVisitDebounceGuard {
+                        database: self.clone(),
+                        domain,
+                    });
+                }
             }
         }
     }

@@ -63,7 +63,7 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
             log::debug!("{} Is not in the database. Debouncing...", url);
             let visit_guard = database.domain_visit_debounce(domain.clone()).await;
 
-            if visit_guard.was_visited {
+            if visit_guard.is_none() {
                 log::debug!("{} was just visited. Trying the database.", url);
                 // Oh no nevermind, someone else visited it.
                 // Just get the database result.
