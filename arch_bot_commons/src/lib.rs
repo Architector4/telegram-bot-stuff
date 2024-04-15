@@ -25,6 +25,10 @@ pub mod user_resolving;
 /// [pretty_env_logger][] internally, see its documentation for more details.
 ///
 /// [pretty_env_logger]: https://docs.rs/pretty_env_logger
+///
+/// # Panics
+/// Panics if building a Tokio multithreaded runtime fails,
+/// or ifthe provided closure fails.
 pub fn start_everything<T>(closure: impl Future<Output = T>) -> T {
     let log_level = std::env::var_os("RUST_LOG")
         .unwrap_or_else(|| std::ffi::OsString::from("info"))
@@ -56,6 +60,9 @@ pub fn start_everything<T>(closure: impl Future<Output = T>) -> T {
 /// Find out if a user of this ID is an admin of the specified chat of that ID.
 /// If so, returns the `ChatMember` object describing their permissions,
 /// otherwise `None`.
+///
+/// # Errors
+/// Errors if [`Bot::get_chat_administrators`] fails.
 pub async fn get_admin_of(
     bot: &Bot,
     user: UserId,
@@ -70,6 +77,7 @@ pub async fn get_admin_of(
 
 /// Create a string that can be used in a message to refer to
 /// a particular user. Guaranteed to tag them.
+#[must_use]
 pub fn print_user(user: &User) -> (String, Option<MessageEntity>) {
     match user.username {
         Some(ref username) => {
@@ -106,6 +114,7 @@ pub fn print_chat(chat: &Chat) -> Option<String> {
 /// Create a string that can be used in a message to refer to
 /// the sender of this message. Guaranteed to tag them, unless they
 /// are posting anonymously or as a channel.
+#[must_use]
 pub fn print_sender(message: &Message) -> (String, Option<MessageEntity>) {
     match message.from() {
         Some(user) => print_user(user),

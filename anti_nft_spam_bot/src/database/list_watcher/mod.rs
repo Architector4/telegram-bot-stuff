@@ -45,7 +45,7 @@ pub async fn watch_list(db_arc: Arc<super::Database>) {
 
     loop {
         tokio::select! {
-            _ = update_notify.notified() => {
+            () = update_notify.notified() => {
                 // Notified of a change happening. Check the file.
                 log::debug!("Notified of a file change!");
                 let Some(database) = database.upgrade() else {

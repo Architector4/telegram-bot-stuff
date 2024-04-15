@@ -3,6 +3,9 @@ use teloxide::{dptree::deps, prelude::*};
 
 use crate::{database::Database, handlers::reviews::parse_callback_query};
 
+/// # Panics
+///
+/// Panics if there's no key file
 pub async fn entry() {
     log::info!("ASYNC WOOOO");
     let key = fs::read_to_string(match cfg!(debug_assertions) {

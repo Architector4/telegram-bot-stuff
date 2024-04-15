@@ -158,8 +158,9 @@ pub async fn handle_message(
                     .await?;
                     break;
                 }
-                Err(RequestError::Api(ApiError::MessageIdInvalid))
-                | Err(RequestError::Api(ApiError::MessageToDeleteNotFound)) => {
+                Err(RequestError::Api(
+                    ApiError::MessageIdInvalid | ApiError::MessageToDeleteNotFound,
+                )) => {
                     // Someone else probably has already deleted it. That's fine.
                     break;
                 }

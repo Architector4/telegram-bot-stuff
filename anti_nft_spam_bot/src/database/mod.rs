@@ -127,7 +127,7 @@ impl Database {
             bot,
             review_lock: Mutex::new(()),
             drop_watch: watch::channel(()),
-            domains_currently_being_visited: Default::default(),
+            domains_currently_being_visited: Mutex::new(HashSet::with_capacity(4)),
             domains_visit_notify: Notify::new(),
         });
 
@@ -583,15 +583,15 @@ impl Database {
 
                 if was_visited {
                     break None;
-                } else {
-                    visited_lock.insert(domain.clone());
-                    drop(visited_lock);
-
-                    break Some(DomainVisitDebounceGuard {
-                        database: self.clone(),
-                        domain,
-                    });
                 }
+
+                visited_lock.insert(domain.clone());
+                drop(visited_lock);
+
+                break Some(DomainVisitDebounceGuard {
+                    database: self.clone(),
+                    domain,
+                });
             }
         }
     }

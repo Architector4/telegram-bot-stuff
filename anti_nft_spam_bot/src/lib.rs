@@ -20,6 +20,9 @@ pub static REVIEW_LOG_CHANNEL_ID: ChatId = ChatId(-1002128704357);
 
 /// Try to parse a string as a [`Url`] in a way that telegram parses it,
 /// with allowing an implicit `http://` prefix.
+///
+/// # Errors
+/// Errors if it fails to parse either way.
 pub fn parse_url_like_telegram(string: &str) -> Result<Url, url::ParseError> {
     match Url::parse(string) {
         Ok(url) => Ok(url),

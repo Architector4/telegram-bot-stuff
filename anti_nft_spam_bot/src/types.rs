@@ -132,7 +132,7 @@ impl ReviewResponse {
             .map_err(|_| "Failed to parse rowid")?;
 
         if iter.next().is_some() {
-            Err("Extraneous data in response")?
+            Err("Extraneous data in response")?;
         }
 
         let Some((url, domain_from_db)) =

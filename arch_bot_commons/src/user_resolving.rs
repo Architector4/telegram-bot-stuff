@@ -19,6 +19,7 @@ fn get_potential_userids(message: &Message) -> Vec<UserId> {
 /// Looks through the message for any and all users it's directed at, whether by reply or by link
 /// mentions. This does not return the sender, the person the message is forwarded from, or users
 /// mentioned by username like `@Architector_4`.
+#[must_use]
 pub fn get_linkable_mentioned_users(message: &Message) -> Vec<&User> {
     let mut output = vec![];
     if let Some(repliee) = message.reply_to_message().and_then(|m| m.from()) {
@@ -77,6 +78,7 @@ pub enum UserResolveResult {
 impl UserResolveResult {
     /// Converts from `UserResolveResult` to `Option<User>`.
     /// Unresolved results are returned as `None`.
+    #[must_use]
     pub fn ok(self) -> Option<User> {
         match self {
             UserResolveResult::User(user) => Some(user),
@@ -90,13 +92,13 @@ impl UserResolveResult {
 pub async fn resolve_to_users(
     what: Vec<UserLike>,
     bot: &Bot,
-    chat: ChatId,
+    chat_id: ChatId,
 ) -> Vec<Result<UserResolveResult, RequestError>> {
     futures::future::join_all(what.into_iter().map(|ulike| async move {
         match ulike {
             // try to resolve the user id
             UserLike::Id(uid) => match bot
-                .get_chat_member(chat, uid)
+                .get_chat_member(chat_id, uid)
                 .await
                 .map(|m| m.user)
                 .map(UserResolveResult::User)
@@ -139,10 +141,10 @@ pub trait MentionResolver {
         let mut output = vec![];
 
         for user in get_linkable_mentioned_users(message) {
-            output.push(UserLike::User(user.to_owned()))
+            output.push(UserLike::User(user.to_owned()));
         }
         for uid in get_potential_userids(message) {
-            output.push(UserLike::Id(uid))
+            output.push(UserLike::Id(uid));
         }
 
         for username in get_text_mentioned_users(message) {
@@ -159,7 +161,7 @@ pub trait MentionResolver {
     fn see_users_from_update(&mut self, update: &Update) {
         // Single user extraction
         if let Some(u) = update.user() {
-            self.see_user(u)
+            self.see_user(u);
         }
 
         match &update.kind {
@@ -168,7 +170,7 @@ pub trait MentionResolver {
                 // The one it's from (was already handled);
                 // The one it's forwarded from;
                 if let Some(u) = message.forward_from_user() {
-                    self.see_user(u)
+                    self.see_user(u);
                 }
                 // The one it's replying to;
                 // The ones it mentions by link mentions;
