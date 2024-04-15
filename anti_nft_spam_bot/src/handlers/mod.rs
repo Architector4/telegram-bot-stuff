@@ -3,7 +3,7 @@ use std::sync::Arc;
 use teloxide::{
     prelude::*,
     types::{ChatMember, Me, MessageEntityKind, MessageEntityRef},
-    RequestError,
+    ApiError, RequestError,
 };
 use url::Url;
 
@@ -120,50 +120,65 @@ pub async fn handle_message(
     };
 
     if should_delete {
-        match bot.delete_message(message.chat.id, message.id).await {
-            Ok(_) => {
-                // Make a string, either a @username or full name,
-                // describing the offending user.
-                let offending_user_name = {
-                    if let Some(user) = message.from() {
-                        if let Some(username) = &user.username {
-                            format!("@{}", username)
+        // Try up to 3 times in case a fail happens lol
+        for _ in 0..3 {
+            match bot.delete_message(message.chat.id, message.id).await {
+                Ok(_) => {
+                    // Make a string, either a @username or full name,
+                    // describing the offending user.
+                    let offending_user_name = {
+                        if let Some(user) = message.from() {
+                            if let Some(username) = &user.username {
+                                format!("@{}", username)
+                            } else {
+                                user.full_name()
+                            }
+                        } else if let Some(chat) = message.sender_chat() {
+                            if let Some(username) = chat.username() {
+                                format!("@{}", username)
+                            } else if let Some(title) = chat.title() {
+                                title.to_string()
+                            } else {
+                                // Shouldn't happen, but eh.
+                                "a private user".to_string()
+                            }
                         } else {
-                            user.full_name()
-                        }
-                    } else if let Some(chat) = message.sender_chat() {
-                        if let Some(username) = chat.username() {
-                            format!("@{}", username)
-                        } else if let Some(title) = chat.title() {
-                            title.to_string()
-                        } else {
-                            // Shouldn't happen, but eh.
+                            // Shouldn't happen either, but eh.
                             "a private user".to_string()
                         }
-                    } else {
-                        // Shouldn't happen either, but eh.
-                        "a private user".to_string()
-                    }
-                };
+                    };
 
-                bot.send_message(
-                    message.chat.id,
-                    format!(
-                        "Removed a message from {} containing a spam link.",
-                        offending_user_name
-                    ),
-                )
-                .await?;
-            }
-            Err(_) => {
-                bot.send_message(
-                    message.chat.id,
-                    concat!(
-                        "Tried to remove a message containing a spam link, but failed. ",
-                        "Is this bot an admin with ability to remove messages?"
-                    ),
-                )
-                .await?;
+                    bot.send_message(
+                        message.chat.id,
+                        format!(
+                            "Removed a message from {} containing a spam link.",
+                            offending_user_name
+                        ),
+                    )
+                    .await?;
+                    break;
+                }
+                Err(RequestError::Api(ApiError::MessageIdInvalid))
+                | Err(RequestError::Api(ApiError::MessageToDeleteNotFound)) => {
+                    // Someone else probably has already deleted it. That's fine.
+                    break;
+                }
+                Err(RequestError::Api(ApiError::MessageCantBeDeleted)) => {
+                    // No rights?
+                    bot.send_message(
+                        message.chat.id,
+                        concat!(
+                            "Tried to remove a message containing a spam link, but failed. ",
+                            "Is this bot an admin with ability to remove messages?"
+                        ),
+                    )
+                    .await?;
+                    break;
+                }
+                Err(_) => {
+                    // Random network error or whatever, possibly.
+                    // Try again by letting the loop roll.
+                }
             }
         }
     } else {
