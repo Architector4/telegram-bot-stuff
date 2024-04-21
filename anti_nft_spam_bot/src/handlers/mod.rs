@@ -204,24 +204,31 @@ async fn gather_suspicion(
 
     let text = text.to_lowercase();
 
-    let Some(replied_message) = message.reply_to_message() else {
-        return Ok(());
-    };
-
     if text.contains("spam")
         || text.contains("scam")
         || text.contains("admin")
         || text.contains("begone")
     {
-        // Replied-to message is sus. Mark its links.
+        // This or replied-to message has sus links.
+        // Tag them.
 
-        // Get message "entities".
-        let Some(entities) = replied_message
+        // Get this message "entities".
+        let Some(mut entities) = message
             .parse_entities()
-            .or_else(|| replied_message.parse_caption_entities())
+            .or_else(|| message.parse_caption_entities())
         else {
             return Ok(());
         };
+
+        // Get replied-to message "entities", if any.
+        if let Some(replied_message) = message.reply_to_message() {
+            if let Some(replied_entities) = replied_message
+                .parse_entities()
+                .or_else(|| replied_message.parse_caption_entities())
+            {
+                entities.extend(replied_entities);
+            }
+        }
 
         let mut marked_anything_as_sus = false;
         let mut had_links = false;
@@ -244,12 +251,16 @@ async fn gather_suspicion(
             }
         }
 
-        // That's the bot command, most likely.
         if text.starts_with("/spam") | text.starts_with("/scam") {
+            // That's the bot command, most likely. Users like indication that it does things.
+
+            // Purposefully ambiguous message wording, where "this" both refers to the
+            // message we're replying to and the message they replied to lol
+
             if marked_anything_as_sus {
                 bot.send_message(
                     message.chat.id,
-                    "Thank you, links in the message you replied to will be reviewed for spam.",
+                    "Thank you, links in this message will be reviewed for spam.",
                 )
                 .reply_to_message_id(message.id)
                 .await?;
@@ -258,7 +269,7 @@ async fn gather_suspicion(
                 // Deductively, this means the links it had are already marked as spam.
                 bot.send_message(
                     message.chat.id,
-                    "Thank you, but the links in the message you replied to are already marked as spam..",
+                    "Thank you, but the links in this message are already marked as spam.",
                 )
                 .reply_to_message_id(message.id)
                 .await?;
