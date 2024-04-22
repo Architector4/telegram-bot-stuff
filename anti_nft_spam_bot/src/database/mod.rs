@@ -17,7 +17,7 @@ use teloxide::Bot;
 use tokio::sync::{watch, Mutex, Notify};
 use url::Url;
 
-use crate::{parse_url_like_telegram, types::ReviewResponse};
+use crate::{parse_url_like_telegram, spam_checker::SPAM_CHECKER_VERSION, types::ReviewResponse};
 
 use super::types::{Domain, IsSpam};
 
@@ -70,6 +70,7 @@ impl Database {
         // last_sent_to_review (date+time in UTC timezone in ISO 8601 format)
         // manually_reviewed (0 for no, 1 for yes)
         // from_spam_list (0 for no, 1 for yes)
+        // spam_checker_version (version of this program this was determined at)
         pool.execute(sqlx::query(
             "
                 CREATE TABLE IF NOT EXISTS domains (
@@ -78,7 +79,8 @@ impl Database {
                     is_spam INTEGER NOT NULL,
                     last_sent_to_review TEXT NULL,
                     manually_reviewed INTEGER NOT NULL DEFAULT 0,
-                    from_spam_list INTEGER NOT NULL DEFAULT 0
+                    from_spam_list INTEGER NOT NULL DEFAULT 0,
+                    spam_checker_version INTEGER NOT NULL DEFAULT 0
                 ) STRICT;",
         ))
         .await?;
@@ -89,6 +91,7 @@ impl Database {
         // last_sent_to_review (date+time in UTC timezone in ISO 8601 format)
         // manually_reviewed (0 for no, 1 for yes)
         // from_spam_list (0 for no, 1 for yes)
+        // spam_checker_version (version of this program this was determined at)
         pool.execute(sqlx::query(
             "
                 CREATE TABLE IF NOT EXISTS urls (
@@ -96,7 +99,8 @@ impl Database {
                     is_spam INTEGER NOT NULL,
                     last_sent_to_review TEXT NULL,
                     manually_reviewed INTEGER NOT NULL DEFAULT 0,
-                    from_spam_list INTEGER NOT NULL DEFAULT 0
+                    from_spam_list INTEGER NOT NULL DEFAULT 0,
+                    spam_checker_version INTEGER NOT NULL DEFAULT 0
                 ) STRICT;",
         ))
         .await?;
@@ -118,6 +122,18 @@ impl Database {
         let _ = sqlx::query(
             "ALTER TABLE urls
         ADD COLUMN from_spam_list INTEGER NOT NULL DEFAULT 0;",
+        )
+        .execute(&pool)
+        .await;
+        let _ = sqlx::query(
+            "ALTER TABLE domains
+        ADD COLUMN spam_checker_version INTEGER NOT NULL DEFAULT 0;",
+        )
+        .execute(&pool)
+        .await;
+        let _ = sqlx::query(
+            "ALTER TABLE urls
+        ADD COLUMN spam_checker_version INTEGER NOT NULL DEFAULT 0;",
         )
         .execute(&pool)
         .await;
@@ -143,11 +159,23 @@ impl Database {
     /// Note that [`Self::is_url_spam`] should take priority over this,
     /// unless its return result is [`IsSpam::Maybe`].
     pub async fn is_domain_spam(&self, domain: &Domain) -> Result<Option<IsSpam>, Error> {
-        sqlx::query("SELECT is_spam FROM domains WHERE domain=?;")
-            .bind(domain.as_str())
-            .map(|row: SqliteRow| IsSpam::from(row.get::<u8, _>("is_spam")))
-            .fetch_optional(&self.pool)
-            .await
+        // The "NOT" condition is to exclude results that says anything other than `IsSpam::Yes`
+        // and are automatically determined by an older spam check version.
+        // We DON'T want to delete those, because they should still be useful for review.
+        sqlx::query(
+            "SELECT is_spam FROM domains
+            WHERE domain=? AND
+                NOT (
+                    is_spam!=1 AND
+                    from_spam_list=0 AND
+                    spam_checker_version<?
+                    );",
+        )
+        .bind(domain.as_str())
+        .bind(SPAM_CHECKER_VERSION)
+        .map(|row: SqliteRow| IsSpam::from(row.get::<u8, _>("is_spam")))
+        .fetch_optional(&self.pool)
+        .await
     }
 
     /// Check if a URL is a spam URL or not, according to the database.
@@ -156,11 +184,23 @@ impl Database {
     /// Note that this should take priority over [`Self::is_domain_spam`],
     /// unless this function's return result is [`IsSpam::Maybe`].
     pub async fn is_url_spam(&self, url: &Url) -> Result<Option<IsSpam>, Error> {
-        sqlx::query("SELECT is_spam FROM urls WHERE url=?;")
-            .bind(url.as_str())
-            .map(|row: SqliteRow| IsSpam::from(row.get::<u8, _>("is_spam")))
-            .fetch_optional(&self.pool)
-            .await
+        // The "NOT" condition is to exclude results that says anything other than `IsSpam::Yes`
+        // and are automatically determined by an older spam check version.
+        // We DON'T want to delete those, because they should still be useful for review.
+        sqlx::query(
+            "SELECT is_spam FROM urls
+            WHERE url=? AND
+                NOT (
+                    is_spam!=1 AND
+                    from_spam_list=0 AND
+                    spam_checker_version<?
+                    );",
+        )
+        .bind(url.as_str())
+        .bind(SPAM_CHECKER_VERSION)
+        .map(|row: SqliteRow| IsSpam::from(row.get::<u8, _>("is_spam")))
+        .fetch_optional(&self.pool)
+        .await
     }
 
     /// Check if a given URL (or its domain) is spam or not, according to the database.
@@ -172,8 +212,9 @@ impl Database {
     pub async fn is_spam(
         &self,
         url: &Url,
-        mut domain: Option<&Domain>,
+        domain: impl Into<Option<&Domain>>,
     ) -> Result<Option<IsSpam>, Error> {
+        let mut domain = domain.into();
         let mut url_maybe_spam = false;
         // Look for direct URL match...
         if let Some(url_result) = self.is_url_spam(url).await? {
@@ -209,27 +250,40 @@ impl Database {
     pub async fn add_domain(
         &self,
         domain: &Domain,
-        example_url: Option<&Url>,
+        example_url: impl Into<Option<&Url>>,
         is_spam: IsSpam,
         from_spam_list: bool,
         manually_reviewed: bool,
     ) -> Result<(), Error> {
+        let example_url = example_url.into();
         sqlx::query(
-            "INSERT INTO domains(domain, example_url, is_spam, from_spam_list, manually_reviewed)
-            VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT DO
-            UPDATE SET  example_url=COALESCE(?, example_url), is_spam=?,
-                        from_spam_list=?, manually_reviewed=?;",
+            "INSERT INTO domains(
+                domain,
+                example_url,
+                is_spam,
+                from_spam_list,
+                manually_reviewed,
+                spam_checker_version)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT DO UPDATE SET
+                example_url=COALESCE(?, example_url),
+                is_spam=?,
+                from_spam_list=?,
+                manually_reviewed=?,
+                spam_checker_version=?;",
         )
         .bind(domain.as_str())
         .bind(example_url.map(Url::as_str))
         .bind::<u8>(is_spam.into())
         .bind(from_spam_list)
         .bind(manually_reviewed)
+        .bind(SPAM_CHECKER_VERSION)
+        // On conflict...
         .bind(example_url.map(Url::as_str))
         .bind::<u8>(is_spam.into())
         .bind(from_spam_list)
         .bind(manually_reviewed)
+        .bind(SPAM_CHECKER_VERSION)
         .execute(&self.pool)
         .await?;
 
@@ -276,18 +330,29 @@ impl Database {
         manually_reviewed: bool,
     ) -> Result<(), Error> {
         sqlx::query(
-            "INSERT INTO urls(url, is_spam, from_spam_list, manually_reviewed)
-            VALUES (?, ?, ?, ?)
-        ON CONFLICT DO
-            UPDATE SET is_spam=?, from_spam_list=?, manually_reviewed=?;",
+            "INSERT INTO urls(
+                url,
+                is_spam,
+                from_spam_list,
+                manually_reviewed,
+                spam_checker_version)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT DO UPDATE SET
+                is_spam=?,
+                from_spam_list=?,
+                manually_reviewed=?,
+                spam_checker_version=?;",
         )
         .bind(url.as_str())
         .bind::<u8>(is_spam.into())
         .bind(from_spam_list)
         .bind(manually_reviewed)
+        .bind(SPAM_CHECKER_VERSION)
+        // On conflict...
         .bind::<u8>(is_spam.into())
         .bind(from_spam_list)
         .bind(manually_reviewed)
+        .bind(SPAM_CHECKER_VERSION)
         .execute(&self.pool)
         .await?;
         Ok(())

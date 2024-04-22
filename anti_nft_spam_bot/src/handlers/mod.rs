@@ -81,7 +81,7 @@ pub async fn handle_message(
         };
         log::debug!("Spotted URL with domain {}", domain);
 
-        let Some(is_spam) = crate::domain_checker::check(&database, &domain, &url).await else {
+        let Some(is_spam) = crate::spam_checker::check(&database, &domain, &url).await else {
             continue;
         };
 

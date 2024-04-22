@@ -1,7 +1,7 @@
 mod database;
-mod domain_checker;
 mod entry;
 mod handlers;
+mod spam_checker;
 mod types;
 
 pub use entry::*;

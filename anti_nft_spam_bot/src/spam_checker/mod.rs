@@ -6,9 +6,33 @@ use crate::{
     types::{Domain, IsSpam},
 };
 
+/////// IMPORTANT!!
+/////// IMPORTANT!!
+/////// IMPORTANT!!
+/////// If spam checking logic is updated to catch more spam, increment this.
+pub const SPAM_CHECKER_VERSION: u32 = 1;
+
 // Checkers
 mod american_groundhog_spam;
 mod nft_spam;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IsSpamCheckResult {
+    No,
+    YesUrl,
+    YesDomain,
+    Maybe,
+}
+
+impl From<IsSpamCheckResult> for IsSpam {
+    fn from(val: IsSpamCheckResult) -> Self {
+        match val {
+            IsSpamCheckResult::No => IsSpam::No,
+            IsSpamCheckResult::YesUrl | IsSpamCheckResult::YesDomain => IsSpam::Yes,
+            IsSpamCheckResult::Maybe => IsSpam::Maybe,
+        }
+    }
+}
 
 /// Check the link's domain against the database, or by visiting, as needed.
 ///
@@ -22,35 +46,10 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
     {
         log::debug!("Checked {} with database and got: {:?}", url, is_spam);
 
-        if is_spam != IsSpam::Yes {
-            // Potential problem scenario:
-            // 1. Spammers use a new type of spam that isn't detected by this bot yet.
-            // 2. Someone replies /spam to it, and it gets put into the database as
-            // "maybe spam", or otherwise "not spam".
-            // 3. The bot is updated to support this new type of spam.
-            // 4. The spam that reuses the same links doesn't get blocked, since
-            // it's marked as "maybe/not spam" in the database, and hence not
-            // checked by the new code.
-            //
-            // This could probably use a database table field, like "bot check version",
-            // which makes the entry be ignored if it's of an older version than the
-            // bot is currently running, or something. For now, I'm too lazy, So
-            // I'll just patch this up by always re-checking non-spam telegram URLs
-            // anyway. It's a few string comparisons and may be even cheaper than
-            // a database lookup, to be honest. lol
-
-            if let Some(telegram_url_check) = nft_spam::is_spam_telegram_url(url) {
-                log::debug!(
-                    "Checked {} as a TG URL anyway and got: {:?}",
-                    url,
-                    telegram_url_check
-                );
-                return Some(telegram_url_check);
-            }
-        }
         Some(is_spam)
     } else {
         log::debug!("URL is not in database...");
+
         // Not in the database. Check for real...
 
         if let Some(is_telegram_spam) = nft_spam::is_spam_telegram_url(url) {
@@ -62,7 +61,6 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
                 .expect("Database died!");
             Some(is_telegram_spam)
         } else {
-            // No database result. We're going to visit the URL and log by the domain.
             log::debug!("{} Is not in the database. Debouncing...", url);
             let visit_guard = database.domain_visit_debounce(domain.clone()).await;
 
@@ -71,19 +69,27 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
                 // Oh no nevermind, someone else visited it.
                 // Just get the database result.
                 drop(visit_guard);
-                database
-                    .is_domain_spam(domain)
-                    .await
-                    .expect("Database died!")
-            } else if let Ok(is_spam) = visit_and_check_if_spam(url).await {
+                database.is_spam(url, domain).await.expect("Database died!")
+            } else if let Ok(is_spam_check) = visit_and_check_if_spam(url).await {
                 // Add it to the database.
-                log::debug!("Visited {} and got: {:?}", url, is_spam);
-                database
-                    .add_domain(domain, Some(url), is_spam, false, false)
-                    .await
-                    .expect("Database died!");
+                log::debug!("Visited {} and got: {:?}", url, is_spam_check);
+                match is_spam_check {
+                    IsSpamCheckResult::YesUrl => {
+                        database
+                            .add_url(url, IsSpam::Yes, false, false)
+                            .await
+                            .expect("Database died!");
+                    }
+                    _ => {
+                        // All the other cases effectively apply to the domains.
+                        database
+                            .add_domain(domain, url, is_spam_check.into(), false, false)
+                            .await
+                            .expect("Database died!");
+                    }
+                };
 
-                Some(is_spam)
+                Some(is_spam_check.into())
             } else {
                 // The visit probably timed out or something. Meh.
                 log::debug!("{} timed out", url);
@@ -94,7 +100,7 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
 }
 
 /// Check if a website served by the given URL is spam or not by visiting it.
-pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, reqwest::Error> {
+async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpamCheckResult, reqwest::Error> {
     // Default policy is to follow up to 10 redirects.
     let client = reqwest::Client::builder()
         .user_agent("GoogleOther")
@@ -128,22 +134,23 @@ pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, reqwest::Error
             && header_content_length
         {
             // Good enough lol
-            return Ok(IsSpam::Maybe);
+            return Ok(IsSpamCheckResult::Maybe);
         }
 
         // Fake cloudflare captcha.
         // Can't believe we got lied to. So sad :(
 
-        return Ok(IsSpam::Yes);
+        return Ok(IsSpamCheckResult::YesUrl);
     }
 
     // Check the HTML...
     if nft_spam::is_spam_html(&text) {
-        return Ok(IsSpam::Yes);
+        return Ok(IsSpamCheckResult::YesDomain);
     }
     if american_groundhog_spam::check_spam_html(&client, &text).await? {
-        return Ok(IsSpam::Yes);
+        return Ok(IsSpamCheckResult::YesUrl);
     }
 
-    Ok(IsSpam::No)
+    // guess not.
+    Ok(IsSpamCheckResult::No)
 }
