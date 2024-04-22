@@ -95,15 +95,15 @@ impl ReviewResponse {
         Ok(match self {
             ReviewResponse::Skip => false,
             ReviewResponse::UrlSpam(_, url) => database
-                .is_url_spam(url)
+                .is_url_spam(url, false)
                 .await?
                 .map_or(true, |x| x != IsSpam::Yes),
             ReviewResponse::DomainSpam(domain, _url) => database
-                .is_domain_spam(domain)
+                .is_domain_spam(domain, false)
                 .await?
                 .map_or(true, |x| x != IsSpam::Yes),
             ReviewResponse::NotSpam(domain, url) => database
-                .is_spam(url, domain.as_ref())
+                .is_spam(url, domain.as_ref(), false)
                 .await?
                 // `IsSpam::Maybe` case here is ignored too.
                 .map_or(true, |x| x == IsSpam::Yes),

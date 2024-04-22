@@ -158,7 +158,14 @@ impl Database {
     ///
     /// Note that [`Self::is_url_spam`] should take priority over this,
     /// unless its return result is [`IsSpam::Maybe`].
-    pub async fn is_domain_spam(&self, domain: &Domain) -> Result<Option<IsSpam>, Error> {
+    ///
+    /// "No" and "Maybe" results that were automatically determined by
+    /// an old spam checker are ignored unless `return_old_checker_results` is set to true.
+    pub async fn is_domain_spam(
+        &self,
+        domain: &Domain,
+        return_old_checker_results: bool,
+    ) -> Result<Option<IsSpam>, Error> {
         // The "NOT" condition is to exclude results that says anything other than `IsSpam::Yes`
         // and are automatically determined by an older spam check version.
         // We DON'T want to delete those, because they should still be useful for review.
@@ -172,7 +179,11 @@ impl Database {
                     );",
         )
         .bind(domain.as_str())
-        .bind(SPAM_CHECKER_VERSION)
+        .bind(if return_old_checker_results {
+            0
+        } else {
+            SPAM_CHECKER_VERSION
+        })
         .map(|row: SqliteRow| IsSpam::from(row.get::<u8, _>("is_spam")))
         .fetch_optional(&self.pool)
         .await
@@ -183,7 +194,14 @@ impl Database {
     ///
     /// Note that this should take priority over [`Self::is_domain_spam`],
     /// unless this function's return result is [`IsSpam::Maybe`].
-    pub async fn is_url_spam(&self, url: &Url) -> Result<Option<IsSpam>, Error> {
+    ///
+    /// "No" and "Maybe" results that were automatically determined by
+    /// an old spam checker are ignored unless `return_old_checker_results` is set to true.
+    pub async fn is_url_spam(
+        &self,
+        url: &Url,
+        return_old_checker_results: bool,
+    ) -> Result<Option<IsSpam>, Error> {
         // The "NOT" condition is to exclude results that says anything other than `IsSpam::Yes`
         // and are automatically determined by an older spam check version.
         // We DON'T want to delete those, because they should still be useful for review.
@@ -197,7 +215,11 @@ impl Database {
                     );",
         )
         .bind(url.as_str())
-        .bind(SPAM_CHECKER_VERSION)
+        .bind(if return_old_checker_results {
+            0
+        } else {
+            SPAM_CHECKER_VERSION
+        })
         .map(|row: SqliteRow| IsSpam::from(row.get::<u8, _>("is_spam")))
         .fetch_optional(&self.pool)
         .await
@@ -209,15 +231,19 @@ impl Database {
     ///
     /// Argument `domain` is optional and, if `url` check is indecisive,
     /// is used if provided, or extracted from URL if not.
+    ///
+    /// "No" and "Maybe" results that were automatically determined by
+    /// an old spam checker are ignored unless `return_old_checker_results` is set to true.
     pub async fn is_spam(
         &self,
         url: &Url,
         domain: impl Into<Option<&Domain>>,
+        return_old_checker_results: bool,
     ) -> Result<Option<IsSpam>, Error> {
         let mut domain = domain.into();
         let mut url_maybe_spam = false;
         // Look for direct URL match...
-        if let Some(url_result) = self.is_url_spam(url).await? {
+        if let Some(url_result) = self.is_url_spam(url, return_old_checker_results).await? {
             if url_result == IsSpam::Maybe {
                 url_maybe_spam = true;
             } else {
@@ -235,7 +261,8 @@ impl Database {
 
         // Look for domain match...
         if let Some(domain) = domain {
-            self.is_domain_spam(domain).await
+            self.is_domain_spam(domain, return_old_checker_results)
+                .await
         } else {
             // If it's not a domain, but URL is marked as "maybe", return "maybe".
             match url_maybe_spam {
@@ -378,7 +405,7 @@ impl Database {
     /// Returns true if it was indeed marked as sus.
     pub async fn mark_sus(&self, url: &Url, mut domain: Option<&Domain>) -> Result<bool, Error> {
         // Check current stance in the database.
-        if let Some(is_spam_in_db) = self.is_spam(url, domain).await? {
+        if let Some(is_spam_in_db) = self.is_spam(url, domain, false).await? {
             if is_spam_in_db == IsSpam::Yes {
                 // Nothing needs to be done, it's already banned.
                 return Ok(false);
@@ -563,11 +590,11 @@ impl Database {
                 // One of them is bound to exist:
                 // the one that the review question was made from lol
 
-                if self.is_url_spam(url).await?.is_some() {
+                if self.is_url_spam(url, true).await?.is_some() {
                     self.add_url(url, IsSpam::No, false, true).await?;
                 }
                 if let Some(domain) = domain {
-                    if self.is_domain_spam(domain).await?.is_some() {
+                    if self.is_domain_spam(domain, true).await?.is_some() {
                         self.add_domain(domain, Some(url), IsSpam::No, false, true)
                             .await?;
                     }
