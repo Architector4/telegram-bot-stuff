@@ -1,4 +1,3 @@
-use reqwest::{Error, StatusCode};
 use std::{sync::Arc, time::Duration};
 use url::Url;
 
@@ -6,6 +5,10 @@ use crate::{
     database::Database,
     types::{Domain, IsSpam},
 };
+
+// Checkers
+mod american_groundhog_spam;
+mod nft_spam;
 
 /// Check the link's domain against the database, or by visiting, as needed.
 ///
@@ -36,7 +39,7 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
             // anyway. It's a few string comparisons and may be even cheaper than
             // a database lookup, to be honest. lol
 
-            if let Some(telegram_url_check) = is_spam_telegram_url(url) {
+            if let Some(telegram_url_check) = nft_spam::is_spam_telegram_url(url) {
                 log::debug!(
                     "Checked {} as a TG URL anyway and got: {:?}",
                     url,
@@ -50,7 +53,7 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
         log::debug!("URL is not in database...");
         // Not in the database. Check for real...
 
-        if let Some(is_telegram_spam) = is_spam_telegram_url(url) {
+        if let Some(is_telegram_spam) = nft_spam::is_spam_telegram_url(url) {
             // Add it to the database.
             log::debug!("Checked TG URL {} and got: {:?}", url, is_telegram_spam);
             database
@@ -91,7 +94,7 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
 }
 
 /// Check if a website served by the given URL is spam or not by visiting it.
-pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, Error> {
+pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, reqwest::Error> {
     // Default policy is to follow up to 10 redirects.
     let client = reqwest::Client::builder()
         .user_agent("GoogleOther")
@@ -106,13 +109,9 @@ pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, Error> {
     let header_cf_ray = result.headers().get("cf-ray").is_some();
     let header_cache = result.headers().get("cf-cache-status").is_some();
     let header_content_length = result.headers().get("content-length").is_some();
-    let status_code_forbidden = result.status() == StatusCode::FORBIDDEN;
+    let status_code_forbidden = result.status() == reqwest::StatusCode::FORBIDDEN;
 
     let text = result.text().await?;
-
-    if is_spam_html(&text) {
-        return Ok(IsSpam::Yes);
-    }
 
     if (text.contains("<title>Just a moment...</title>")
         && text.contains("Enable JavaScript and cookies to continue"))
@@ -138,101 +137,13 @@ pub async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpam, Error> {
         return Ok(IsSpam::Yes);
     }
 
+    // Check the HTML...
+    if nft_spam::is_spam_html(&text) {
+        return Ok(IsSpam::Yes);
+    }
+    if american_groundhog_spam::check_spam_html(&client, &text).await? {
+        return Ok(IsSpam::Yes);
+    }
+
     Ok(IsSpam::No)
-}
-
-fn is_spam_html(text: &str) -> bool {
-    text.contains("cdnjs.cloudflare.com/ajax/libs/ethers")
-        || text.contains("ethereumjs")
-        || text.contains("web3.min.js")
-}
-
-/// Returns `None` if it's not a telegram URL.
-fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
-    let domain = url.domain()?;
-
-    // Check if it's a telegram domain...
-    if !matches!(
-        domain.to_lowercase().as_str(),
-        "t.me" | "telegram.me" | "telegram.dog"
-    ) {
-        return None;
-    };
-
-    // Ripping out Url::path_segments() body here lol
-    let Some(path) = url.path().strip_prefix('/') else {
-        // Shouldn't happen but eh
-        return Some(IsSpam::No);
-    };
-
-    let path_lower = path.to_lowercase();
-    let mut segments = path_lower.split('/');
-
-    let Some(username) = segments.next() else {
-        // Someone just linked t.me? lol
-        return Some(IsSpam::No);
-    };
-
-    if !username.ends_with("bot") {
-        // Not a telegram bot.
-        return Some(IsSpam::No);
-    };
-
-    if username.ends_with("drop_bot") {
-        // No way in hell a "...drop_bot" is anything other than spam, right?
-        return Some(IsSpam::Yes);
-    };
-
-    let Some(params) = segments.next() else {
-        // It's a bot, but no params. They use params.
-        // If you're reading this:
-        // don't worry, we'll review and patch as needed lol
-        return Some(IsSpam::Maybe);
-    };
-
-    if ["claim", "drop"].iter().any(|x| params.contains(x)) {
-        // Who else would post a bot with params of "claim" than spammers anyway?
-        return Some(IsSpam::Yes);
-    }
-
-    Some(IsSpam::Maybe)
-}
-
-#[cfg(test)]
-mod tests {
-    //#[test]
-    //fn wat(){
-    //    let text = include_str!("/media/ext_hdd/nobackup/architector4/Downloads/spam.txt");
-    //    assert!(is_spam_html(text));
-    //}
-
-    use url::Url;
-
-    use crate::{domain_checker::is_spam_telegram_url, types::IsSpam};
-
-    #[test]
-    fn test_spam_bot_url() {
-        let random_url = Url::parse("https://www.amogus.com/").unwrap();
-        assert!(is_spam_telegram_url(&random_url).is_none());
-
-        let random_telegram_url = Url::parse("https://t.me/Architector_4_Channel").unwrap();
-        assert!(matches!(
-            is_spam_telegram_url(&random_telegram_url),
-            Some(IsSpam::No)
-        ));
-
-        let random_telegram_bot_url = Url::parse("https://t.me/Anti_NFT_Spam_Bot").unwrap();
-        assert!(matches!(
-            is_spam_telegram_url(&random_telegram_bot_url),
-            Some(IsSpam::Maybe)
-        ));
-
-        let spam_url = Url::parse("https://t.me/FawunBot/claim").unwrap();
-        assert!(matches!(is_spam_telegram_url(&spam_url), Some(IsSpam::Yes)));
-
-        let spam_url =
-            Url::parse("https://t.me/stonksdrop_bot?start=bd658555-7bc6-4652-8afb-e69fdd3d4c0d")
-                .unwrap();
-        assert!(matches!(is_spam_telegram_url(&spam_url), Some(IsSpam::Yes)));
-    }
 }
