@@ -52,17 +52,14 @@ pub async fn check_spam_html(
 
 #[cfg(test)]
 mod tests {
-    use crate::types::IsSpam;
-
+    use super::super::{visit_and_check_if_spam, IsSpamCheckResult};
     use super::*;
     #[tokio::test]
     async fn detect_american_groundhog() {
         let bad_url = Url::parse("https://telegra.ph/JEFFREY-EPSTEIN-SPOTTED-IN-MEXICO-AND-NEW-FAMOUS-PEOPLE-DISCOVERED-ON-THE-JEFFREY-EPSTEIN-LIST-04-18").unwrap();
         assert_eq!(
-            super::super::visit_and_check_if_spam(&bad_url)
-                .await
-                .unwrap(),
-            IsSpam::Yes
+            visit_and_check_if_spam(&bad_url).await.unwrap(),
+            IsSpamCheckResult::YesUrl
         );
     }
 }
