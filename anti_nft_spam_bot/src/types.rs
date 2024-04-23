@@ -103,7 +103,7 @@ impl ReviewResponse {
                 .await?
                 .map_or(true, |x| x != IsSpam::Yes),
             ReviewResponse::NotSpam(domain, url) => database
-                .is_spam(url, domain.as_ref(), false)
+                .is_spam(url, domain.as_ref(), true)
                 .await?
                 // `IsSpam::Maybe` case here is ignored too.
                 .map_or(true, |x| x == IsSpam::Yes),
