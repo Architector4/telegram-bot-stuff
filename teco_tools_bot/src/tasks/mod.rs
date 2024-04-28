@@ -141,13 +141,18 @@ impl Task {
         &self,
         mut output: impl std::fmt::Write,
         header: bool,
+        editable: bool,
     ) -> Result<(), std::fmt::Error> {
         let mut wrote_first_param = false;
         macro_rules! write_param {
             ($name:expr, $value:expr) => {{
                 #[allow(unused_assignments)]
                 if header && !wrote_first_param {
-                    writeln!(output, "Parameters (edit message to change):")?;
+                    write!(output, "Parameters:")?;
+                    if editable {
+                        write!(output, " (edit message to change)")?;
+                    }
+                    writeln!(output, ":")?;
                     wrote_first_param = true;
                 }
                 writeln!(output, "<b>{}</b>: {}", $name, $value.to_string())
@@ -201,7 +206,8 @@ impl Task {
         } else {
             format!("Task accepted. Position in queue: {}\n", queue_size)
         };
-        self.write_params(&mut response, true).unwrap();
+        self.write_params(&mut response, true, queue_size != 0)
+            .unwrap();
         response
     }
 }
