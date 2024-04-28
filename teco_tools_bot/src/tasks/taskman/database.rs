@@ -181,9 +181,9 @@ impl Database {
         };
 
         let queue_size_non_premium = self.get_queue_size_raw(false).await?;
+        let queue_size_premium = self.get_queue_size_raw(true).await?;
 
         let queue_size = if premium {
-            let queue_size_premium = self.get_queue_size_raw(true).await?;
 
             if queue_size_premium <= queue_size_non_premium {
                 queue_size_premium
@@ -193,7 +193,12 @@ impl Database {
                 queue_size_non_premium
             }
         } else {
-            queue_size_non_premium
+            // User is not premium. Still, if premium queue is empty, use it.
+            if queue_size_premium < 1 {
+                queue_size_premium
+            } else {
+                queue_size_non_premium
+            }
         };
 
         sqlx::query(
