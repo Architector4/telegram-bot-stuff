@@ -1,3 +1,6 @@
+mod split_msg;
+pub use split_msg::*;
+
 use futures::{Future, TryStreamExt};
 use teloxide::{
     net::Download,
