@@ -17,7 +17,8 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Install ImageMagick
-      run: sudo apt install imagemagick
+      run: |
+        sudo apt update && sudo apt install -y imagemagick libmagickwand-dev
     - name: Build
       run: cargo build --verbose
     - name: Run tests
