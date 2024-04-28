@@ -8,6 +8,7 @@ use teloxide::{
     types::{Chat, MessageEntity, User},
 };
 
+pub mod useful_methods;
 pub mod user_resolving;
 
 // this is cursed lol
