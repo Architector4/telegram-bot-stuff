@@ -53,7 +53,11 @@ impl Task {
 
                 let mut response;
 
-                let response_str = if sign == -1 && count > 255 || sign == 1 && count > 585 {
+                // Those are maximum amogus counts that can fit in
+                // a 4096 characters long message lol
+                //let response_str = if sign == -1 && count > 255 || sign == 1 && count > 585 {
+                // Let's be more modest than that.
+                let response_str = if count > 16 {
                     if sign == -1 {
                         "<b>TOO MUCH NEGATIVE AMOGUS</b>"
                     } else {
