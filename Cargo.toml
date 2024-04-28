@@ -5,4 +5,5 @@ members = [
 	"hi_cutie_bot",
 	"arch_bot_commons",
 	"anti_nft_spam_bot",
+	"teco_tools_bot",
 ]

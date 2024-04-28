@@ -31,3 +31,11 @@ It can also be used inline, and produces a different response
 activated by the phrase "Hi Herbert!".
 
 Current profile picture is from here: https://www.extremelyfungible.com/vivi-heads
+
+## teco_tools_bot
+
+The code of [@teco_tools_bot](https://t.me/Teco_Tools_Bot).
+This bot contains various kinds of tools, like image manipulation,
+that could be of use. Under development.
+
+Current profile picture is created by me personally.
