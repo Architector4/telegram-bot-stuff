@@ -263,7 +263,7 @@ pub const HELP: Command = Command {
 };
 async fn help(tp: TaskParams<'_>) -> Ret {
     if !tp.message.chat.is_private() {
-        goodbye_err!("Contact me in DMs for help!");
+        goodbye_desc!("Contact me in DMs for help!");
     }
     let help = Command::generate_help();
     goodbye_desc!(help);

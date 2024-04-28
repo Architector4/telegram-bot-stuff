@@ -116,9 +116,15 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
         // Try up to 3 times
         let mut result = task_data.task.complete_task(&taskman.bot, &task_data).await;
         if result.is_err() {
+            if let Err(RequestError::RetryAfter(x)) = result {
+                sleep(x).await;
+            }
             result = task_data.task.complete_task(&taskman.bot, &task_data).await;
         }
         if result.is_err() {
+            if let Err(RequestError::RetryAfter(x)) = result {
+                sleep(x).await;
+            }
             result = task_data.task.complete_task(&taskman.bot, &task_data).await;
         }
 

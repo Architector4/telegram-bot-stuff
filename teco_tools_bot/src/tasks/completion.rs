@@ -6,6 +6,7 @@ use teloxide::{
     types::InputFile,
     Bot, RequestError,
 };
+use tokio::time::sleep;
 
 use super::{taskman::database::TaskDatabaseInfo, ImageFormat, ResizeType, Task};
 
@@ -242,6 +243,9 @@ impl Task {
                             .await
                     };
                     if let Err(e) = result {
+                        if let RequestError::RetryAfter(x) = e {
+                            sleep(x).await;
+                        }
                         error = Err(e);
                     } else {
                         error = Ok(());
