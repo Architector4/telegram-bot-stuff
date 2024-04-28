@@ -93,18 +93,24 @@ impl Task {
                 mut format,
                 resize_type,
             } => {
-                let photo = data
-                    .message
-                    .get_photo_or_raster_sticker_here_or_reply_file_meta();
-
+                let photo = data.message.get_media_info();
                 let photo = match photo {
-                    Ok(Some(photo)) => photo,
-                    Ok(None) => goodbye!("Error: can't find an image"),
-                    Err(()) => goodbye!("Error: can't work with animated nor video stickers"),
+                    Some(photo) => {
+                        if !photo.is_image() {
+                            goodbye!(
+                                "Error: can't work with video nor animated nor video stickers."
+                            );
+                        }
+                        if photo.file.size > 20 * 1000 * 1000 {
+                            goodbye!("Error: media is too large.");
+                        }
+                        photo
+                    }
+                    None => goodbye!("Error: can't find an image."),
                 };
 
                 if format == ImageFormat::Preserve {
-                    if photo.3 {
+                    if photo.is_sticker {
                         format = ImageFormat::Webp;
                     } else {
                         format = ImageFormat::Jpeg;
@@ -113,7 +119,7 @@ impl Task {
 
                 let mut img_data: Vec<u8> = Vec::new();
 
-                bot.download_file_to_vec(photo.2, &mut img_data).await?;
+                bot.download_file_to_vec(photo.file, &mut img_data).await?;
 
                 fn resize_image(
                     data: Vec<u8>,

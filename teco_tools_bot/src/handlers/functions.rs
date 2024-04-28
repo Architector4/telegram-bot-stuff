@@ -328,15 +328,21 @@ async fn amogus(tp: TaskParams<'_>) -> Ret {
 }
 
 async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType, format: ImageFormat) -> Ret {
-    let photo = tp
-        .message
-        .get_photo_or_raster_sticker_here_or_reply_file_meta();
+    let photo = tp.message.get_media_info();
     let photo = match photo {
-        Ok(Some(photo)) => photo,
-        Ok(None) => goodbye_cancel!("can't find an image."),
-        Err(()) => goodbye_cancel!("can't work with animated nor video stickers."),
+        Some(photo) => {
+            if !photo.is_image() {
+                goodbye_cancel!("can't work with video nor animated nor video stickers.");
+            }
+            if photo.file.size > 20 * 1000 * 1000 {
+                goodbye_cancel!("media is too large.");
+            }
+            photo
+        }
+        None => goodbye_cancel!("can't find an image."),
     };
-    let (Some(width), Some(height)) = (NonZeroU32::new(photo.0), NonZeroU32::new(photo.1)) else {
+    let (Some(width), Some(height)) = (NonZeroU32::new(photo.width), NonZeroU32::new(photo.height))
+    else {
         goodbye_cancel!("media is too small.");
     };
 
@@ -354,13 +360,18 @@ pub const TO_STICKER: Command = Command {
     hidden: false,
 };
 async fn to_sticker(tp: TaskParams<'_>) -> Ret {
-    let photo = tp
-        .message
-        .get_photo_or_raster_sticker_here_or_reply_file_meta();
+    let photo = tp.message.get_media_info();
     let _photo = match photo {
-        Ok(Some(photo)) => photo,
-        Ok(None) => goodbye_cancel!("can't find an image"),
-        Err(()) => goodbye_cancel!("can't work with animated nor video stickers"),
+        Some(photo) => {
+            if !photo.is_image() {
+                goodbye_cancel!("can't work with video nor animated nor video stickers.");
+            }
+            if photo.file.size > 20 * 1000 * 1000 {
+                goodbye_cancel!("media is too large.");
+            }
+            photo
+        }
+        None => goodbye_cancel!("can't find an image."),
     };
 
     Ok(Ok(Task::default_to_sticker()))

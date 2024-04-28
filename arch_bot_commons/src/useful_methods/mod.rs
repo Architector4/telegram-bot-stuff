@@ -9,6 +9,21 @@ use teloxide::{
     Bot, RequestError,
 };
 
+pub struct MessageMediaInfo<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub is_sticker: bool,
+    pub is_video: bool,
+    pub is_vector_sticker: bool,
+    pub file: &'a FileMeta,
+}
+
+impl<'a> MessageMediaInfo<'a> {
+    pub fn is_image(&self) -> bool {
+        !self.is_video && !self.is_vector_sticker
+    }
+}
+
 pub trait MessageStuff {
     fn text_full(&self) -> Option<&str>;
     #[allow(clippy::result_unit_err)] // i'm lazy lol
@@ -17,9 +32,7 @@ pub trait MessageStuff {
     ///
     /// # Errors
     /// Returns Err(()) if there is a sticker but it's not raster.
-    fn get_photo_or_raster_sticker_here_or_reply_file_meta(
-        &self,
-    ) -> Result<Option<(u32, u32, &FileMeta, bool)>, ()>;
+    fn get_media_info(&self) -> Option<MessageMediaInfo<'_>>;
     fn find_biggest_photo(&self) -> Option<&PhotoSize>;
 }
 
@@ -27,30 +40,37 @@ impl MessageStuff for Message {
     fn text_full(&self) -> Option<&str> {
         self.text().or_else(|| self.caption())
     }
-    fn get_photo_or_raster_sticker_here_or_reply_file_meta(
-        &self,
-    ) -> Result<Option<(u32, u32, &FileMeta, bool)>, ()> {
+    fn get_media_info(&self) -> Option<MessageMediaInfo<'_>> {
         if let Some(biggest) = self.find_biggest_photo() {
-            return Ok(Some((biggest.width, biggest.height, &biggest.file, false)));
+            return Some(MessageMediaInfo {
+                width: biggest.width,
+                height: biggest.height,
+                is_sticker: false,
+                is_video: false,
+                is_vector_sticker: false,
+                file: &biggest.file,
+            });
         }
+
         if let Some(sticker) = self.sticker() {
-            if !sticker.is_raster() {
-                return Err(());
-            }
-
-            return Ok(Some((
-                sticker.width.into(),
-                sticker.height.into(),
-                &sticker.file,
-                true,
-            )));
+            return Some(MessageMediaInfo {
+                width: sticker.width.into(),
+                height: sticker.height.into(),
+                is_sticker: true,
+                is_video: sticker.is_video(),
+                is_vector_sticker: sticker.is_animated(),
+                file: &sticker.file,
+            });
         }
 
+        // TODO: get videos
+
+        
         if let Some(reply_to) = self.reply_to_message() {
-            return reply_to.get_photo_or_raster_sticker_here_or_reply_file_meta();
+            return reply_to.get_media_info();
         }
 
-        Ok(None)
+        None
     }
     fn find_biggest_photo(&self) -> Option<&PhotoSize> {
         if let Some(photo_sizes) = self.photo() {
