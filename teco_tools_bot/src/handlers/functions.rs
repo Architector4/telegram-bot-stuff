@@ -44,24 +44,14 @@ impl<'a> TaskParams<'a> {
         taskman: &'new Taskman,
         bot: &'new Bot,
         message: &'new Message,
-        bot_username: &'new str,
     ) -> Option<TaskParams<'new>> {
-        // Let's say text here is "/someTASK@Teco_Tools_Bot amogus: 6
         let text = message.text_full()?;
 
         if !text.starts_with('/') {
             return None;
         }
 
-        // Then command = "/someTASK@Teco_Tools_Bot"
-        let command = text.split_whitespace().next()?;
-
-        //let command_full_len = command.len();
-
-        // command = "/sometask"
-        let command = command.trim_end_matches(bot_username).to_lowercase();
-
-        //let params = &text[command_full_len..].trim_start();
+        let command = text.split_whitespace().next()?.to_lowercase();
 
         Some(TaskParams {
             taskman,
@@ -72,8 +62,16 @@ impl<'a> TaskParams<'a> {
     }
 
     pub fn make_task(self) -> Option<TaskFuture<'a>> {
+        // Commands shouldn't have an "@" in their callnames.
+        // If the command is "/distort@Teco_Tools_Bot",
+        // trim the "@" and everything after it.
+        let callname = if let Some(username_start) = self.command.find('@') {
+            &self.command[0..username_start]
+        } else {
+            &self.command
+        };
         for command in COMMANDS {
-            if command.is_matching_callname(&self.command) {
+            if command.is_matching_callname(callname) {
                 return Some((command.function)(self));
             }
         }

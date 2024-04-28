@@ -102,9 +102,8 @@ impl Task {
         taskman: &'a Taskman,
         bot: &'a Bot,
         message: &'a Message,
-        bot_username: &'a str,
     ) -> Option<TaskFuture<'a>> {
-        let task_params = TaskParams::new(taskman, bot, message, bot_username)?;
+        let task_params = TaskParams::new(taskman, bot, message)?;
         task_params.make_task()
     }
 

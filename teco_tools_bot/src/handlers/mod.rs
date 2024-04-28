@@ -44,12 +44,9 @@ use crate::tasks::{taskman::Taskman, Task, TaskError};
 pub async fn parse_command_into_task(
     taskman: &Taskman,
     bot: &Bot,
-    me: &Me,
     message: &Message,
 ) -> Result<Result<Task, TaskError>, RequestError> {
-    let bot_username = format!("@{}", me.username());
-
-    let Some(task) = Task::parse_task(taskman, bot, message, &bot_username) else {
+    let Some(task) = Task::parse_task(taskman, bot, message) else {
         return Ok(Err(TaskError::Error(String::new())));
     };
 
@@ -68,7 +65,7 @@ pub async fn handle_new_message(
         return Ok(());
     }
 
-    let task = match parse_command_into_task(&taskman, &bot, &me, &message).await? {
+    let task = match parse_command_into_task(&taskman, &bot, &message).await? {
         Ok(t) => t,
         Err(e) => {
             if !e.is_empty() {
@@ -157,7 +154,6 @@ pub async fn handle_new_message(
 
 pub async fn handle_edited_message(
     bot: Bot,
-    me: Me,
     message: Message,
     taskman: Arc<Taskman>,
 ) -> Result<(), RequestError> {
@@ -208,7 +204,7 @@ pub async fn handle_edited_message(
         return Ok(());
     }
 
-    let task = match parse_command_into_task(&taskman, &bot, &me, &message).await? {
+    let task = match parse_command_into_task(&taskman, &bot, &message).await? {
         Ok(t) => t,
         Err(e) => {
             let cancelling = e.is_cancel() || message.text_full().unwrap().starts_with("/cancel");
