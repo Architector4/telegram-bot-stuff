@@ -4,7 +4,7 @@ use std::{
 };
 
 pub mod database;
-use arch_bot_commons::useful_methods::BotArchSendMsg;
+use arch_bot_commons::{teloxide_retry, useful_methods::BotArchSendMsg};
 use database::Database;
 use html_escape::encode_text;
 use teloxide::{
@@ -113,20 +113,7 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
             .parse_mode(teloxide::types::ParseMode::Html)
             .await;
 
-        // Try up to 3 times
-        let mut result = task_data.task.complete_task(&taskman.bot, &task_data).await;
-        if result.is_err() {
-            if let Err(RequestError::RetryAfter(x)) = result {
-                sleep(x).await;
-            }
-            result = task_data.task.complete_task(&taskman.bot, &task_data).await;
-        }
-        if result.is_err() {
-            if let Err(RequestError::RetryAfter(x)) = result {
-                sleep(x).await;
-            }
-            result = task_data.task.complete_task(&taskman.bot, &task_data).await;
-        }
+        let result = teloxide_retry!(task_data.task.complete_task(&taskman.bot, &task_data).await);
 
         let _ = taskman
             .bot
@@ -194,7 +181,7 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
             .await
             .expect("Database died!");
 
-        sleep(Duration::from_secs(3)).await;
+        sleep(Duration::from_secs(1)).await;
     }
 }
 

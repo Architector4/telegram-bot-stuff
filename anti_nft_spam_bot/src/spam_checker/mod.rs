@@ -69,7 +69,10 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
                 // Oh no nevermind, someone else visited it.
                 // Just get the database result.
                 drop(visit_guard);
-                database.is_spam(url, domain, false).await.expect("Database died!")
+                database
+                    .is_spam(url, domain, false)
+                    .await
+                    .expect("Database died!")
             } else if let Ok(is_spam_check) = visit_and_check_if_spam(url).await {
                 // Add it to the database.
                 log::debug!("Visited {} and got: {:?}", url, is_spam_check);

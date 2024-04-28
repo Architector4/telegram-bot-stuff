@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use futures::Future;
 use teloxide::{
     payloads::SendMessageSetters,
@@ -7,6 +5,8 @@ use teloxide::{
     types::{Message, MessageId, Recipient},
     Bot, RequestError,
 };
+
+use crate::teloxide_retry;
 
 pub trait BotArchSendMsg {
     /// Opinionated method to send a message, with HTML markup,
@@ -36,28 +36,15 @@ impl BotArchSendMsg for Bot {
         let iter = SplitOverLengthTokens::new(text, 4096);
 
         for text in iter {
-            // Try up to 3 times lol
-            let mut looped: u8 = 0;
-            let result = loop {
-                looped += 1;
+            let result = teloxide_retry!({
                 let mut request = self
                     .send_message(to_where.clone(), text)
                     .parse_mode(teloxide::types::ParseMode::Html);
                 if let Some(reply_to) = reply_to {
                     request = request.reply_to_message_id(reply_to);
                 }
-                let result = request.await;
-
-                if let Err(RequestError::RetryAfter(duration)) = result {
-                    tokio::time::sleep(duration).await;
-                } else {
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-
-                if result.is_ok() || looped >= 3 {
-                    break result;
-                }
-            };
+                request.await
+            });
 
             match result {
                 Ok(message) => sent_messages.push(message),

@@ -1,4 +1,4 @@
-use arch_bot_commons::useful_methods::*;
+use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use magick_rust::{MagickError, MagickWand};
 use teloxide::{
     payloads::{SendMessageSetters, SendPhotoSetters, SendStickerSetters},
@@ -6,7 +6,6 @@ use teloxide::{
     types::InputFile,
     Bot, RequestError,
 };
-use tokio::time::sleep;
 
 use super::{taskman::database::TaskDatabaseInfo, ImageFormat, ResizeType, Task};
 
@@ -191,11 +190,9 @@ impl Task {
                     goodbye!("Error: failed to parse the image");
                 };
 
-                let mut error: Result<(), RequestError> = Ok(());
-                // Retry up to 3 times. Don't want to lose the cake lol
-                for _ in 0..3 {
+                teloxide_retry!({
                     let send = img_data.clone();
-                    let result = if is_webp {
+                    if is_webp {
                         bot.send_sticker(data.message.chat.id, InputFile::memory(send))
                             .reply_to_message_id(data.message.id.0)
                             .await
@@ -203,19 +200,9 @@ impl Task {
                         bot.send_photo(data.message.chat.id, InputFile::memory(send))
                             .reply_to_message_id(data.message.id)
                             .await
-                    };
-                    if let Err(e) = result {
-                        if let RequestError::RetryAfter(x) = e {
-                            sleep(x).await;
-                        }
-                        error = Err(e);
-                    } else {
-                        error = Ok(());
-                        break;
                     }
-                }
-
-                error
+                })?;
+                Ok(())
             }
         }
     }

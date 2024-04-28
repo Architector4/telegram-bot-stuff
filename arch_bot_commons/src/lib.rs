@@ -157,3 +157,27 @@ pub fn append_with_message_entities(
         entities.push(new);
     }
 }
+
+/// Retry a a function that returns a [`RequestError`] up to 5 times until it succeeds,
+/// waiting on flood_wait and other such errors.
+#[macro_export]
+macro_rules! teloxide_retry {
+    ($what:expr) => {{
+        let mut counter: u8 = 0;
+        loop {
+            let result = $what;
+            if let Err(e) = &result {
+                if let teloxide::RequestError::RetryAfter(x) = e {
+                    tokio::time::sleep(*x).await;
+                }
+                counter += 1;
+                if counter == 5 {
+                    break result;
+                }
+                continue;
+            } else {
+                break result;
+            }
+        }
+    }};
+}
