@@ -250,6 +250,8 @@ async fn start(tp: TaskParams<'_>) -> Ret {
 
 This is a multitool tool telegram bot designed to do things because i wanted to make one lol
 
+For a full list of commands, send /help
+
 For complaints or questions poke @Architector_4";
 
     goodbye_desc!(response);
