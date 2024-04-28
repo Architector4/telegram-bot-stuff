@@ -53,7 +53,7 @@ pub fn start_everything<T>(closure: impl Future<Output = T>) -> T {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .unwrap()
+        .expect("Failed to start Tokio runtime")
         .block_on(closure)
 }
 
