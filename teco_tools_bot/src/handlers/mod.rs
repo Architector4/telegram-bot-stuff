@@ -12,35 +12,6 @@ use teloxide::{
 
 use crate::tasks::{taskman::Taskman, Task, TaskError};
 
-//pub async fn funny_handle_message(
-//    bot: Bot,
-//    _me: Me,
-//    message: Message,
-//    _taskman: Arc<Taskman>,
-//) -> Result<(), RequestError> {
-//    if let Some(from) = message.from() {
-//        if from.id == OWNER_ID {
-//            //use url::Url;
-//            //let wat = Url::parse("http://95.216.169.4:2828/0019.webp.png.jpg").unwrap();
-//
-//            use teloxide::payloads::SendPhotoSetters;
-//            bot.send_photo(
-//                message.chat.id,
-//                teloxide::types::InputFile::file(
-//                    "/media/ext_hdd/nobackup/architector4/Downloads/0019.webp.png",
-//                )
-//                .file_name("AGOGUS.png"),
-//            )
-//            .reply_to_message_id(message.id)
-//            .await?;
-//            //bot.send_message(msg.chat.id, "hi")
-//            //    .reply_to_message_id(msg.id)
-//            //    .await?;
-//        }
-//    }
-//    Ok(())
-//}
-
 pub async fn parse_command_into_task(
     taskman: &Taskman,
     bot: &Bot,

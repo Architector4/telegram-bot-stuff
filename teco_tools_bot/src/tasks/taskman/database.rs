@@ -184,7 +184,6 @@ impl Database {
         let queue_size_premium = self.get_queue_size_raw(true).await?;
 
         let queue_size = if premium {
-
             if queue_size_premium <= queue_size_non_premium {
                 queue_size_premium
             } else {
