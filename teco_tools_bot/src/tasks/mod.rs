@@ -121,7 +121,7 @@ impl Task {
                             "<code>WxH</code>: Width and height of the output image, can't be 0 or too big; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or too big\n",
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 1. ",
-                            "Can't be less than -16 or bigger than 16.\n",
+                            "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
                             "Same requirements as with <code>delta_x</code>."
                             ),
@@ -506,7 +506,7 @@ impl Task {
                 let sanitized_f64_parser = |val: &str| -> Result<f64, ()> {
                     let result: f64 = val.parse().map_err(|_| ())?;
 
-                    if result.is_finite() && (-16.0..=16.0).contains(&result) {
+                    if result.is_finite() && (-4.0..=4.0).contains(&result) {
                         Ok(result)
                     } else {
                         Err(())

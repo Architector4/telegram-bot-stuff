@@ -183,8 +183,8 @@ impl Task {
                             wand.liquid_rescale_image(
                                 width,
                                 height,
-                                delta_x.abs().min(16.0),
-                                rigidity.max(-16.0).min(16.0),
+                                delta_x.abs().min(4.0),
+                                rigidity.max(-4.0).min(4.0),
                             )?;
                         }
                         ResizeType::Stretch => {
