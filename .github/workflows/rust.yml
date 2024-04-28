@@ -18,7 +18,13 @@ jobs:
     - uses: actions/checkout@v3
     - name: Install ImageMagick
       run: |
-        sudo apt update && sudo apt install -y imagemagick libmagickwand-dev
+          # Yoinking it from my dependency:
+          # https://github.com/nlfiedler/magick-rust/blob/master/.github/workflows/docs.yaml#L24
+          curl https://imagemagick.org/archive/ImageMagick.tar.gz | tar xz
+          cd ImageMagick-7.1*
+          ./configure --with-magick-plus-plus=no --with-perl=no 
+          make -j
+          sudo make install
     - name: Build
       run: cargo build --verbose
     - name: Run tests
