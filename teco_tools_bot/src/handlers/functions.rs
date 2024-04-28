@@ -295,17 +295,20 @@ async fn reverse_text(tp: TaskParams<'_>) -> Ret {
         input.push_str("\n\n");
     }
 
-    // TODO: use Unicode graphemes for reversal instead lol
     let request_text = tp.message.text_full().unwrap();
-    let first_word = request_text.split_ascii_whitespace().next().unwrap();
-    let request_text = request_text[first_word.len()..].trim();
+    // Exclude first word - the whole command invocation.
+    let request_text = request_text[tp.command.len()..].trim();
     input.push_str(request_text);
 
     if input.is_empty() {
-        input.push_str(first_word);
+        // Nothing to reverse...
+        // Include the command invocation then lol
+        input.push_str(&tp.command);
     }
 
-    let response = input.chars().rev().collect::<String>();
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let response = input.graphemes(true).rev().collect::<String>();
     let response = encode_text(&response);
 
     goodbye_desc!(response);
