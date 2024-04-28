@@ -96,8 +96,6 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
         let notified = notify.notified();
 
         let Some(task_data) = taskman.db.grab_task(premium).await.expect("Database died!") else {
-            // No tasks. Vacuum the database?
-            taskman.db.idle_cleanup().await;
             drop(taskman);
             notified.await;
             continue;
@@ -248,8 +246,6 @@ pub async fn queue_counter_spinjob(taskman: Weak<Taskman>) {
         }
 
         if !got_a_single_task {
-            // No tasks. Vacuum the database?
-            taskman.db.idle_cleanup().await;
             drop(queue);
             drop(taskman);
             notified.await;
