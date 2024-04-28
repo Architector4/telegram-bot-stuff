@@ -147,7 +147,7 @@ impl Task {
             ($name:expr, $value:expr) => {{
                 #[allow(unused_assignments)]
                 if header && !wrote_first_param {
-                    write!(output, "Parameters:")?;
+                    write!(output, "Parameters")?;
                     if editable {
                         write!(output, " (edit message to change)")?;
                     }
