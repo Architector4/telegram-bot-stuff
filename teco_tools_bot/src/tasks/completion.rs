@@ -88,44 +88,6 @@ impl Task {
 
                 goodbye!(response_str);
             }
-            //Task::ToSticker => {
-            //    use std::io::Cursor;
-            //    let photo = data
-            //        .message
-            //        .get_photo_or_raster_sticker_here_or_reply_file_meta();
-
-            //    let photo = match photo {
-            //        Ok(Some(photo)) => photo,
-            //        Ok(None) => goodbye!("Error: can't find an image"),
-            //        Err(()) => goodbye!("Error: can't work with animated nor video stickers"),
-            //    };
-
-            //    let mut img_data: Vec<u8> = Vec::new();
-
-            //    bot.download_file_to_vec(photo.2, &mut img_data).await?;
-
-            //    let Some(image) = image::io::Reader::new(Cursor::new(&img_data))
-            //        .with_guessed_format()
-            //        .ok()
-            //        .and_then(|x| x.decode().ok())
-            //    else {
-            //        goodbye!("Error: failed to parse the image");
-            //    };
-
-            //    let image = image.resize(512, 512, image::imageops::FilterType::CatmullRom);
-
-            //    img_data.clear();
-
-            //    let encoder =
-            //        image::codecs::webp::WebPEncoder::new_lossless(Cursor::new(&mut img_data));
-            //    image.write_with_encoder(encoder).unwrap();
-
-            //    bot.send_sticker(data.message.chat.id, InputFile::memory(img_data))
-            //        .reply_to_message_id(data.message.id.0)
-            //        .await?;
-
-            //    Ok(())
-            //}
             Task::Resize {
                 new_dimensions,
                 percentage: _,

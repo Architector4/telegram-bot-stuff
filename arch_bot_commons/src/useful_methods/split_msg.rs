@@ -217,7 +217,6 @@ impl<'a> Iterator for SplitOverLengthTokens<'a> {
             }
         }
 
-        dbg!(split_type);
         assert_ne!(output_size, 0, "Maximum length is too small");
 
         // Send it.
