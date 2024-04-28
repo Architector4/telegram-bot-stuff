@@ -210,13 +210,17 @@ impl Task {
                     ))
                 }
 
-                let woot = resize_image(
-                    img_data,
+                let dimensions = (
                     new_dimensions.0.get() as usize,
                     new_dimensions.1.get() as usize,
-                    *resize_type,
-                    format,
                 );
+                let resize_type = *resize_type;
+
+                let woot = tokio::task::spawn_blocking(move || {
+                    resize_image(img_data, dimensions.0, dimensions.1, resize_type, format)
+                })
+                .await
+                .expect("Worker died!");
                 let Ok((img_data, is_webp)) = woot else {
                     let wat = woot.unwrap_err();
                     log::error!("{}", wat);

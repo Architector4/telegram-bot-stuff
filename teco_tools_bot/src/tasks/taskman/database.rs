@@ -136,7 +136,10 @@ impl Database {
         pool.execute(sqlx::query("UPDATE tasks SET in_progress=0;"))
             .await?;
 
-        let woot = Database { pool, grabbing_task_mutex: Mutex::new(())};
+        let woot = Database {
+            pool,
+            grabbing_task_mutex: Mutex::new(()),
+        };
 
         woot.idle_cleanup().await;
 
