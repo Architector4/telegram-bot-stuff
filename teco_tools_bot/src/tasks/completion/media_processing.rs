@@ -4,6 +4,8 @@ use std::{
 };
 
 use crossbeam_channel::Sender;
+use rayon::prelude::*;
+
 use magick_rust::{MagickError, MagickWand};
 
 use crate::tasks::{ImageFormat, ResizeType};
@@ -226,10 +228,14 @@ pub fn count_video_frames_and_framerate(data: &[u8]) -> Result<(u64, f64), std::
 pub fn resize_video(
     status_report: Sender<String>,
     data: Vec<u8>,
-    width: usize,
-    height: usize,
+    mut width: usize,
+    mut height: usize,
     resize_type: ResizeType,
 ) -> Result<Vec<u8>, String> {
+    // We will be encoding into h264, which needs width and height divisible by 2.
+    width += width % 2;
+    height += height % 2;
+
     macro_rules! unfail {
         ($thing: expr) => {
             match $thing {
@@ -243,7 +249,7 @@ pub fn resize_video(
     let decoder = Command::new("ffmpeg")
         .args([
             "-loglevel",
-            "quiet",
+            "error",
             "-i",
             "-",
             "-c:v",
@@ -262,23 +268,28 @@ pub fn resize_video(
     std::thread::spawn(move || decoder_stdin.write_all(&data));
     let data_stream = decoder.stdout.take().unwrap();
 
-    let converted_image_stream =
-        SplitIntoBmps::<ChildStdout>::new(data_stream).map(|frame| match frame {
-            Ok(frame) => Ok(
-                resize_image(&frame, width, height, resize_type, ImageFormat::Bmp)
-                    .expect("ImageMagick failed!"),
-            ),
-            Err(e) => Err(e),
-        });
+    let converted_image_stream = {
+        SplitIntoBmps::<ChildStdout>::new(data_stream)
+            .enumerate()
+            .par_bridge()
+            .map(|(count, frame)| match frame {
+                Ok(frame) => Ok((
+                    count,
+                    resize_image(&frame, width, height, resize_type, ImageFormat::Bmp)
+                        .expect("ImageMagick failed!"),
+                )),
+                Err(e) => Err(e),
+            })
+    };
 
-    let (frame_sender, frame_receiver) = crossbeam_channel::unbounded::<Vec<u8>>();
+    let (frame_sender, frame_receiver) = crossbeam_channel::unbounded::<(usize, Vec<u8>)>();
 
     let encoder_thread = std::thread::spawn(move || {
         let frame_receiver = frame_receiver;
         let mut encoder = Command::new("ffmpeg")
             .args([
                 "-loglevel",
-                "quiet",
+                "error",
                 "-framerate",
                 input_frame_rate.to_string().as_str(),
                 "-i",
@@ -298,18 +309,46 @@ pub fn resize_video(
         let mut encoder_stdin = encoder.stdin.take().unwrap();
 
         std::thread::spawn(move || {
-            let mut frame_count: usize = 0;
+            let mut frame_number: usize = 0;
+            let mut out_of_order_frames: Vec<(usize, Vec<u8>)> = Vec::new();
+
             while let Ok(frame) = frame_receiver.recv() {
-                frame_count += 1;
+                if frame.0 == frame_number {
+                    // Frame received in order. Push it in directly.
+                    encoder_stdin
+                        .write_all(&frame.1)
+                        .expect("Failed writing frame to encoder!");
+                    frame_number += 1;
+                } else {
+                    // It's out of order. Push it away.
+                    out_of_order_frames.push(frame);
+                }
+
+                if !out_of_order_frames.is_empty() {
+                    // If possible, send them in order.
+
+                    loop {
+                        let Some(in_order_frame) =
+                            out_of_order_frames.iter().position(|x| x.0 == frame_number)
+                        else {
+                            break;
+                        };
+
+                        let in_order_frame = out_of_order_frames.swap_remove(in_order_frame);
+
+                        encoder_stdin
+                            .write_all(&in_order_frame.1)
+                            .expect("Failed writing frame to encoder!");
+                        frame_number += 1;
+                    }
+                }
+
                 if input_frame_count != 0 {
                     let _ = status_report
-                        .send(format!("Frame {} / {}", frame_count, input_frame_count));
+                        .send(format!("Frame {} / {}", frame_number, input_frame_count));
                 } else {
-                    let _ = status_report.send(format!("Frame {}", frame_count));
+                    let _ = status_report.send(format!("Frame {}", frame_number));
                 }
-                encoder_stdin
-                    .write_all(&frame)
-                    .expect("Failed writing frame to encoder!");
             }
             drop(encoder_stdin);
         });
@@ -334,9 +373,9 @@ pub fn resize_video(
         Err(e) => Err(e),
     });
 
-    if let Some(last) = writing_stream.last() {
-        unfail!(last);
-    }
+    // Try to find an error and fail on it, if any lol
+    let reduce = writing_stream.reduce(|| Ok(()), |a, b| if b.is_err() { b } else { a });
+    unfail!(reduce);
 
     drop(frame_sender);
 
