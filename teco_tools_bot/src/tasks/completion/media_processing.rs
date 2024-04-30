@@ -431,7 +431,7 @@ pub fn resize_video(
                 OsStr::new("-map"),
                 OsStr::new("0:a:0"),
                 OsStr::new(if distort { "-af" } else { "-c:a" }),
-                OsStr::new(if distort { "vibrato=f=7:d=1" } else { "copy" }),
+                OsStr::new(if distort { "vibrato=f=7:d=1,aformat=s16p" } else { "copy" }),
                 OsStr::new("-f"),
                 OsStr::new("mp4"),
                 muxfile.path().as_ref(),
