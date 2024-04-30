@@ -182,7 +182,7 @@ impl Task {
                     let send = media_data.clone();
                     if media.is_video {
                         if media.is_gif {
-                            bot.send_animation(data.message.chat.id, InputFile::memory(send))
+                            bot.send_animation(data.message.chat.id, InputFile::memory(send).file_name("amogus.mp4"))
                                 .reply_to_message_id(data.message.id)
                                 .await
                         } else {
