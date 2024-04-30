@@ -453,25 +453,3 @@ pub fn resize_video(
 
     Ok(output)
 }
-
-#[cfg(test)]
-pub mod test {
-    use crossbeam_channel::unbounded;
-
-    use super::resize_video;
-
-    #[test]
-    pub fn test() {
-        let (sender, receiver) = unbounded();
-        drop(receiver);
-        let data = include_bytes!("/tmp/test/tgtest");
-        let result = resize_video(
-            sender,
-            data.to_vec(),
-            512,
-            512,
-            crate::tasks::ResizeType::Fit,
-        );
-        assert!(!result.unwrap().is_empty());
-    }
-}
