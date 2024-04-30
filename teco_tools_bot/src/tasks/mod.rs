@@ -13,6 +13,8 @@ use param_parsing::ParamParser;
 
 use taskman::Taskman;
 
+pub static MAX_OUTPUT_MEDIA_DIMENSION_SIZE: u32 = 2048;
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum ResizeType {
     Stretch,
@@ -27,6 +29,9 @@ impl ResizeType {
             delta_x: 1.0,
             rigidity: 0.0,
         }
+    }
+    pub fn is_seam_carve(&self) -> bool {
+        matches!(self, Self::SeamCarve { .. })
     }
 }
 
@@ -441,7 +446,6 @@ impl Task {
                 if resize_type == ResizeType::ToSticker {
                     return Ok(self.clone());
                 }
-                static MAX_DIMENSION_SIZE: u32 = 2048;
                 // This is named "percentage" purely to make my life easier with
                 // the parser logic lol
                 //
@@ -458,10 +462,22 @@ impl Task {
 
                 fn single_dimension_parser(data: &str) -> Option<NonZeroU32> {
                     let woot: NonZeroU32 = data.parse().ok()?;
-                    if woot.get() > MAX_DIMENSION_SIZE {
+                    Some(woot)
+                }
+                fn percentage_calculator(
+                    percentage: f32,
+                    starting_dimensions: (NonZeroU32, NonZeroU32),
+                ) -> Option<(NonZeroU32, NonZeroU32, f32)> {
+                    let factor = percentage / 100.0;
+
+                    if !factor.is_normal() || factor <= 0.0 {
                         return None;
                     }
-                    Some(woot)
+
+                    let width = (starting_dimensions.0.get() as f32 * factor) as u32;
+                    let height = (starting_dimensions.1.get() as f32 * factor) as u32;
+
+                    Some((width.try_into().ok()?, height.try_into().ok()?, percentage))
                 }
 
                 fn percentage_parser(
@@ -471,23 +487,7 @@ impl Task {
                     let percent = data.find('%')?;
 
                     let percentage: f32 = data[0..percent].parse().ok()?;
-                    let factor = percentage / 100.0;
-
-                    if !factor.is_normal() || factor <= 0.0 {
-                        return None;
-                    }
-
-                    let width = starting_dimensions.0.get() as f32 * factor;
-                    let height = starting_dimensions.1.get() as f32 * factor;
-
-                    if width > MAX_DIMENSION_SIZE as f32 || height > MAX_DIMENSION_SIZE as f32 {
-                        return None;
-                    }
-
-                    let width = width as u32;
-                    let height = height as u32;
-
-                    Some((width.try_into().ok()?, height.try_into().ok()?, percentage))
+                    percentage_calculator(percentage, starting_dimensions)
                 }
 
                 fn width_height_parser(
@@ -562,16 +562,72 @@ impl Task {
                     parse_stop!(param, help);
                 }
 
+                // Calculate if the image after any specified rescaling is too big.
+                let image_too_big = percentage.0.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE
+                    || percentage.1.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
+                let image_too_big_2x = percentage.0.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2
+                    || percentage.1.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2;
+
+                fn smallest_percentage_that_can_fit(
+                    (width, height): &(NonZeroU32, NonZeroU32),
+                ) -> f32 {
+                    // May be a bit approximate, but meh.
+                    // For these divisions to return something like 0, the image
+                    // needs to be too huge for telegram to even accept it, so no
+                    // worries here.
+                    let smallest_width_percent =
+                        (width.get() * 100) / MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
+                    let smallest_height_percent =
+                        (height.get() * 100) / MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
+
+                    let smallest_percent =
+                        u32::min(smallest_width_percent, smallest_height_percent);
+                    smallest_percent as f32
+                }
+
                 if percentage.2 == -1.0 {
-                    if format == ImageFormat::Preserve
-                        || matches!(resize_type, ResizeType::SeamCarve { .. })
+                    // No width/height nor percentage was specified.
+                    // Preset one.
+
+                    let default_percentage =
+                        if format == ImageFormat::Preserve || resize_type.is_seam_carve() {
+                            // We aren't changing format and/or we want seam carving.
+                            // Either way, this means we likely want to resize the image then. Do 50%.
+                            if image_too_big_2x {
+                                // Image is more than 200% big.
+                                // Scalling it to 50% will still be too big. Scale down.
+                                smallest_percentage_that_can_fit(old_dimensions)
+                            } else {
+                                50.0
+                            }
+                        } else if image_too_big {
+                            // We want to preserve the image size, but it's too big.
+                            // Scale down.
+                            smallest_percentage_that_can_fit(old_dimensions)
+                        } else {
+                            100.0
+                        };
+
+                    if let Some(parsed) = percentage_calculator(default_percentage, *old_dimensions)
                     {
-                        if let Some(parsed) = percentage_parser("50%", *old_dimensions) {
-                            percentage = parsed;
-                        }
-                    } else if let Some(parsed) = percentage_parser("100%", *old_dimensions) {
                         percentage = parsed;
                     }
+                } else if image_too_big {
+                    // Error that image is too big.
+                    return Err(TaskError::Error(format!(
+                        concat!(
+                            "output size {}x{} is too big. ",
+                            "This bot only allows generating images no bigger than {}x{}.\n",
+                            "For reference, input image's size is {}x{}, so the output must be no bigger than {}% of it."
+                        ),
+                        percentage.0,
+                        percentage.1,
+                        MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
+                        MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
+                        old_dimensions.0,
+                        old_dimensions.1,
+                        smallest_percentage_that_can_fit(old_dimensions)
+                    )));
                 }
 
                 if let ResizeType::SeamCarve {
