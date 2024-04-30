@@ -7,7 +7,7 @@ pub fn resize_image(
     data: Vec<u8>,
     width: usize,
     height: usize,
-    resize_type: ResizeType,
+    mut resize_type: ResizeType,
     format: ImageFormat,
 ) -> Result<Vec<u8>, MagickError> {
     if format == ImageFormat::Preserve {
@@ -32,6 +32,13 @@ pub fn resize_image(
     // Also delta_x less than 0 segfaults. Other code prevents that from getting
     // here, but might as well lol
     // And both values in extremely high amounts segfault too, it seems lol
+
+    if wand.get_image_width() <= 1 || wand.get_image_height() <= 1 && resize_type.is_seam_carve() {
+        // ImageMagick is likely to abort/segfault in this situation.
+        // Switch up resize type.
+        resize_type = ResizeType::Stretch;
+    }
+
 
     match resize_type {
         ResizeType::SeamCarve { delta_x, rigidity } => {
