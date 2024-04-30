@@ -256,7 +256,7 @@ impl Task {
     pub fn default_amogus() -> Task {
         Task::Amogus { amogus: 1 }
     }
-    pub fn default_resize(
+    pub fn default_image_resize(
         width: NonZeroU32,
         height: NonZeroU32,
         resize_type: ResizeType,
@@ -451,7 +451,7 @@ impl Task {
                 //
                 // The -1.0 is a "default"; if it stays that way after parsing params,
                 // then it'll be set to default
-                let mut percentage = (old_dimensions.0, old_dimensions.1, -1.0);
+                let mut new_dimensions = (old_dimensions.0, old_dimensions.1, -1.0);
                 let ResizeType::SeamCarve {
                     mut delta_x,
                     mut rigidity,
@@ -541,7 +541,7 @@ impl Task {
                     parse_plain_param_optional!(param, format, help);
                     parse_plain_param_with_parser_optional!(
                         param,
-                        percentage,
+                        new_dimensions,
                         dimensions_parser_err,
                         help
                     );
@@ -558,15 +558,14 @@ impl Task {
                         parse_plain_param_optional!(param, resize_type, help);
                     }
                     parse_keyval_param!(param, format, help);
-                    parse_keyval_param_with_parser!(param, percentage, dimensions_parser_err, help);
                     parse_stop!(param, help);
                 }
 
                 // Calculate if the image after any specified rescaling is too big.
-                let image_too_big = percentage.0.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE
-                    || percentage.1.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
-                let image_too_big_2x = percentage.0.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2
-                    || percentage.1.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2;
+                let image_too_big = new_dimensions.0.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE
+                    || new_dimensions.1.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
+                let image_too_big_2x = new_dimensions.0.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2
+                    || new_dimensions.1.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2;
 
                 fn smallest_percentage_that_can_fit(
                     (width, height): &(NonZeroU32, NonZeroU32),
@@ -582,7 +581,7 @@ impl Task {
                     smallest_percent as f32
                 }
 
-                if percentage.2 == -1.0 {
+                if new_dimensions.2 == -1.0 {
                     // No width/height nor percentage was specified.
                     // Preset one.
 
@@ -607,7 +606,7 @@ impl Task {
 
                     if let Some(parsed) = percentage_calculator(default_percentage, *old_dimensions)
                     {
-                        percentage = parsed;
+                        new_dimensions = parsed;
                     }
                 } else if image_too_big {
                     // Error that image is too big.
@@ -617,8 +616,8 @@ impl Task {
                             "This bot only allows generating images no bigger than {}x{}.\n",
                             "For reference, input image's size is {}x{}, so the output must be no bigger than {}% of it."
                         ),
-                        percentage.0,
-                        percentage.1,
+                        new_dimensions.0,
+                        new_dimensions.1,
                         MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
                         MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
                         old_dimensions.0,
@@ -636,8 +635,8 @@ impl Task {
                     *rg = rigidity;
                 }
                 Ok(Task::ImageResize {
-                    new_dimensions: (percentage.0, percentage.1),
-                    percentage: percentage.2,
+                    new_dimensions: (new_dimensions.0, new_dimensions.1),
+                    percentage: new_dimensions.2,
                     resize_type,
                     format,
                 })

@@ -39,7 +39,6 @@ pub fn resize_image(
         resize_type = ResizeType::Stretch;
     }
 
-
     match resize_type {
         ResizeType::SeamCarve { delta_x, rigidity } => {
             wand.liquid_rescale_image(

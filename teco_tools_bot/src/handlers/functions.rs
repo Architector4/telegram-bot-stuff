@@ -347,7 +347,8 @@ async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType, format: Image
     };
 
     let task = unfail!(
-        Task::default_resize(width, height, resize_type, format).parse_params(tp.get_params())
+        Task::default_image_resize(width, height, resize_type, format)
+            .parse_params(tp.get_params())
     );
 
     Ok(Ok(task))
