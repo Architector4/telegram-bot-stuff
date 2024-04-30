@@ -1,5 +1,5 @@
+mod media_processing;
 use arch_bot_commons::{teloxide_retry, useful_methods::*};
-use magick_rust::{MagickError, MagickWand};
 use teloxide::{
     payloads::{SendMessageSetters, SendPhotoSetters, SendStickerSetters},
     requests::Requester,
@@ -7,7 +7,7 @@ use teloxide::{
     Bot, RequestError,
 };
 
-use super::{taskman::database::TaskDatabaseInfo, ImageFormat, ResizeType, Task};
+use super::{taskman::database::TaskDatabaseInfo, ImageFormat, Task};
 
 impl Task {
     pub async fn complete_task(
@@ -121,63 +121,6 @@ impl Task {
 
                 bot.download_file_to_vec(photo.file, &mut img_data).await?;
 
-                fn resize_image(
-                    data: Vec<u8>,
-                    width: usize,
-                    height: usize,
-                    resize_type: ResizeType,
-                    format: ImageFormat,
-                ) -> Result<(Vec<u8>, bool), MagickError> {
-                    let wand = MagickWand::new();
-
-                    wand.read_image_blob(data)?;
-
-                    // The second and third arguments are "delta_x" and "rigidity"
-                    // This library doesn't document them, but another bindings
-                    // wrapper does: https://docs.wand-py.org/en/latest/wand/image.html
-                    //
-                    // According to it:
-                    // > delta_x (numbers.Real) – maximum seam transversal step. 0 means straight seams. default is 0
-                    // (but delta_x of 0 is very boring so we will pretend the default is 1)
-                    // > rigidity (numbers.Real) – introduce a bias for non-straight seams. default is 0
-
-                    // Also delta_x less than 0 segfaults. Other code prevents that from getting
-                    // here, but might as well lol
-                    // And both values in extremely high amounts segfault too, it seems lol
-
-                    match resize_type {
-                        ResizeType::SeamCarve { delta_x, rigidity } => {
-                            wand.liquid_rescale_image(
-                                width,
-                                height,
-                                delta_x.abs().min(4.0),
-                                rigidity.max(-4.0).min(4.0),
-                            )?;
-                        }
-                        ResizeType::Stretch => {
-                            wand.resize_image(
-                                width,
-                                height,
-                                magick_rust::bindings::FilterType_LagrangeFilter,
-                            );
-                        }
-                        ResizeType::Fit | ResizeType::ToSticker => {
-                            wand.fit(width, height);
-                        }
-                    }
-
-                    let should_be_webp = match format {
-                        ImageFormat::Preserve => wand.get_image_alpha_channel(),
-                        ImageFormat::Webp => true,
-                        ImageFormat::Jpeg => false,
-                    };
-
-                    Ok((
-                        wand.write_image_blob(if should_be_webp { "webp" } else { "jpeg" })?,
-                        should_be_webp,
-                    ))
-                }
-
                 let dimensions = (
                     new_dimensions.0.get() as usize,
                     new_dimensions.1.get() as usize,
@@ -185,7 +128,13 @@ impl Task {
                 let resize_type = *resize_type;
 
                 let woot = tokio::task::spawn_blocking(move || {
-                    resize_image(img_data, dimensions.0, dimensions.1, resize_type, format)
+                    media_processing::resize_image(
+                        img_data,
+                        dimensions.0,
+                        dimensions.1,
+                        resize_type,
+                        format,
+                    )
                 })
                 .await
                 .expect("Worker died!");
