@@ -178,6 +178,10 @@ impl Task {
                     goodbye!("Error: failed to process the media");
                 };
 
+                if media_data.is_empty() {
+                    goodbye!("Error: failed to process the media; got empty file as a result. Sorry!");
+                }
+
                 teloxide_retry!({
                     let send = media_data.clone();
                     if media.is_video {
