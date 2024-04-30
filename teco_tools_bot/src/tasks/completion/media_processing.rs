@@ -282,7 +282,7 @@ pub fn resize_video(
             })
     };
 
-    let (frame_sender, frame_receiver) = crossbeam_channel::unbounded::<(usize, Vec<u8>)>();
+    let (frame_sender, frame_receiver) = crossbeam_channel::bounded::<(usize, Vec<u8>)>(256);
 
     let encoder_thread = std::thread::spawn(move || {
         let frame_receiver = frame_receiver;
