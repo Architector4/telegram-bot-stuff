@@ -118,7 +118,7 @@ pub enum Task {
     Amogus {
         amogus: i32,
     },
-    Resize {
+    ImageResize {
         new_dimensions: (NonZeroU32, NonZeroU32),
         percentage: f32,
         format: ImageFormat,
@@ -141,7 +141,7 @@ impl Task {
             Task::Amogus { .. } => {
                 "<code>amogus</code>: How much amogus. Negative numbers are allowed."
             }
-            Task::Resize { resize_type, ..} => {
+            Task::ImageResize { resize_type, ..} => {
                 match resize_type {
                     ResizeType::ToSticker => "",
                     ResizeType::SeamCarve { .. } =>
@@ -195,7 +195,7 @@ impl Task {
 
         match self {
             Task::Amogus { amogus } => wp!(amogus),
-            Task::Resize {
+            Task::ImageResize {
                 new_dimensions,
                 percentage,
                 format,
@@ -246,7 +246,7 @@ impl Task {
 
 impl Task {
     pub fn default_to_sticker() -> Task {
-        Task::Resize {
+        Task::ImageResize {
             new_dimensions: (NonZeroU32::new(512).unwrap(), NonZeroU32::new(512).unwrap()),
             percentage: 100.0,
             format: ImageFormat::Webp,
@@ -262,7 +262,7 @@ impl Task {
         resize_type: ResizeType,
         format: ImageFormat,
     ) -> Task {
-        Task::Resize {
+        Task::ImageResize {
             new_dimensions: (width, height),
             percentage: 100.0,
             format,
@@ -437,7 +437,7 @@ impl Task {
 
                 Ok(Task::Amogus { amogus })
             }
-            Task::Resize {
+            Task::ImageResize {
                 new_dimensions: old_dimensions,
                 percentage: _,
                 mut format,
@@ -573,9 +573,9 @@ impl Task {
                 ) -> f32 {
                     // May be a bit approximate, but meh.
                     let smallest_width_percent =
-                         (MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 100) / width.get();
+                        (MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 100) / width.get();
                     let smallest_height_percent =
-                         (MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 100) / height.get();
+                        (MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 100) / height.get();
 
                     let smallest_percent =
                         u32::min(smallest_width_percent, smallest_height_percent);
@@ -635,7 +635,7 @@ impl Task {
                     *dx = delta_x;
                     *rg = rigidity;
                 }
-                Ok(Task::Resize {
+                Ok(Task::ImageResize {
                     new_dimensions: (percentage.0, percentage.1),
                     percentage: percentage.2,
                     resize_type,

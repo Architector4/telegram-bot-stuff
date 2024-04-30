@@ -87,7 +87,7 @@ impl Task {
 
                 goodbye!(response_str);
             }
-            Task::Resize {
+            Task::ImageResize {
                 new_dimensions,
                 percentage: _,
                 mut format,
