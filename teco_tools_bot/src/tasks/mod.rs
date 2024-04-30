@@ -446,11 +446,8 @@ impl Task {
                 if resize_type == ResizeType::ToSticker {
                     return Ok(self.clone());
                 }
-                // This is named "percentage" purely to make my life easier with
-                // the parser logic lol
-                //
                 // The -1.0 is a "default"; if it stays that way after parsing params,
-                // then it'll be set to default
+                // then it will be autocalculated at the end of the function
                 let mut new_dimensions = (old_dimensions.0, old_dimensions.1, -1.0);
                 let ResizeType::SeamCarve {
                     mut delta_x,
