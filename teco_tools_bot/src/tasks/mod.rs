@@ -124,6 +124,11 @@ pub enum Task {
         format: ImageFormat,
         resize_type: ResizeType,
     },
+    VideoResize {
+        new_dimensions: (NonZeroU32, NonZeroU32),
+        percentage: f32,
+        resize_type: ResizeType,
+    },
 }
 
 impl Task {
@@ -161,6 +166,25 @@ impl Task {
                             "<code>size%</code>: Percentage of the original size, can't be 0 or too big\n",
                             ),
                 }
+            },
+            Task::VideoResize { resize_type, .. } => {
+                match resize_type {
+                    ResizeType::ToSticker => "",
+                    ResizeType::SeamCarve { ..} => concat!(
+                            "<code>WxH</code>: Width and height of the output video, can't be 0 or too big; OR\n",
+                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big\n",
+                            "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 1. ",
+                            "Can't be less than -4 or bigger than 4.\n",
+                            "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
+                            "Same requirements as with <code>delta_x</code>."
+
+                        ),
+                    ResizeType::Stretch | ResizeType::Fit => concat!(
+                            "<code>WxH</code>: Width and height of the output video, can't be 0 or too big; OR\n",
+                            "<code>method</code>: Resize method. Can only be \"fit\" or \"stretch\".\n",
+                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big\n",
+                        ),
+                }
             }
         }
     }
@@ -195,16 +219,23 @@ impl Task {
 
         match self {
             Task::Amogus { amogus } => wp!(amogus),
-            Task::ImageResize {
+            Task::VideoResize {
                 new_dimensions,
                 percentage,
-                format,
+                resize_type,
+            }
+            | Task::ImageResize {
+                new_dimensions,
+                percentage,
+                format: _,
                 resize_type,
             } => {
                 if *resize_type == ResizeType::ToSticker {
                     return Ok(());
                 }
-                write_param!("Format", format)?;
+                if let Task::ImageResize { format, .. } = self {
+                    write_param!("Format", format)?;
+                }
                 if *resize_type == ResizeType::Fit {
                     write!(
                         output,
@@ -266,6 +297,17 @@ impl Task {
             new_dimensions: (width, height),
             percentage: 100.0,
             format,
+            resize_type,
+        }
+    }
+    pub fn default_video_resize(
+        width: NonZeroU32,
+        height: NonZeroU32,
+        resize_type: ResizeType,
+    ) -> Task {
+        Task::VideoResize {
+            new_dimensions: (width, height),
+            percentage: 100.0,
             resize_type,
         }
     }
@@ -440,9 +482,20 @@ impl Task {
             Task::ImageResize {
                 new_dimensions: old_dimensions,
                 percentage: _,
-                mut format,
+                format: _,
+                mut resize_type,
+            }
+            | Task::VideoResize {
+                new_dimensions: old_dimensions,
+                percentage: _,
                 mut resize_type,
             } => {
+                let (is_video, mut format) = if let Task::ImageResize { format, .. } = self {
+                    (false, *format)
+                } else {
+                    (true, ImageFormat::Preserve)
+                };
+
                 if resize_type == ResizeType::ToSticker {
                     return Ok(self.clone());
                 }
@@ -535,7 +588,9 @@ impl Task {
                 };
 
                 for param in params {
-                    parse_plain_param_optional!(param, format, help);
+                    if !is_video {
+                        parse_plain_param_optional!(param, format, help);
+                    }
                     parse_plain_param_with_parser_optional!(
                         param,
                         new_dimensions,
@@ -558,10 +613,10 @@ impl Task {
                     parse_stop!(param, help);
                 }
 
-                // Calculate if the image after any specified rescaling is too big.
-                let image_too_big = new_dimensions.0.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE
+                // Calculate if the media after any specified rescaling is too big.
+                let media_too_big = new_dimensions.0.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE
                     || new_dimensions.1.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
-                let image_too_big_2x = new_dimensions.0.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2
+                let media_too_big_2x = new_dimensions.0.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2
                     || new_dimensions.1.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2;
 
                 fn smallest_percentage_that_can_fit(
@@ -585,16 +640,16 @@ impl Task {
                     let default_percentage =
                         if format == ImageFormat::Preserve || resize_type.is_seam_carve() {
                             // We aren't changing format and/or we want seam carving.
-                            // Either way, this means we likely want to resize the image then. Do 50%.
-                            if image_too_big_2x {
+                            // Either way, this means we likely want to resize the media then. Do 50%.
+                            if media_too_big_2x {
                                 // Image is more than 200% big.
                                 // Scalling it to 50% will still be too big. Scale down.
                                 smallest_percentage_that_can_fit(old_dimensions)
                             } else {
                                 50.0
                             }
-                        } else if image_too_big {
-                            // We want to preserve the image size, but it's too big.
+                        } else if media_too_big {
+                            // We want to preserve the media size, but it's too big.
                             // Scale down.
                             smallest_percentage_that_can_fit(old_dimensions)
                         } else {
@@ -605,13 +660,12 @@ impl Task {
                     {
                         new_dimensions = parsed;
                     }
-                } else if image_too_big {
-                    // Error that image is too big.
+                } else if media_too_big {
                     return Err(TaskError::Error(format!(
                         concat!(
                             "output size {}x{} is too big. ",
-                            "This bot only allows generating images no bigger than {}x{}.\n",
-                            "For reference, input image's size is {}x{}, so the output must be no bigger than {}% of it."
+                            "This bot only allows generating media no bigger than {}x{}.\n",
+                            "For reference, input media's size is {}x{}, so the output must be no bigger than {}% of it."
                         ),
                         new_dimensions.0,
                         new_dimensions.1,
@@ -631,12 +685,20 @@ impl Task {
                     *dx = delta_x;
                     *rg = rigidity;
                 }
-                Ok(Task::ImageResize {
-                    new_dimensions: (new_dimensions.0, new_dimensions.1),
-                    percentage: new_dimensions.2,
-                    resize_type,
-                    format,
-                })
+                if is_video {
+                    Ok(Task::VideoResize {
+                        new_dimensions: (new_dimensions.0, new_dimensions.1),
+                        percentage: new_dimensions.2,
+                        resize_type,
+                    })
+                } else {
+                    Ok(Task::ImageResize {
+                        new_dimensions: (new_dimensions.0, new_dimensions.1),
+                        percentage: new_dimensions.2,
+                        resize_type,
+                        format,
+                    })
+                }
             }
         }
     }

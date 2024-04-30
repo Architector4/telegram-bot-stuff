@@ -1,7 +1,7 @@
 mod media_processing;
 use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use teloxide::{
-    payloads::{SendMessageSetters, SendPhotoSetters, SendStickerSetters},
+    payloads::{SendMessageSetters, SendPhotoSetters, SendStickerSetters, SendVideoSetters},
     requests::Requester,
     types::InputFile,
     Bot, RequestError,
@@ -90,38 +90,53 @@ impl Task {
             Task::ImageResize {
                 new_dimensions,
                 percentage: _,
-                mut format,
+                format: _,
+                resize_type,
+            }
+            | Task::VideoResize {
+                new_dimensions,
+                percentage: _,
                 resize_type,
             } => {
-                let photo = data.message.get_media_info();
-                let photo = match photo {
-                    Some(photo) => {
-                        if !photo.is_image() {
-                            goodbye!(
-                                "Error: can't work with video nor animated nor video stickers."
-                            );
+                let media = data.message.get_media_info();
+                let media = match media {
+                    Some(media) => {
+                        if media.is_vector_sticker {
+                            goodbye!("Error: can't work with animated stickers.");
                         }
-                        if photo.file.size > 20 * 1000 * 1000 {
+                        if media.file.size > 20 * 1000 * 1000 {
                             goodbye!("Error: media is too large.");
                         }
-                        photo
+                        media
                     }
-                    None => goodbye!("Error: can't find an image."),
+                    None => goodbye!("Error: can't find the media.."),
+                };
+                let format = if let Task::ImageResize { format, .. } = self {
+                    if media.is_video {
+                        goodbye!("Error: expected an image to resize, but found a video instead.");
+                    }
+                    if *format == ImageFormat::Preserve {
+                        if media.is_sticker {
+                            ImageFormat::Webp
+                        } else {
+                            ImageFormat::Jpeg
+                        }
+                    } else {
+                        *format
+                    }
+                } else {
+                    if !media.is_video {
+                        goodbye!("Error: expected a video to resize, but found an image instead.");
+                    }
+                    ImageFormat::Preserve
                 };
 
-                if format == ImageFormat::Preserve {
-                    if photo.is_sticker {
-                        format = ImageFormat::Webp;
-                    } else {
-                        format = ImageFormat::Jpeg;
-                    }
-                }
+                let should_be_sticker = !media.is_video && format.supports_alpha_transparency();
 
-                let should_be_sticker = format.supports_alpha_transparency();
+                let mut media_data: Vec<u8> = Vec::new();
 
-                let mut img_data: Vec<u8> = Vec::new();
-
-                bot.download_file_to_vec(photo.file, &mut img_data).await?;
+                bot.download_file_to_vec(media.file, &mut media_data)
+                    .await?;
 
                 let dimensions = (
                     new_dimensions.0.get() as usize,
@@ -129,27 +144,42 @@ impl Task {
                 );
                 let resize_type = *resize_type;
 
+                let is_video = media.is_video;
                 let woot = tokio::task::spawn_blocking(move || {
-                    media_processing::resize_image(
-                        img_data,
-                        dimensions.0,
-                        dimensions.1,
-                        resize_type,
-                        format,
-                    )
+                    if is_video {
+                        media_processing::resize_video(
+                            media_data,
+                            dimensions.0,
+                            dimensions.1,
+                            resize_type,
+                        )
+                    } else {
+                        media_processing::resize_image(
+                            &media_data,
+                            dimensions.0,
+                            dimensions.1,
+                            resize_type,
+                            format,
+                        )
+                        .map_err(|e| e.to_string())
+                    }
                 })
                 .await
                 .expect("Worker died!");
-                let Ok(img_data) = woot else {
+                let Ok(media_data) = woot else {
                     let wat = woot.unwrap_err();
                     log::error!("{}", wat);
 
-                    goodbye!("Error: failed to parse the image");
+                    goodbye!("Error: failed to process the media");
                 };
 
                 teloxide_retry!({
-                    let send = img_data.clone();
-                    if should_be_sticker {
+                    let send = media_data.clone();
+                    if is_video {
+                        bot.send_video(data.message.chat.id, InputFile::memory(send))
+                            .reply_to_message_id(data.message.id)
+                            .await
+                    } else if should_be_sticker {
                         bot.send_sticker(data.message.chat.id, InputFile::memory(send))
                             .reply_to_message_id(data.message.id.0)
                             .await

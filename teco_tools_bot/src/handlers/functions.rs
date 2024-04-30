@@ -327,29 +327,33 @@ async fn amogus(tp: TaskParams<'_>) -> Ret {
     Ok(Ok(task))
 }
 
-async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType, format: ImageFormat) -> Ret {
-    let photo = tp.message.get_media_info();
-    let photo = match photo {
-        Some(photo) => {
-            if !photo.is_image() {
-                goodbye_cancel!("can't work with video nor animated nor video stickers.");
+async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
+    let media = tp.message.get_media_info();
+    let media = match media {
+        Some(media) => {
+            if media.is_vector_sticker {
+                goodbye_cancel!("can't work with animated stickers.");
             }
-            if photo.file.size > 20 * 1000 * 1000 {
+            if media.file.size > 20 * 1000 * 1000 {
                 goodbye_cancel!("media is too large.");
             }
-            photo
+            media
         }
-        None => goodbye_cancel!("can't find an image."),
+        None => goodbye_cancel!("can't find a video or an image."),
     };
-    let (Some(width), Some(height)) = (NonZeroU32::new(photo.width), NonZeroU32::new(photo.height))
+    let (Some(width), Some(height)) = (NonZeroU32::new(media.width), NonZeroU32::new(media.height))
     else {
         goodbye_cancel!("media is too small.");
     };
 
-    let task = unfail!(
-        Task::default_image_resize(width, height, resize_type, format)
-            .parse_params(tp.get_params())
-    );
+    let task = if media.is_image() {
+        unfail!(
+            Task::default_image_resize(width, height, resize_type, ImageFormat::Preserve)
+                .parse_params(tp.get_params())
+        )
+    } else {
+        unfail!(Task::default_video_resize(width, height, resize_type).parse_params(tp.get_params()))
+    };
 
     Ok(Ok(task))
 }
@@ -393,7 +397,7 @@ pub const RESIZE: Command = Command {
     hidden: false,
 };
 fn resize(tp: TaskParams<'_>) -> impl Future<Output = Ret> + '_ {
-    resize_inner(tp, ResizeType::Fit, ImageFormat::Preserve)
+    resize_inner(tp, ResizeType::Fit)
 }
 
 pub const DISTORT: Command = Command {
@@ -411,7 +415,7 @@ pub const DISTORT: Command = Command {
     hidden: false,
 };
 fn distort(tp: TaskParams<'_>) -> impl Future<Output = Ret> + '_ {
-    resize_inner(tp, ResizeType::default_seam_carve(), ImageFormat::Preserve)
+    resize_inner(tp, ResizeType::default_seam_carve())
 }
 
 async fn premium_inner(tp: TaskParams<'_>, premium: bool) -> Ret {
