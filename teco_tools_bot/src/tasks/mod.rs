@@ -61,14 +61,37 @@ pub enum ImageFormat {
     Preserve,
     Webp,
     Jpeg,
+    Bmp,
+    Png,
 }
+
+impl ImageFormat {
+    /// Returns `true` if the format supports alpha transparency.
+    /// BMP doesn't count, but [`Self::Preserve`] does.
+    pub fn supports_alpha_transparency(&self) -> bool {
+        match self {
+            Self::Preserve => true,
+            Self::Webp => true,
+            Self::Jpeg => false,
+            Self::Bmp => false,
+            Self::Png => true,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Preserve => "Preserve",
+            Self::Webp => "WebP",
+            Self::Jpeg => "JPEG",
+            Self::Bmp => "BMP",
+            Self::Png => "PNG",
+        }
+    }
+}
+
 impl Display for ImageFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Preserve => write!(f, "Preserve"),
-            Self::Webp => write!(f, "WEBP"),
-            Self::Jpeg => write!(f, "JPG"),
-        }
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -79,6 +102,7 @@ impl FromStr for ImageFormat {
             "preserve" => Ok(Self::Preserve),
             "webp" => Ok(Self::Webp),
             "jpg" | "jpeg" => Ok(Self::Jpeg),
+            // BMP and PNG are intentionally ignored as they're for internal purposes only
             _ => Err(()),
         }
     }

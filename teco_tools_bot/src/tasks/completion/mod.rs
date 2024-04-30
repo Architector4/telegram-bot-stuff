@@ -117,6 +117,8 @@ impl Task {
                     }
                 }
 
+                let should_be_sticker = format.supports_alpha_transparency();
+
                 let mut img_data: Vec<u8> = Vec::new();
 
                 bot.download_file_to_vec(photo.file, &mut img_data).await?;
@@ -138,7 +140,7 @@ impl Task {
                 })
                 .await
                 .expect("Worker died!");
-                let Ok((img_data, is_webp)) = woot else {
+                let Ok(img_data) = woot else {
                     let wat = woot.unwrap_err();
                     log::error!("{}", wat);
 
@@ -147,7 +149,7 @@ impl Task {
 
                 teloxide_retry!({
                     let send = img_data.clone();
-                    if is_webp {
+                    if should_be_sticker {
                         bot.send_sticker(data.message.chat.id, InputFile::memory(send))
                             .reply_to_message_id(data.message.id.0)
                             .await

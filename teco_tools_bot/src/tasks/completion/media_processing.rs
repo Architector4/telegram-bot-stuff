@@ -2,13 +2,20 @@ use magick_rust::{MagickError, MagickWand};
 
 use crate::tasks::{ImageFormat, ResizeType};
 
+/// Will error if [`ImageFormat::Preserve`] is sent.
 pub fn resize_image(
     data: Vec<u8>,
     width: usize,
     height: usize,
     resize_type: ResizeType,
     format: ImageFormat,
-) -> Result<(Vec<u8>, bool), MagickError> {
+) -> Result<Vec<u8>, MagickError> {
+    if format == ImageFormat::Preserve {
+        // yeah this isn't a MagickError, but we'd get one in the last line
+        // anyways, so might as well make a better description for ourselves lol
+        return Err(MagickError("ImageFormat::Preserve was specified"));
+    }
+
     let wand = MagickWand::new();
 
     wand.read_image_blob(data)?;
@@ -47,14 +54,5 @@ pub fn resize_image(
         }
     }
 
-    let should_be_webp = match format {
-        ImageFormat::Preserve => wand.get_image_alpha_channel(),
-        ImageFormat::Webp => true,
-        ImageFormat::Jpeg => false,
-    };
-
-    Ok((
-        wand.write_image_blob(if should_be_webp { "webp" } else { "jpeg" })?,
-        should_be_webp,
-    ))
+    wand.write_image_blob(format.as_str())
 }
