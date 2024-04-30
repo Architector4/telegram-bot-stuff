@@ -572,13 +572,10 @@ impl Task {
                     (width, height): &(NonZeroU32, NonZeroU32),
                 ) -> f32 {
                     // May be a bit approximate, but meh.
-                    // For these divisions to return something like 0, the image
-                    // needs to be too huge for telegram to even accept it, so no
-                    // worries here.
                     let smallest_width_percent =
-                        (width.get() * 100) / MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
+                         (MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 100) / width.get();
                     let smallest_height_percent =
-                        (height.get() * 100) / MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
+                         (MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 100) / height.get();
 
                     let smallest_percent =
                         u32::min(smallest_width_percent, smallest_height_percent);
