@@ -244,8 +244,6 @@ pub fn resize_video(
         .args([
             "-loglevel",
             "quiet",
-            "-rtbufsize",
-            "1G",
             "-i",
             "-",
             "-c:v",
@@ -281,14 +279,12 @@ pub fn resize_video(
             .args([
                 "-loglevel",
                 "quiet",
-                "-rtbufsize",
-                "1G",
+                "-framerate",
+                input_frame_rate.to_string().as_str(),
                 "-i",
                 "-",
                 "-pix_fmt",
                 "yuv420p",
-                "-r",
-                input_frame_rate.to_string().as_str(),
                 "-f",
                 "mp4",
                 "-movflags",
@@ -311,36 +307,28 @@ pub fn resize_video(
                 } else {
                     let _ = status_report.send(format!("Frame {}", frame_count));
                 }
-                dbg!("Writing frame");
                 encoder_stdin
                     .write_all(&frame)
                     .expect("Failed writing frame to encoder!");
-                dbg!("Wrote frame");
             }
-            dbg!("Dropping stdin");
             drop(encoder_stdin);
-            dbg!("Dropped stdin");
         });
 
-        dbg!("Waiting for encoder...");
         let output = encoder
             .wait_with_output()
             .expect("Waiting for encoder failed!");
-        dbg!("Waited for encoder.");
 
         output.stdout
     });
 
     let writing_stream = converted_image_stream.map(|frame| match frame {
         Ok(frame) => {
-            dbg!("Sending frame");
             let Ok(()) = frame_sender.send(frame) else {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::UnexpectedEof,
                     "Failed sending frame to encoder!",
                 ));
             };
-            dbg!("Sent frame");
             Ok(())
         }
         Err(e) => Err(e),

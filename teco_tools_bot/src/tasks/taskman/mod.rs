@@ -158,6 +158,7 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
                 .await
         );
 
+        drop(sender);
         let _ = status_updater.await;
 
         let _ = taskman
