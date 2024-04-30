@@ -2297,6 +2297,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "teloxide",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "unicode-segmentation",

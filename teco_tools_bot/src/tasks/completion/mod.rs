@@ -179,16 +179,21 @@ impl Task {
                 };
 
                 if media_data.is_empty() {
-                    goodbye!("Error: failed to process the media; got empty file as a result. Sorry!");
+                    goodbye!(
+                        "Error: failed to process the media; got empty file as a result. Sorry!"
+                    );
                 }
 
                 teloxide_retry!({
                     let send = media_data.clone();
                     if media.is_video {
                         if media.is_gif {
-                            bot.send_animation(data.message.chat.id, InputFile::memory(send).file_name("amogus.mp4"))
-                                .reply_to_message_id(data.message.id)
-                                .await
+                            bot.send_animation(
+                                data.message.chat.id,
+                                InputFile::memory(send).file_name("amogus.mp4"),
+                            )
+                            .reply_to_message_id(data.message.id)
+                            .await
                         } else {
                             bot.send_video(data.message.chat.id, InputFile::memory(send))
                                 .reply_to_message_id(data.message.id)

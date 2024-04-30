@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsStr,
     io::{BufReader, Read, Write},
     process::{ChildStdout, Command, Stdio},
 };
@@ -7,6 +8,7 @@ use crossbeam_channel::Sender;
 use rayon::prelude::*;
 
 use magick_rust::{MagickError, MagickWand};
+use tempfile::NamedTempFile;
 
 use crate::tasks::{ImageFormat, ResizeType};
 
@@ -152,31 +154,26 @@ impl<T: Read> Iterator for SplitIntoBmps<T> {
     }
 }
 
-pub fn count_video_frames_and_framerate(data: &[u8]) -> Result<(u64, f64), std::io::Error> {
+pub fn count_video_frames_and_framerate_and_audio(
+    path: &std::path::Path,
+) -> Result<(u64, f64, bool), std::io::Error> {
     macro_rules! goodbye {
         ($desc: expr) => {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, $desc))
         };
     }
-    let mut counter = Command::new("ffprobe")
+    let counter = Command::new("ffprobe")
         .args([
-            "-loglevel",
-            "quiet",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=nb_frames,avg_frame_rate",
-            "-of",
-            "default=noprint_wrappers=1",
-            "-",
+            OsStr::new("-loglevel"),
+            OsStr::new("quiet"),
+            OsStr::new("-show_entries"),
+            OsStr::new("stream=nb_frames,avg_frame_rate,codec_type"),
+            OsStr::new("-of"),
+            OsStr::new("default=noprint_wrappers=1"),
+            path.as_ref(),
         ])
-        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()?;
-
-    let mut counter_stdin = counter.stdin.take().unwrap();
-
-    let _ = counter_stdin.write_all(data);
 
     let output = counter.wait_with_output()?;
     let Ok(output) = String::from_utf8(output.stdout) else {
@@ -184,16 +181,35 @@ pub fn count_video_frames_and_framerate(data: &[u8]) -> Result<(u64, f64), std::
     };
 
     // output may be in a format like
+    // codec_type=video
     // avg_frame_rate=30/1
     // nb_frames=69
     // Or
+    // codec_type=audio
+    // avg_frame_rate=0/0
+    // codec_type=video
+    // nb_frames=80
     // avg_frame_rate=3200000/53387
     // nb_frames=N/A
 
     let mut count = 0;
     let mut framerate: f64 = 30.0;
+    let mut observing_video_codecs = false;
+    let mut has_audio = false;
 
     for line in output.split('\n') {
+        if line == "codec_type=audio" {
+            observing_video_codecs = false;
+            has_audio = true;
+            continue;
+        }
+        if line == "codec_type=video" {
+            observing_video_codecs = true;
+            continue;
+        }
+        if !observing_video_codecs {
+            continue;
+        }
         if let Some(line) = line.strip_prefix("nb_frames=") {
             if line == "N/A" {
                 continue;
@@ -222,7 +238,7 @@ pub fn count_video_frames_and_framerate(data: &[u8]) -> Result<(u64, f64), std::
         }
     }
 
-    Ok((count, framerate))
+    Ok((count, framerate, has_audio))
 }
 
 pub fn resize_video(
@@ -244,28 +260,32 @@ pub fn resize_video(
             }
         };
     }
-    let (input_frame_count, input_frame_rate) = unfail!(count_video_frames_and_framerate(&data));
+
+    let mut inputfile = unfail!(NamedTempFile::new());
+    unfail!(inputfile.write_all(&data));
+    unfail!(inputfile.flush());
+    let outputfile = unfail!(NamedTempFile::new());
+
+    let (input_frame_count, input_frame_rate, has_audio) =
+        unfail!(count_video_frames_and_framerate_and_audio(inputfile.path()));
 
     let decoder = Command::new("ffmpeg")
         .args([
-            "-loglevel",
-            "error",
-            "-i",
-            "-",
-            "-c:v",
-            "bmp",
-            "-f",
-            "image2pipe",
-            "-",
+            OsStr::new("-y"),
+            OsStr::new("-loglevel"),
+            OsStr::new("error"),
+            OsStr::new("-i"),
+            inputfile.path().as_ref(),
+            OsStr::new("-c:v"),
+            OsStr::new("bmp"),
+            OsStr::new("-f"),
+            OsStr::new("image2pipe"),
+            OsStr::new("-"),
         ])
-        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn();
+
     let mut decoder = unfail!(decoder);
-    let mut decoder_stdin = decoder.stdin.take().unwrap();
-    // Just      spam it out from another thread.
-    // Hacky, but prevents deadlocking with all the iteration here lmao
-    std::thread::spawn(move || decoder_stdin.write_all(&data));
     let data_stream = decoder.stdout.take().unwrap();
 
     let converted_image_stream = {
@@ -283,27 +303,31 @@ pub fn resize_video(
     };
 
     let (frame_sender, frame_receiver) = crossbeam_channel::bounded::<(usize, Vec<u8>)>(256);
+    let outputfilepath_for_encoder = outputfile.path().as_os_str().to_os_string();
 
     let encoder_thread = std::thread::spawn(move || {
         let frame_receiver = frame_receiver;
         let mut encoder = Command::new("ffmpeg")
             .args([
-                "-loglevel",
-                "error",
-                "-framerate",
-                input_frame_rate.to_string().as_str(),
-                "-i",
-                "-",
-                "-pix_fmt",
-                "yuv420p",
-                "-f",
-                "mp4",
-                "-movflags",
-                "empty_moov",
-                "-",
+                OsStr::new("-y"),
+                OsStr::new("-loglevel"),
+                OsStr::new("error"),
+                OsStr::new("-framerate"),
+                OsStr::new(input_frame_rate.to_string().as_str()),
+                OsStr::new("-i"),
+                OsStr::new("-"),
+                OsStr::new("-vf"), // Pad uneven pixels with black.
+                OsStr::new("pad=ceil(iw/2)*2:ceil(ih/2)*2"),
+                // I'd prefer the crop filter instead, but it leaves
+                // a chance of cropping to 0 width/height and stuff breaking :(
+                //OsStr::new("crop=trunc(iw/2)*2:trunc(ih/2)*2"),
+                OsStr::new("-pix_fmt"),
+                OsStr::new("yuv420p"),
+                OsStr::new("-f"),
+                OsStr::new("mp4"),
+                outputfilepath_for_encoder.as_ref(),
             ])
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
             .spawn()
             .expect("Spawning encoder failed!");
         let mut encoder_stdin = encoder.stdin.take().unwrap();
@@ -353,11 +377,7 @@ pub fn resize_video(
             drop(encoder_stdin);
         });
 
-        let output = encoder
-            .wait_with_output()
-            .expect("Waiting for encoder failed!");
-
-        output.stdout
+        encoder.wait().expect("Encoder died!");
     });
 
     let writing_stream = converted_image_stream.map(|frame| match frame {
@@ -379,7 +399,7 @@ pub fn resize_video(
 
     drop(frame_sender);
 
-    let output = encoder_thread.join().map_err(|e| {
+    let encoder_thread = encoder_thread.join().map_err(|e| {
         if let Ok(e) = e.downcast() {
             let e: Box<&'static str> = e;
             *e.as_ref()
@@ -388,5 +408,70 @@ pub fn resize_video(
         }
     });
 
-    Ok(unfail!(output))
+    unfail!(decoder.wait());
+    unfail!(encoder_thread);
+
+    let mut finalfile = if has_audio {
+        // Now to transfer audio... This means we need a THIRD file to put the final result into.
+        let muxfile = unfail!(NamedTempFile::new());
+        let distort = resize_type.is_seam_carve();
+        let audiomuxer = Command::new("ffmpeg")
+            .args([
+                OsStr::new("-y"),
+                OsStr::new("-loglevel"),
+                OsStr::new("error"),
+                OsStr::new("-i"),
+                inputfile.path().as_ref(),
+                OsStr::new("-i"),
+                outputfile.path().as_ref(),
+                OsStr::new("-c:v"),
+                OsStr::new("copy"),
+                OsStr::new("-map"),
+                OsStr::new("1:v:0"),
+                OsStr::new("-map"),
+                OsStr::new("0:a:0"),
+                OsStr::new(if distort { "-af" } else { "-c:a" }),
+                OsStr::new(if distort { "vibrato=f=7:d=1" } else { "copy" }),
+                OsStr::new("-f"),
+                OsStr::new("mp4"),
+                muxfile.path().as_ref(),
+            ])
+            .spawn();
+
+        unfail!(unfail!(audiomuxer).wait());
+
+        muxfile
+    } else {
+        outputfile
+    };
+
+    unfail!(finalfile.reopen());
+
+    let mut output = data;
+    output.clear();
+    unfail!(finalfile.read_to_end(&mut output));
+
+    Ok(output)
+}
+
+#[cfg(test)]
+pub mod test {
+    use crossbeam_channel::unbounded;
+
+    use super::resize_video;
+
+    #[test]
+    pub fn test() {
+        let (sender, receiver) = unbounded();
+        drop(receiver);
+        let data = include_bytes!("/tmp/test/tgtest");
+        let result = resize_video(
+            sender,
+            data.to_vec(),
+            512,
+            512,
+            crate::tasks::ResizeType::Fit,
+        );
+        assert!(!result.unwrap().is_empty());
+    }
 }
