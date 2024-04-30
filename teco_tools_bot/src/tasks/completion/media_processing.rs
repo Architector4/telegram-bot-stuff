@@ -3,6 +3,7 @@ use std::{
     process::{ChildStdout, Command, Stdio},
 };
 
+use crossbeam_channel::Sender;
 use magick_rust::{MagickError, MagickWand};
 
 use crate::tasks::{ImageFormat, ResizeType};
@@ -149,7 +150,81 @@ impl<T: Read> Iterator for SplitIntoBmps<T> {
     }
 }
 
+pub fn count_video_frames_and_framerate(data: &[u8]) -> Result<(u64, f64), std::io::Error> {
+    macro_rules! goodbye {
+        ($desc: expr) => {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, $desc))
+        };
+    }
+    let mut counter = Command::new("ffprobe")
+        .args([
+            "-loglevel",
+            "quiet",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=nb_frames,avg_frame_rate",
+            "-of",
+            "default=noprint_wrappers=1",
+            "-",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+
+    let mut counter_stdin = counter.stdin.take().unwrap();
+
+    let _ = counter_stdin.write_all(data);
+
+    let output = counter.wait_with_output()?;
+    let Ok(output) = String::from_utf8(output.stdout) else {
+        goodbye!("Counter returned non UTF-8 response");
+    };
+
+    // output may be in a format like
+    // avg_frame_rate=30/1
+    // nb_frames=69
+    // Or
+    // avg_frame_rate=3200000/53387
+    // nb_frames=N/A
+
+    let mut count = 0;
+    let mut framerate: f64 = 30.0;
+
+    for line in output.split('\n') {
+        if let Some(line) = line.strip_prefix("nb_frames=") {
+            if line == "N/A" {
+                continue;
+            }
+            let Ok(this_count) = line.parse::<u64>() else {
+                goodbye!("Counter returned a non-integer");
+            };
+            count = this_count;
+        } else if let Some(line) = line.strip_prefix("avg_frame_rate=") {
+            framerate = if let Some(slash) = line.find('/') {
+                let (a, b) = line.split_at(slash);
+                let Ok(a) = a.parse::<f64>() else {
+                    goodbye!("Framerate value a couldn't be parsed");
+                };
+                let Ok(b) = b[1..].parse::<f64>() else {
+                    goodbye!("Framerate value b couldn't be parsed");
+                };
+                a / b
+            } else {
+                let Ok(this_framerate) = line.parse::<f64>() else {
+                    goodbye!("Framerate value is without slash and unparsable");
+                };
+
+                this_framerate
+            }
+        }
+    }
+
+    Ok((count, framerate))
+}
+
 pub fn resize_video(
+    status_report: Sender<String>,
     data: Vec<u8>,
     width: usize,
     height: usize,
@@ -163,7 +238,7 @@ pub fn resize_video(
             }
         };
     }
-    let input_size = data.len();
+    let (input_frame_count, input_frame_rate) = unfail!(count_video_frames_and_framerate(&data));
 
     let decoder = Command::new("ffmpeg")
         .args([
@@ -184,6 +259,8 @@ pub fn resize_video(
         .spawn();
     let mut decoder = unfail!(decoder);
     let mut decoder_stdin = decoder.stdin.take().unwrap();
+    // Just      spam it out from another thread.
+    // Hacky, but prevents deadlocking with all the iteration here lmao
     std::thread::spawn(move || decoder_stdin.write_all(&data));
     let data_stream = decoder.stdout.take().unwrap();
 
@@ -196,30 +273,76 @@ pub fn resize_video(
             Err(e) => Err(e),
         });
 
-    let encoder = Command::new("ffmpeg")
-        .args([
-            "-loglevel",
-            "quiet",
-            "-rtbufsize",
-            "1G",
-            "-i",
-            "-",
-            "-pix_fmt",
-            "yuv420p",
-            "-f",
-            "mp4",
-            "-movflags",
-            "empty_moov",
-            "-",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn();
-    let mut encoder = unfail!(encoder);
-    let mut encoder_stdin = encoder.stdin.take().unwrap();
+    let (frame_sender, frame_receiver) = crossbeam_channel::unbounded::<Vec<u8>>();
+
+    let encoder_thread = std::thread::spawn(move || {
+        let frame_receiver = frame_receiver;
+        let mut encoder = Command::new("ffmpeg")
+            .args([
+                "-loglevel",
+                "quiet",
+                "-rtbufsize",
+                "1G",
+                "-i",
+                "-",
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                input_frame_rate.to_string().as_str(),
+                "-f",
+                "mp4",
+                "-movflags",
+                "empty_moov",
+                "-",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Spawning encoder failed!");
+        let mut encoder_stdin = encoder.stdin.take().unwrap();
+
+        std::thread::spawn(move || {
+            let mut frame_count: usize = 0;
+            while let Ok(frame) = frame_receiver.recv() {
+                frame_count += 1;
+                if input_frame_count != 0 {
+                    let _ = status_report
+                        .send(format!("Frame {} / {}", frame_count, input_frame_count));
+                } else {
+                    let _ = status_report.send(format!("Frame {}", frame_count));
+                }
+                dbg!("Writing frame");
+                encoder_stdin
+                    .write_all(&frame)
+                    .expect("Failed writing frame to encoder!");
+                dbg!("Wrote frame");
+            }
+            dbg!("Dropping stdin");
+            drop(encoder_stdin);
+            dbg!("Dropped stdin");
+        });
+
+        dbg!("Waiting for encoder...");
+        let output = encoder
+            .wait_with_output()
+            .expect("Waiting for encoder failed!");
+        dbg!("Waited for encoder.");
+
+        output.stdout
+    });
 
     let writing_stream = converted_image_stream.map(|frame| match frame {
-        Ok(frame) => encoder_stdin.write_all(&frame),
+        Ok(frame) => {
+            dbg!("Sending frame");
+            let Ok(()) = frame_sender.send(frame) else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "Failed sending frame to encoder!",
+                ));
+            };
+            dbg!("Sent frame");
+            Ok(())
+        }
         Err(e) => Err(e),
     });
 
@@ -227,13 +350,16 @@ pub fn resize_video(
         unfail!(last);
     }
 
-    unfail!(decoder.wait());
-    drop(encoder_stdin);
+    drop(frame_sender);
 
-    let mut output = Vec::with_capacity(input_size);
-    output.clear();
+    let output = encoder_thread.join().map_err(|e| {
+        if let Ok(e) = e.downcast() {
+            let e: Box<&'static str> = e;
+            *e.as_ref()
+        } else {
+            "Joining encoder thread failed!"
+        }
+    });
 
-    unfail!(encoder.stdout.take().unwrap().read_to_end(&mut output));
-
-    Ok(output)
+    Ok(unfail!(output))
 }

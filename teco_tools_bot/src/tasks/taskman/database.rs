@@ -17,7 +17,7 @@ type Pool = sqlx::Pool<Sqlite>;
 const DB_PATH: &str = "sqlite:teco_tools.sqlite";
 static WAS_CONSTRUCTED: AtomicBool = AtomicBool::new(false);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TaskDatabaseInfo {
     pub taskid: i64,
     pub userid: UserId,

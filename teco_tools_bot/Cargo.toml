@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 arch_bot_commons = { version = "0.6.5", path = "../arch_bot_commons" }
+crossbeam-channel = "0.5.12"
 html-escape = "0.2.13"
 log = "0.4.17"
 magick_rust = "0.21.0"

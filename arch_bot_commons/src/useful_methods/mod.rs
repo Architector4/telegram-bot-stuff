@@ -13,6 +13,7 @@ pub struct MessageMediaInfo<'a> {
     pub width: u32,
     pub height: u32,
     pub is_sticker: bool,
+    pub is_gif: bool,
     pub is_video: bool,
     pub is_vector_sticker: bool,
     pub file: &'a FileMeta,
@@ -46,6 +47,7 @@ impl MessageStuff for Message {
                 width: biggest.width,
                 height: biggest.height,
                 is_sticker: false,
+                is_gif: false,
                 is_video: false,
                 is_vector_sticker: false,
                 file: &biggest.file,
@@ -57,15 +59,37 @@ impl MessageStuff for Message {
                 width: sticker.width.into(),
                 height: sticker.height.into(),
                 is_sticker: true,
+                is_gif: false,
                 is_video: sticker.is_video(),
                 is_vector_sticker: sticker.is_animated(),
                 file: &sticker.file,
             });
         }
 
-        // TODO: get videos
+        if let Some(video) = self.video() {
+            return Some(MessageMediaInfo {
+                width: video.width,
+                height: video.height,
+                is_sticker: false,
+                is_gif: false,
+                is_video: true,
+                is_vector_sticker: false,
+                file: &video.file,
+            });
+        }
 
-        
+        if let Some(animation) = self.animation() {
+            return Some(MessageMediaInfo {
+                width: animation.width,
+                height: animation.height,
+                is_sticker: false,
+                is_video: true,
+                is_gif: true,
+                is_vector_sticker: false,
+                file: &animation.file,
+            });
+        }
+
         if let Some(reply_to) = self.reply_to_message() {
             return reply_to.get_media_info();
         }

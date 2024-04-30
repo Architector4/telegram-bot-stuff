@@ -259,9 +259,13 @@ impl Task {
         }
     }
 
-    pub fn produce_queue_message(&self, queue_size: u32) -> String {
+    pub fn produce_queue_message(&self, queue_size: u32, progress_info: Option<&str>) -> String {
         let mut response = if queue_size == 0 {
-            String::from("Working on your task now...\n")
+            if let Some(progress) = progress_info {
+                format!("Working on your task now... {}\n", progress)
+            } else {
+                String::from("Working on your task now...\n")
+            }
         } else {
             format!("Task accepted. Position in queue: {}\n", queue_size)
         };

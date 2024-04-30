@@ -5,6 +5,7 @@ use std::{
 
 pub mod database;
 use arch_bot_commons::{teloxide_retry, useful_methods::BotArchSendMsg};
+use crossbeam_channel::TryRecvError;
 use database::Database;
 use html_escape::encode_text;
 use teloxide::{
@@ -102,18 +103,62 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
         };
 
         // Inform the user that we're doing the task.
-        let response = task_data.task.produce_queue_message(0);
-        let _ = taskman
-            .bot
-            .edit_message_text(
-                task_data.queue_message_chat_id,
-                task_data.queue_message_id,
-                response,
-            )
-            .parse_mode(teloxide::types::ParseMode::Html)
-            .await;
+        macro_rules! produce_queue_message {
+            ($task: expr, $taskman:expr, $progress: expr) => {
+                // Inform the user that we're doing the task.
+                let response = $task.produce_queue_message(0, $progress);
+                let _ = $taskman
+                    .bot
+                    .edit_message_text(
+                        task_data.queue_message_chat_id,
+                        task_data.queue_message_id,
+                        response,
+                    )
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .await;
+            };
+        }
+        produce_queue_message!(task_data.task, taskman, None);
 
-        let result = teloxide_retry!(task_data.task.complete_task(&taskman.bot, &task_data).await);
+        let (sender, receiver) = crossbeam_channel::unbounded();
+
+        let status_updater = {
+            let taskman = taskman.clone();
+            let task = task_data.task.clone();
+            tokio::spawn(async move {
+                let mut updated_to_last_received = true;
+                let mut last_received: Option<String> = None;
+                loop {
+                    match receiver.try_recv() {
+                        Ok(item) => {
+                            last_received = Some(item);
+                            updated_to_last_received = false;
+                        }
+                        Err(TryRecvError::Empty) => {
+                            if !updated_to_last_received {
+                                updated_to_last_received = true;
+                                if let Some(last_received) = &last_received {
+                                    produce_queue_message!(task, taskman, Some(last_received));
+                                }
+                            }
+                            sleep(Duration::from_secs(1)).await;
+                        }
+                        Err(TryRecvError::Disconnected) => {
+                            break;
+                        }
+                    }
+                }
+            })
+        };
+
+        let result = teloxide_retry!(
+            task_data
+                .task
+                .complete_task(sender.clone(), &taskman.bot, &task_data)
+                .await
+        );
+
+        let _ = status_updater.await;
 
         let _ = taskman
             .bot
@@ -220,7 +265,12 @@ pub async fn queue_counter_spinjob(taskman: Weak<Taskman>) {
                 continue;
             };
 
-            let response = taskdata.task.produce_queue_message(queue_size);
+            if queue_size == 0 {
+                // It's being worked on. Don't touch it.
+                continue;
+            }
+
+            let response = taskdata.task.produce_queue_message(queue_size, None);
             //let now = sqlx::types::chrono::Utc::now().to_string();
 
             if taskman

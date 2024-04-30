@@ -94,7 +94,7 @@ pub async fn handle_new_message(
         .await
         .expect("Database died!");
 
-    let response = task.produce_queue_message(queue_size);
+    let response = task.produce_queue_message(queue_size, None);
 
     let queue_response_message = bot
         .send_message(message.chat.id, response)
@@ -238,7 +238,7 @@ pub async fn handle_edited_message(
         .expect("Database died!")
         .unwrap();
 
-    let response = task.produce_queue_message(queue_size);
+    let response = task.produce_queue_message(queue_size, None);
 
     let _ = bot
         .edit_message_text(

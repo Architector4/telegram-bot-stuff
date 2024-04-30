@@ -1,7 +1,11 @@
 mod media_processing;
 use arch_bot_commons::{teloxide_retry, useful_methods::*};
+use crossbeam_channel::Sender;
 use teloxide::{
-    payloads::{SendMessageSetters, SendPhotoSetters, SendStickerSetters, SendVideoSetters},
+    payloads::{
+        SendAnimationSetters, SendMessageSetters, SendPhotoSetters, SendStickerSetters,
+        SendVideoSetters,
+    },
     requests::Requester,
     types::InputFile,
     Bot, RequestError,
@@ -12,6 +16,7 @@ use super::{taskman::database::TaskDatabaseInfo, ImageFormat, Task};
 impl Task {
     pub async fn complete_task(
         &self,
+        status_report: Sender<String>,
         bot: &Bot,
         data: &TaskDatabaseInfo,
     ) -> Result<(), RequestError> {
@@ -144,10 +149,10 @@ impl Task {
                 );
                 let resize_type = *resize_type;
 
-                let is_video = media.is_video;
                 let woot = tokio::task::spawn_blocking(move || {
-                    if is_video {
+                    if media.is_video {
                         media_processing::resize_video(
+                            status_report,
                             media_data,
                             dimensions.0,
                             dimensions.1,
@@ -175,10 +180,16 @@ impl Task {
 
                 teloxide_retry!({
                     let send = media_data.clone();
-                    if is_video {
-                        bot.send_video(data.message.chat.id, InputFile::memory(send))
-                            .reply_to_message_id(data.message.id)
-                            .await
+                    if media.is_video {
+                        if media.is_gif {
+                            bot.send_animation(data.message.chat.id, InputFile::memory(send))
+                                .reply_to_message_id(data.message.id)
+                                .await
+                        } else {
+                            bot.send_video(data.message.chat.id, InputFile::memory(send))
+                                .reply_to_message_id(data.message.id)
+                                .await
+                        }
                     } else if should_be_sticker {
                         bot.send_sticker(data.message.chat.id, InputFile::memory(send))
                             .reply_to_message_id(data.message.id.0)
