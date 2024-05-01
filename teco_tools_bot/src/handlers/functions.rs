@@ -386,7 +386,7 @@ pub const RESIZE: Command = Command {
         "/resize &lt;image&gt; ",
         "[&lt;fit/stretch/crop&gt;] ",
         "[&lt;WxH&gt; or &lt;size%&gt;] ",
-        "[&lt;format&gt;]",
+        "[&lt;format&gt;] ",
         "[&lt;rot&gt;]",
     ),
     description: concat!(
