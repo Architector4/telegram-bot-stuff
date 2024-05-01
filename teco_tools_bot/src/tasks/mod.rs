@@ -156,7 +156,8 @@ impl Task {
                         concat!(
                             "<code>format</code>: Format to save the image in: png, jpeg or preserve\n",
                             "<code>WxH</code>: Width and height of the output image, can't be 0 or too big; OR\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big\n",
+                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big; OR\n",
+                            "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 1. ",
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
@@ -165,8 +166,9 @@ impl Task {
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop =>
                         concat!(
                             "<code>WxH</code>: Width and height of the output image, can't be 0 or too big; OR\n",
+                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big; OR\n",
+                            "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big\n",
                             ),
                 }
             },
@@ -175,7 +177,8 @@ impl Task {
                     ResizeType::ToSticker => "",
                     ResizeType::SeamCarve { ..} => concat!(
                             "<code>WxH</code>: Width and height of the output video, can't be 0 or too big; OR\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big\n",
+                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big; OR\n",
+                            "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 1. ",
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
@@ -184,8 +187,9 @@ impl Task {
                         ),
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop => concat!(
                             "<code>WxH</code>: Width and height of the output video, can't be 0 or too big; OR\n",
+                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big; OR\n",
+                            "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big\n",
                         ),
                 }
             }
@@ -604,6 +608,54 @@ impl Task {
                     }
                 };
 
+                fn aspect_ratio_parser(
+                    (a, mut b): (&str, &str),
+                    starting_dimensions: (NonZeroU32, NonZeroU32),
+                ) -> Option<(NonZeroU32, NonZeroU32)> {
+                    let (width, height) =
+                        (starting_dimensions.0.get(), starting_dimensions.1.get());
+                    let ends_in_plus = if b.ends_with('+') {
+                        b = &b[0..b.len() - 1];
+                        true
+                    } else {
+                        false
+                    };
+
+                    let (a_nzu32, b_nzu32): (NonZeroU32, NonZeroU32) =
+                        (a.parse().ok()?, b.parse().ok()?);
+                    let (a, b) = (a_nzu32.get(), b_nzu32.get());
+
+                    // We now have an aspect ratio. Figure out two resolutions.
+                    // A smaller one that will fit within the original image snugly,
+                    // and a bigger one that will fit the original image within itself snugly.
+
+                    let fit_by_width = (width, (width * b) / a);
+
+                    let fit_by_height = ((height * a) / b, height);
+
+                    // True if fit_by_width is the bigger one,
+                    // i.e. fits the original image within itself.
+                    let fit_by_width_is_bigger =
+                        fit_by_width.0 > fit_by_height.0 || fit_by_width.1 > fit_by_height.1;
+
+                    // If we don't have a plus, then we need the smaller one.
+                    // If we do have a plus, then we need the bigger one.
+                    // Perfect situation for a XOR lol
+                    let fit_by_width_needed = fit_by_width_is_bigger ^ ends_in_plus;
+
+                    let wanted = if fit_by_width_needed {
+                        fit_by_width
+                    } else {
+                        fit_by_height
+                    };
+
+                    // This is very unlikely to fail. It was already parsed as NonZeroU32 in the
+                    // first place, and the math shouldn't exceed the limits.
+                    // Still, maybe the user would specify insanely huge numbers for an aspect
+                    // ratio? lol
+                    Some((NonZeroU32::new(wanted.0)?, NonZeroU32::new(wanted.1)?))
+                }
+
                 for param in params {
                     if !is_video {
                         parse_plain_param_optional!(param, format, help);
@@ -626,7 +678,18 @@ impl Task {
                     } else {
                         parse_plain_param_optional!(param, resize_type, help);
                     }
+
+                    if let Ok(v) = param {
+                        // Try to parse it as an aspect ratio lol
+                        if let Some(parse) = aspect_ratio_parser(v, *old_dimensions) {
+                            new_dimensions = (parse.0, parse.1, 0.0);
+                            continue;
+                        }
+                        // If it fails to parse, the format parser below will complain with all the
+                        // help lol
+                    }
                     parse_keyval_param!(param, format, help);
+
                     parse_stop!(param, help);
                 }
 
