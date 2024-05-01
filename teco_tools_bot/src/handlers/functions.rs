@@ -465,3 +465,41 @@ pub const UNPREMIUM: Command = Command {
 fn unpremium(tp: TaskParams<'_>) -> impl Future<Output = Ret> + '_ {
     premium_inner(tp, false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    /// Validate that bot commands match requirements by Telegram's Bot API
+    fn validate_bot_commands() {
+        let commands = Command::generate_bot_commands();
+        // "At most 100 commands can be specified"
+        // - https://core.telegram.org/bots/api#setmycommands
+        assert!(commands.len() <= 100);
+        #[allow(clippy::len_zero)] // It's clearer here this way in context lol
+        for command in commands {
+            // Everything here is from https://core.telegram.org/bots/api#botcommand
+            // "Text of the command; 1-32 characters."
+
+            // Just in case, this code assumes length is measured in UTF-8 bytes.
+            assert!(command.command.len() >= 1);
+            assert!(command.command.len() <= 32);
+
+            // "Can contain only lowercase English letters, digits and underscores."
+            // Assuming "English letters" is Latin letters...
+            for chr in command.command.chars() {
+                // "ASCII Alphabetic" means all Latin letters, so filter by lowercase too.
+                let is_lowercase_latin = chr.is_ascii_alphabetic() && chr.is_ascii_lowercase();
+                // Assuming only ASCII digits are allowed...
+                let is_digit = "0123456789".contains(chr);
+                let is_underscore = chr == '_';
+
+                assert!(is_lowercase_latin || is_digit || is_underscore);
+            }
+
+            // "Description of the command; 1-256 characters."
+            assert!(command.description.len() >= 1);
+            assert!(command.description.len() <= 256);
+        }
+    }
+}
