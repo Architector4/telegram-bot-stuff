@@ -658,12 +658,12 @@ impl Task {
                     // If we don't have a plus, then we need the smaller one.
                     // If we do have a plus, then we need the bigger one.
                     // Perfect situation for a XOR lol
-                    let fit_by_width_needed = fit_by_width_is_bigger ^ ends_in_plus;
+                    let fit_by_height_needed = fit_by_width_is_bigger ^ ends_in_plus;
 
-                    let wanted = if fit_by_width_needed {
-                        fit_by_width
-                    } else {
+                    let wanted = if fit_by_height_needed {
                         fit_by_height
+                    } else {
+                        fit_by_width
                     };
 
                     // This is very unlikely to fail. It was already parsed as NonZeroU32 in the
