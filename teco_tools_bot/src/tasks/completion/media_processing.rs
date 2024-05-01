@@ -43,7 +43,10 @@ pub fn resize_image(
     // here, but might as well lol
     // And both values in extremely high amounts segfault too, it seems lol
 
-    if wand.get_image_width() <= 1 || wand.get_image_height() <= 1 && resize_type.is_seam_carve() {
+    let iwidth = wand.get_image_width();
+    let iheight = wand.get_image_height();
+
+    if (iwidth <= 1 || iheight <= 1) && resize_type.is_seam_carve() {
         // ImageMagick is likely to abort/segfault in this situation.
         // Switch up resize type.
         resize_type = ResizeType::Stretch;
@@ -67,6 +70,61 @@ pub fn resize_image(
         }
         ResizeType::Fit | ResizeType::ToSticker => {
             wand.fit(width, height);
+        }
+        ResizeType::Crop => {
+            // We want to scale the image so that it completely covers the area,
+            // where at least one dimension is exactly as big,
+            // and then crop the other dimension.
+            //
+
+            // If we imagine it's width...
+            let size_matching_width = (
+                width, // == (iwidth * width) / iwidth
+                (iheight * width) / iwidth,
+            );
+            // If we imagine it's height...
+            let size_matching_height = (
+                (iwidth * height) / iheight,
+                height, // == (iheight * height) / iheight
+            );
+
+            // Pick the biggest.
+            let mut size_pre_crop = if size_matching_width.0 > size_matching_height.0
+                || size_matching_width.1 > size_matching_height.1
+            {
+                size_matching_width
+            } else {
+                size_matching_height
+            };
+
+            // A bit of a safeguard. I don't want to hold images this big
+            // in memory lol
+            if size_pre_crop.0 > 16384 {
+                size_pre_crop.1 = (size_pre_crop.1 * size_pre_crop.0) / 16384;
+                size_pre_crop.0 = 16384;
+            }
+            if size_pre_crop.1 > 16384 {
+                size_pre_crop.0 = (size_pre_crop.0 * size_pre_crop.1) / 16384;
+                size_pre_crop.1 = 16384;
+            }
+
+            // Resize to desired size... Yes, this may stretch, but that's better
+            // since then we keep the exact end size, and the crop below
+            // will not fail then lol
+            wand.resize_image(
+                size_pre_crop.0,
+                size_pre_crop.1,
+                magick_rust::bindings::FilterType_LagrangeFilter,
+            );
+
+            // Now crop the result to desired size.
+            wand.crop_image(
+                width,
+                height,
+                ((size_pre_crop.0 - width) / 2) as isize,
+                ((size_pre_crop.1 - height) / 2) as isize,
+            )?;
+            wand.reset_image_page("")?;
         }
     }
 
@@ -431,7 +489,11 @@ pub fn resize_video(
                 OsStr::new("-map"),
                 OsStr::new("0:a:0"),
                 OsStr::new(if distort { "-af" } else { "-c:a" }),
-                OsStr::new(if distort { "vibrato=f=7:d=1,aformat=s16p" } else { "copy" }),
+                OsStr::new(if distort {
+                    "vibrato=f=7:d=1,aformat=s16p"
+                } else {
+                    "copy"
+                }),
                 OsStr::new("-f"),
                 OsStr::new("mp4"),
                 muxfile.path().as_ref(),

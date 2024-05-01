@@ -384,13 +384,14 @@ async fn to_sticker(tp: TaskParams<'_>) -> Ret {
 pub const RESIZE: Command = Command {
     callname: concat!(
         "/resize &lt;image&gt; ",
-        "[&lt;fit/stretch&gt;] ",
+        "[&lt;fit/stretch/crop&gt;] ",
         "[&lt;WxH&gt; or &lt;size%&gt;] ",
         "[&lt;format&gt;]",
     ),
     description: concat!(
         "Resizes the image by fitting it under a specific resolution, ",
-        "or stretching into it if \"stretch\" is specified. ",
+        "or stretching into it if \"stretch\" is specified, ",
+        "or by filling it and cropping to it if \"crop\" is specified. ",
         "By default will reduce the image's size in half on each side unless a format is specified."
     ),
     function: wrap!(resize),

@@ -19,6 +19,7 @@ pub static MAX_OUTPUT_MEDIA_DIMENSION_SIZE: u32 = 2048;
 pub enum ResizeType {
     Stretch,
     Fit,
+    Crop,
     ToSticker,
     SeamCarve { delta_x: f64, rigidity: f64 },
 }
@@ -41,6 +42,7 @@ impl FromStr for ResizeType {
         match s.to_ascii_lowercase().as_str() {
             "fit" => Ok(Self::Fit),
             "stretch" => Ok(Self::Stretch),
+            "crop" => Ok(Self::Crop),
             _ => Err(()),
         }
     }
@@ -51,6 +53,7 @@ impl Display for ResizeType {
         match self {
             Self::Fit => write!(f, "Fit"),
             Self::Stretch => write!(f, "Stretch"),
+            Self::Crop => write!(f, "Crop"),
             Self::SeamCarve { delta_x, rigidity } => {
                 writeln!(f, "Seam Carving")?;
                 writeln!(f, "<b>delta_x</b>: {}", delta_x)?;
@@ -159,10 +162,10 @@ impl Task {
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
                             "Same requirements as with <code>delta_x</code>."
                             ),
-                    ResizeType::Stretch | ResizeType::Fit =>
+                    ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop =>
                         concat!(
                             "<code>WxH</code>: Width and height of the output image, can't be 0 or too big; OR\n",
-                            "<code>method</code>: Resize method. Can only be \"fit\" or \"stretch\".\n",
+                            "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or too big\n",
                             ),
                 }
@@ -179,9 +182,9 @@ impl Task {
                             "Same requirements as with <code>delta_x</code>."
 
                         ),
-                    ResizeType::Stretch | ResizeType::Fit => concat!(
+                    ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop => concat!(
                             "<code>WxH</code>: Width and height of the output video, can't be 0 or too big; OR\n",
-                            "<code>method</code>: Resize method. Can only be \"fit\" or \"stretch\".\n",
+                            "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or too big\n",
                         ),
                 }
