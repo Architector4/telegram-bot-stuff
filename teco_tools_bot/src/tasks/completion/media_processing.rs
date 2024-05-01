@@ -129,7 +129,16 @@ pub fn resize_image(
         }
     }
 
-    if rotation % 360.0 != 0.0 {
+    if rotation.signum() % 360.0 != 0.0 {
+        if format.supports_alpha_transparency()
+            && rotation.signum() % 90.0 != 0.0
+            && !wand.get_image_alpha_channel()
+        {
+            // No alpha channel, but output format supports it, and
+            // we are rotating by an angle that will add empty space.
+            // Add alpha channel.
+            wand.set_image_alpha_channel(magick_rust::bindings::AlphaChannelOption_OnAlphaChannel)?;
+        }
         let mut pixelwand = PixelWand::new();
         pixelwand.set_alpha(0.0);
         wand.rotate_image(&pixelwand, rotation)?;
