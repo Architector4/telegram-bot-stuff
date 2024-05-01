@@ -517,24 +517,34 @@ impl Task {
                     unreachable!();
                 };
 
-                fn single_dimension_parser(data: &str) -> Option<NonZeroU32> {
-                    let woot: NonZeroU32 = data.parse().ok()?;
-                    Some(woot)
-                }
-                fn percentage_calculator(
+                fn perc_calc(
                     percentage: f32,
-                    starting_dimensions: (NonZeroU32, NonZeroU32),
-                ) -> Option<(NonZeroU32, NonZeroU32, f32)> {
+                    starting_dimension: NonZeroU32,
+                ) -> Option<NonZeroU32> {
                     let factor = percentage / 100.0;
 
                     if !factor.is_normal() || factor <= 0.0 {
                         return None;
                     }
 
-                    let width = (starting_dimensions.0.get() as f32 * factor) as u32;
-                    let height = (starting_dimensions.1.get() as f32 * factor) as u32;
+                    let dim = (starting_dimension.get() as f32 * factor) as u32;
 
-                    Some((width.try_into().ok()?, height.try_into().ok()?, percentage))
+                    dim.try_into().ok()
+                }
+                fn single_dimension_parser(
+                    data: &str,
+                    starting: impl Into<Option<NonZeroU32>>,
+                ) -> Option<NonZeroU32> {
+                    if let Some(starting) = starting.into() {
+                        // Check if it's a percentage.
+                        if let Some(percent) = data.find('%') {
+                            if let Ok(percentage) = data[0..percent].parse::<f32>() {
+                                return perc_calc(percentage, starting);
+                            }
+                        }
+                    }
+                    let woot: NonZeroU32 = data.parse().ok()?;
+                    Some(woot)
                 }
 
                 fn percentage_parser(
@@ -544,7 +554,10 @@ impl Task {
                     let percent = data.find('%')?;
 
                     let percentage: f32 = data[0..percent].parse().ok()?;
-                    percentage_calculator(percentage, starting_dimensions)
+                    let width = perc_calc(percentage, starting_dimensions.0)?;
+                    let height = perc_calc(percentage, starting_dimensions.1)?;
+
+                    Some((width, height, percentage))
                 }
 
                 fn width_height_parser(
@@ -556,16 +569,13 @@ impl Task {
                     let h = &data[x + 1..];
                     // It's width and height.
                     // Try in pixels...
-                    if let Some(width) = single_dimension_parser(w) {
-                        if let Some(height) = single_dimension_parser(h) {
+                    if let Some(width) = single_dimension_parser(w, starting_dimensions.0) {
+                        if let Some(height) = single_dimension_parser(h, starting_dimensions.0) {
                             return Some((width, height));
                         }
                     }
-
-                    // Maybe it's in percentages?
-                    // Cobble it together lol
-                    let (width, _, _) = percentage_parser(w, starting_dimensions)?;
-                    let (_, height, _) = percentage_parser(h, starting_dimensions)?;
+                    let width = single_dimension_parser(w, starting_dimensions.0)?;
+                    let height = single_dimension_parser(h, starting_dimensions.1)?;
 
                     Some((width, height))
                 }
@@ -663,9 +673,11 @@ impl Task {
                             100.0
                         };
 
-                    if let Some(parsed) = percentage_calculator(default_percentage, *old_dimensions)
-                    {
-                        new_dimensions = parsed;
+                    if let (Some(new_width), Some(new_height)) = (
+                        perc_calc(default_percentage, old_dimensions.0),
+                        perc_calc(default_percentage, old_dimensions.1),
+                    ) {
+                        new_dimensions = (new_width, new_height, default_percentage);
                     }
                 } else if media_too_big {
                     return Err(TaskError::Error(format!(

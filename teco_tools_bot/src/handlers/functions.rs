@@ -389,9 +389,8 @@ pub const RESIZE: Command = Command {
         "[&lt;format&gt;]",
     ),
     description: concat!(
-        "Resizes the image by fitting it under a specific resolution, ",
-        "or stretching into it if \"stretch\" is specified, ",
-        "or by filling it and cropping to it if \"crop\" is specified. ",
+        "Resizes a media by fitting (default), stretching or cropping it ",
+        "to specified resolution (or by default to 50% of original). ",
         "By default will reduce the image's size in half on each side unless a format is specified."
     ),
     function: wrap!(resize),
