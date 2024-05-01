@@ -7,7 +7,7 @@ use std::{
 use crossbeam_channel::Sender;
 use rayon::prelude::*;
 
-use magick_rust::{MagickError, MagickWand};
+use magick_rust::{MagickError, MagickWand, PixelWand};
 use tempfile::NamedTempFile;
 
 use crate::tasks::{ImageFormat, ResizeType};
@@ -17,6 +17,7 @@ pub fn resize_image(
     data: &[u8],
     width: usize,
     height: usize,
+    rotation: f64,
     mut resize_type: ResizeType,
     format: ImageFormat,
 ) -> Result<Vec<u8>, MagickError> {
@@ -126,6 +127,12 @@ pub fn resize_image(
             )?;
             wand.reset_image_page("")?;
         }
+    }
+
+    if rotation % 360.0 != 0.0 {
+        let mut pixelwand = PixelWand::new();
+        pixelwand.set_alpha(0.0);
+        wand.rotate_image(&pixelwand, rotation)?;
     }
 
     wand.write_image_blob(format.as_str())
@@ -304,6 +311,7 @@ pub fn resize_video(
     data: Vec<u8>,
     mut width: usize,
     mut height: usize,
+    rotation: f64,
     resize_type: ResizeType,
 ) -> Result<Vec<u8>, String> {
     // We will be encoding into h264, which needs width and height divisible by 2.
@@ -353,8 +361,15 @@ pub fn resize_video(
             .map(|(count, frame)| match frame {
                 Ok(frame) => Ok((
                     count,
-                    resize_image(&frame, width, height, resize_type, ImageFormat::Bmp)
-                        .expect("ImageMagick failed!"),
+                    resize_image(
+                        &frame,
+                        width,
+                        height,
+                        rotation,
+                        resize_type,
+                        ImageFormat::Bmp,
+                    )
+                    .expect("ImageMagick failed!"),
                 )),
                 Err(e) => Err(e),
             })

@@ -94,12 +94,14 @@ impl Task {
             }
             Task::ImageResize {
                 new_dimensions,
+                rotation,
                 percentage: _,
                 format: _,
                 resize_type,
             }
             | Task::VideoResize {
                 new_dimensions,
+                rotation,
                 percentage: _,
                 resize_type,
             } => {
@@ -148,6 +150,7 @@ impl Task {
                     new_dimensions.1.get() as usize,
                 );
                 let resize_type = *resize_type;
+                let rotation = *rotation;
 
                 let woot = tokio::task::spawn_blocking(move || {
                     if media.is_video {
@@ -156,6 +159,7 @@ impl Task {
                             media_data,
                             dimensions.0,
                             dimensions.1,
+                            rotation,
                             resize_type,
                         )
                     } else {
@@ -163,6 +167,7 @@ impl Task {
                             &media_data,
                             dimensions.0,
                             dimensions.1,
+                            rotation,
                             resize_type,
                             format,
                         )

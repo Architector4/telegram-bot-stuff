@@ -123,12 +123,14 @@ pub enum Task {
     },
     ImageResize {
         new_dimensions: (NonZeroU32, NonZeroU32),
+        rotation: f64,
         percentage: f32,
         format: ImageFormat,
         resize_type: ResizeType,
     },
     VideoResize {
         new_dimensions: (NonZeroU32, NonZeroU32),
+        rotation: f64,
         percentage: f32,
         resize_type: ResizeType,
     },
@@ -158,6 +160,7 @@ impl Task {
                             "<code>WxH</code>: Width and height of the output image, can't be 0 or too big; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or too big; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
+                            "<code>rot</code>: Rotate the image by this much after distorting.\n",
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 1. ",
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
@@ -168,6 +171,7 @@ impl Task {
                             "<code>WxH</code>: Width and height of the output image, can't be 0 or too big; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or too big; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
+                            "<code>rot</code>: Rotate the image by this much after resizing.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
                             ),
                 }
@@ -179,6 +183,7 @@ impl Task {
                             "<code>WxH</code>: Width and height of the output video, can't be 0 or too big; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or too big; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
+                            "<code>rot</code>: Rotate the video by this much after distorting.\n",
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 1. ",
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
@@ -189,6 +194,7 @@ impl Task {
                             "<code>WxH</code>: Width and height of the output video, can't be 0 or too big; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or too big; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
+                            "<code>rot</code>: Rotate the video by this much after resizing.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
                         ),
                 }
@@ -228,11 +234,13 @@ impl Task {
             Task::Amogus { amogus } => wp!(amogus),
             Task::VideoResize {
                 new_dimensions,
+                rotation,
                 percentage,
                 resize_type,
             }
             | Task::ImageResize {
                 new_dimensions,
+                rotation,
                 percentage,
                 format: _,
                 resize_type,
@@ -260,6 +268,7 @@ impl Task {
                     write!(output, ", or {}%", percentage)?;
                 }
                 writeln!(output)?;
+                writeln!(output, "<b>Rotation</b>: {}°", rotation)?;
                 write_param!("Resize type", resize_type)?;
                 Ok(())
             }
@@ -290,6 +299,7 @@ impl Task {
     pub fn default_to_sticker() -> Task {
         Task::ImageResize {
             new_dimensions: (NonZeroU32::new(512).unwrap(), NonZeroU32::new(512).unwrap()),
+            rotation: 0.0,
             percentage: 100.0,
             format: ImageFormat::Webp,
             resize_type: ResizeType::ToSticker,
@@ -306,6 +316,7 @@ impl Task {
     ) -> Task {
         Task::ImageResize {
             new_dimensions: (width, height),
+            rotation: 0.0,
             percentage: 100.0,
             format,
             resize_type,
@@ -318,6 +329,7 @@ impl Task {
     ) -> Task {
         Task::VideoResize {
             new_dimensions: (width, height),
+            rotation: 0.0,
             percentage: 100.0,
             resize_type,
         }
@@ -385,6 +397,7 @@ const PARAM_HELP: &str = concat!(
 /// false if it is but failed to parse, or continues if it succeeds.
 macro_rules! parse_plain_param_with_parser_optional {
     ($input: expr, $name: expr, $parser: expr, $help: expr) => {{
+        #[allow(clippy::redundant_closure_call)]
         if let Err(value) = $input {
             if let Ok(value) = $parser(value) {
                 $name = value;
@@ -405,6 +418,7 @@ macro_rules! parse_plain_param_optional {
 
 macro_rules! parse_plain_param_with_parser_mandatory {
     ($input: expr, $name: expr, $parser: expr, $help: expr) => {
+        #[allow(clippy::redundant_closure_call)]
         if let Err(value) = $input {
             let Ok(value) = $parser(value) else {
                 return Err(TaskError::Error(format!(
@@ -492,12 +506,14 @@ impl Task {
             }
             Task::ImageResize {
                 new_dimensions: old_dimensions,
+                rotation,
                 percentage: _,
                 format: _,
                 mut resize_type,
             }
             | Task::VideoResize {
                 new_dimensions: old_dimensions,
+                rotation,
                 percentage: _,
                 mut resize_type,
             } => {
@@ -510,6 +526,7 @@ impl Task {
                 if resize_type == ResizeType::ToSticker {
                     return Ok(self.clone());
                 }
+                let mut rot = *rotation;
                 // The -1.0 is a "default"; if it stays that way after parsing params,
                 // then it will be autocalculated at the end of the function
                 let mut new_dimensions = (old_dimensions.0, old_dimensions.1, -1.0);
@@ -656,6 +673,63 @@ impl Task {
                     Some((NonZeroU32::new(wanted.0)?, NonZeroU32::new(wanted.1)?))
                 }
 
+                /// Returns rotation in degrees, and a boolean denoting if there
+                /// was anyindication that this value is specifically a rotation.
+                fn rotation_parser(data: &str) -> Option<(f64, bool)> {
+                    let new_data_deg = data
+                        .trim_end_matches("deg")
+                        .trim_end_matches('d')
+                        .trim_end_matches('°');
+                    let new_data_rad = data
+                        .trim_end_matches("rad")
+                        .trim_end_matches('r')
+                        .trim_end_matches('㎭');
+
+                    let matched_degrees = new_data_deg.len() != data.len();
+                    let matched_radians = new_data_rad.len() != data.len();
+
+                    let mut matched_anything = matched_degrees || matched_radians;
+
+                    if matched_degrees && matched_radians {
+                        // Both matched. We got nonsense. Bye!
+                        return None;
+                    }
+
+                    // Default assumption is degrees.
+                    let in_radians = matched_radians;
+
+                    let data = if in_radians {
+                        new_data_rad
+                    } else {
+                        new_data_deg
+                    };
+
+                    // Pi/Tau checks because I know someone will try this lmao
+                    let mut rotation: f64 = if data == "π" || data == "Π" {
+                        matched_anything = true;
+                        if matched_radians {
+                            // Nonsense.
+                            return None;
+                        }
+                        std::f64::consts::PI.to_degrees()
+                    } else if data == "τ" || data == "Τ" {
+                        matched_anything = true;
+                        if matched_radians {
+                            // Nonsense.
+                            return None;
+                        }
+                        std::f64::consts::TAU.to_degrees()
+                    } else {
+                        data.parse().ok()?
+                    };
+
+                    if in_radians {
+                        rotation = rotation.to_degrees();
+                    }
+
+                    Some((rotation, matched_anything))
+                }
+
                 for param in params {
                     if !is_video {
                         parse_plain_param_optional!(param, format, help);
@@ -664,6 +738,18 @@ impl Task {
                         param,
                         new_dimensions,
                         dimensions_parser_err,
+                        help
+                    );
+                    parse_plain_param_with_parser_optional!(
+                        param,
+                        rot,
+                        |x| {
+                            if let Some((rotation, true)) = rotation_parser(x) {
+                                Ok(rotation)
+                            } else {
+                                Err(())
+                            }
+                        },
                         help
                     );
 
@@ -689,6 +775,12 @@ impl Task {
                         // help lol
                     }
                     parse_keyval_param!(param, format, help);
+                    parse_keyval_param_with_parser!(
+                        param,
+                        rot,
+                        |x| rotation_parser(x).map(|x| x.0).ok_or(()),
+                        help
+                    );
 
                     parse_stop!(param, help);
                 }
@@ -770,12 +862,14 @@ impl Task {
                 if is_video {
                     Ok(Task::VideoResize {
                         new_dimensions: (new_dimensions.0, new_dimensions.1),
+                        rotation: rot,
                         percentage: new_dimensions.2,
                         resize_type,
                     })
                 } else {
                     Ok(Task::ImageResize {
                         new_dimensions: (new_dimensions.0, new_dimensions.1),
+                        rotation: rot,
                         percentage: new_dimensions.2,
                         resize_type,
                         format,

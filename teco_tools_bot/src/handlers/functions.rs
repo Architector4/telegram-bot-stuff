@@ -387,10 +387,11 @@ pub const RESIZE: Command = Command {
         "[&lt;fit/stretch/crop&gt;] ",
         "[&lt;WxH&gt; or &lt;size%&gt;] ",
         "[&lt;format&gt;]",
+        "[&lt;rot&gt;]",
     ),
     description: concat!(
         "Resizes a media by fitting (default), stretching or cropping it ",
-        "to specified resolution (or by default to 50% of original). ",
+        "to specified resolution (or by default to 50% of original), and rotating by \"rot\" degrees. ",
         "By default will reduce the image's size in half on each side unless a format is specified."
     ),
     function: wrap!(resize),
@@ -408,8 +409,8 @@ pub const DISTORT: Command = Command {
         "[&lt;rigidity&gt;] ",
     ),
     description: concat!(
-        "Distorts the image using seam carving. ",
-        "By default will reduce the image's size in half on each side."
+        "Distorts the image using seam carving and rotates it by \"rot\" degrees. ",
+        "By default will reduce the media's size in half on each side."
     ),
     function: wrap!(distort),
     hidden: false,
