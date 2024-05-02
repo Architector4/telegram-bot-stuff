@@ -192,7 +192,7 @@ impl Task {
                 teloxide_retry!({
                     let send = media_data.clone();
                     if media.is_video {
-                        if media.is_gif {
+                        if media.is_gif || media.is_sticker {
                             bot.send_animation(
                                 data.message.chat.id,
                                 InputFile::memory(send).file_name("amogus.mp4"),
