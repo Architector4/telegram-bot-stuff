@@ -42,6 +42,18 @@ pub async fn check_spam_html(
             return Ok(true);
         }
 
+        if text.contains("<span dir=\"auto\">WikiLeaks</span>")
+            && text.contains("We are here to bring you the truth")
+        {
+            return Ok(true);
+        }
+
+        if text.contains("<span dir=\"auto\">Memento</span>")
+            && text.contains("Uncover hidden truths, decode mysteries")
+        {
+            return Ok(true);
+        }
+
         // Sleep for a bit, so we don't hammer telegram in case there's multiple links.
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
@@ -54,12 +66,31 @@ pub async fn check_spam_html(
 mod tests {
     use super::super::{visit_and_check_if_spam, IsSpamCheckResult};
     use super::*;
-    #[tokio::test]
-    async fn detect_american_groundhog() {
-        let bad_url = Url::parse("https://telegra.ph/JEFFREY-EPSTEIN-SPOTTED-IN-MEXICO-AND-NEW-FAMOUS-PEOPLE-DISCOVERED-ON-THE-JEFFREY-EPSTEIN-LIST-04-18").unwrap();
+
+    async fn check_url(bad_url: &'static str) {
+        let bad_url = Url::parse(bad_url).unwrap();
         assert_eq!(
             visit_and_check_if_spam(&bad_url).await.unwrap(),
-            IsSpamCheckResult::YesUrl
+            IsSpamCheckResult::YesUrl,
+            "failed on {}",
+            bad_url
         );
+    }
+
+    #[tokio::test]
+    async fn detect_american_groundhog() {
+        check_url("https://telegra.ph/JOE-BIDEN-OFFICIALLY-SIGNS-THE-TIKTOK-BAN-BUT-YOU-DONT-KNOW-THE-REAL-REASON-FOR-IT-04-24").await;
+    }
+
+    #[tokio::test]
+    async fn detect_memento() {
+        check_url("https://telegra.ph/Simpsons2024LIVE-04-18").await
+        // Literally the same thing but with a different date:
+        // https://telegra.ph/2-out-of-3-Simpsons-Predictions-in-BANNED-Episode-Come-True-Third-One-Targeting-Donald-Trump-Expected-for-April-30-04-29
+    }
+
+    #[tokio::test]
+    async fn detect_wikileaks() {
+        check_url("https://telegra.ph/Sex-Trafficking-Ring-Organized-By-Famous-People-03-31").await
     }
 }
