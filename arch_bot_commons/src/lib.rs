@@ -169,10 +169,11 @@ macro_rules! teloxide_retry {
             if let Err(e) = &result {
                 if let teloxide::RequestError::RetryAfter(x) = e {
                     tokio::time::sleep(*x).await;
+                } else {
+                    let teloxide::RequestError::Network(_) = e else {
+                        break result;
+                    };
                 }
-                let teloxide::RequestError::Network(_) = e else {
-                    break result;
-                };
 
                 counter += 1;
                 if counter == 5 {
