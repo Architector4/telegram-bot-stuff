@@ -490,7 +490,6 @@ pub fn resize_video(
 
     drop(frame_sender);
 
-
     let encoder_thread = encoder_thread.join().map_err(|e| {
         if let Ok(e) = e.downcast() {
             let e: Box<&'static str> = e;

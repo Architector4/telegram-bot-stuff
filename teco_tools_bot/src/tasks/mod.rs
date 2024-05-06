@@ -208,18 +208,20 @@ impl Task {
         header: bool,
         editable: bool,
     ) -> Result<(), std::fmt::Error> {
-        let mut wrote_first_param = false;
-        macro_rules! write_param {
-            ($name:expr, $value:expr) => {{
+        macro_rules! write_header {
+            () => {{
                 #[allow(unused_assignments)]
-                if header && !wrote_first_param {
+                if header {
                     write!(output, "Parameters")?;
                     if editable {
                         write!(output, " (edit message to change)")?;
                     }
                     writeln!(output, ":")?;
-                    wrote_first_param = true;
                 }
+            }};
+        }
+        macro_rules! write_param {
+            ($name:expr, $value:expr) => {{
                 writeln!(output, "<b>{}</b>: {}", $name, $value.to_string())
             }};
         }
@@ -231,7 +233,10 @@ impl Task {
         }
 
         match self {
-            Task::Amogus { amogus } => wp!(amogus),
+            Task::Amogus { amogus } => {
+                write_header!();
+                wp!(amogus)
+            }
             Task::VideoResize {
                 new_dimensions,
                 rotation,
@@ -245,6 +250,7 @@ impl Task {
                 format: _,
                 resize_type,
             } => {
+                write_header!();
                 if *resize_type == ResizeType::ToSticker {
                     return Ok(());
                 }
