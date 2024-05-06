@@ -169,7 +169,9 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
         if let Err(e) = result {
             let mut request_deleted: bool = false;
             if let RequestError::Api(ApiError::Unknown(s)) = &e {
-                request_deleted = s.contains("message to reply not found");
+                // to telegram: ?????????????????????????????
+                request_deleted = s.contains("Bad Request: message to reply not found")
+                    || s.contains("Bad Request: message to be replied not found");
             };
 
             if !request_deleted {
