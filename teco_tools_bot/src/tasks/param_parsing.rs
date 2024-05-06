@@ -18,7 +18,7 @@ impl<'a> ParamParser<'a> {
             let result = self.0;
             // somewhat more logically correct but who cares
             //self.0 = &self.0[self.0.len()..];
-            self.0 = &"";
+            self.0 = "";
             result
         }
     }
