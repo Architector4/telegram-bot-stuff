@@ -336,10 +336,14 @@ pub fn resize_video(
         };
     }
 
+    let _ = status_report.send("Creating temp files...".to_string());
+
     let mut inputfile = unfail!(NamedTempFile::new());
     unfail!(inputfile.write_all(&data));
     unfail!(inputfile.flush());
     let outputfile = unfail!(NamedTempFile::new());
+
+    let _ = status_report.send("Counting frames...".to_string());
 
     let (input_frame_count, input_frame_rate, has_audio) =
         unfail!(count_video_frames_and_framerate_and_audio(inputfile.path()));
@@ -384,8 +388,11 @@ pub fn resize_video(
             })
     };
 
+    let _ = status_report.send("Initializing encoder...".to_string());
+
     let (frame_sender, frame_receiver) = crossbeam_channel::bounded::<(usize, Vec<u8>)>(256);
     let outputfilepath_for_encoder = outputfile.path().as_os_str().to_os_string();
+    let status_report_for_encoder = status_report.clone();
 
     let encoder_thread = std::thread::spawn(move || {
         let frame_receiver = frame_receiver;
@@ -450,10 +457,10 @@ pub fn resize_video(
                 }
 
                 if input_frame_count != 0 {
-                    let _ = status_report
+                    let _ = status_report_for_encoder
                         .send(format!("Frame {} / {}", frame_number, input_frame_count));
                 } else {
-                    let _ = status_report.send(format!("Frame {}", frame_number));
+                    let _ = status_report_for_encoder.send(format!("Frame {}", frame_number));
                 }
             }
             drop(encoder_stdin);
@@ -479,7 +486,10 @@ pub fn resize_video(
     let reduce = writing_stream.reduce(|| Ok(()), |a, b| if b.is_err() { b } else { a });
     unfail!(reduce);
 
+    let _ = status_report.send("Finalizing...".to_string());
+
     drop(frame_sender);
+
 
     let encoder_thread = encoder_thread.join().map_err(|e| {
         if let Ok(e) = e.downcast() {
@@ -494,6 +504,7 @@ pub fn resize_video(
     unfail!(encoder_thread);
 
     let mut finalfile = if has_audio {
+        let _ = status_report.send("Writing audio...".to_string());
         // Now to transfer audio... This means we need a THIRD file to put the final result into.
         let muxfile = unfail!(NamedTempFile::new());
         let distort = resize_type.is_seam_carve();
