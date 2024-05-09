@@ -66,6 +66,7 @@ version = "0.1.0"
 dependencies = [
  "arch_bot_commons",
  "chrono",
+ "html-escape",
  "log",
  "notify",
  "reqwest",

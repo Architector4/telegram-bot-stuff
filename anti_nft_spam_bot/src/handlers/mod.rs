@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use arch_bot_commons::useful_methods::BotArchSendMsg;
+use html_escape::encode_text;
 use teloxide::{
     prelude::*,
     types::{ChatMember, Me, MessageEntityKind, MessageEntityRef},
@@ -148,12 +150,14 @@ pub async fn handle_message(
                         }
                     };
 
-                    bot.send_message(
+                    bot.archsendmsg(
                         message.chat.id,
                         format!(
-                            "Removed a message from {} containing a spam link.",
-                            offending_user_name
-                        ),
+                            "Removed a message from <code>{}</code> containing a spam link.",
+                            encode_text(&offending_user_name)
+                        )
+                        .as_str(),
+                        None,
                     )
                     .await?;
                     break;
@@ -166,12 +170,13 @@ pub async fn handle_message(
                 }
                 Err(RequestError::Api(ApiError::MessageCantBeDeleted)) => {
                     // No rights?
-                    bot.send_message(
+                    bot.archsendmsg(
                         message.chat.id,
                         concat!(
                             "Tried to remove a message containing a spam link, but failed. ",
                             "Is this bot an admin with ability to remove messages?"
                         ),
+                        None,
                     )
                     .await?;
                     break;
@@ -258,20 +263,20 @@ async fn gather_suspicion(
             // message we're replying to and the message they replied to lol
 
             if marked_anything_as_sus {
-                bot.send_message(
+                bot.archsendmsg(
                     message.chat.id,
                     "Thank you, links in this message will be reviewed for spam.",
+                    message.id,
                 )
-                .reply_to_message_id(message.id)
                 .await?;
             } else if had_links {
                 // Didn't mark anything as sus, but the message had links.
                 // Deductively, this means the links it had are already marked as spam.
-                bot.send_message(
+                bot.archsendmsg(
                     message.chat.id,
                     "Thank you, but the links in this message are already marked as spam.",
+                    message.id,
                 )
-                .reply_to_message_id(message.id)
                 .await?;
             }
         }
