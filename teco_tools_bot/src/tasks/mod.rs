@@ -597,7 +597,7 @@ impl Task {
                     // It's width and height.
                     // Try in pixels...
                     if let Some(width) = single_dimension_parser(w, starting_dimensions.0) {
-                        if let Some(height) = single_dimension_parser(h, starting_dimensions.0) {
+                        if let Some(height) = single_dimension_parser(h, starting_dimensions.1) {
                             return Some((width, height));
                         }
                     }
