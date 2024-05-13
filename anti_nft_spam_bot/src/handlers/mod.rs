@@ -32,6 +32,24 @@ fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
             }
         }
         MessageEntityKind::TextLink { url } => url.clone(),
+        MessageEntityKind::Mention => {
+            // Text will be like "@amogus"
+            // Convert it into "https://t.me/amogus"
+            let username = entity.text().trim_start_matches('@');
+            let url_text = format!("https://t.me/{}", username);
+
+            if let Ok(url) = Url::parse(&url_text) {
+                url
+            } else {
+                // Shouldn't happen, but eh.
+                log::warn!(
+                    "Failed to parse username \"{}\" converted to URL \"{}\"",
+                    entity.text(),
+                    url_text
+                );
+                return None;
+            }
+        }
         _ => {
             return None;
         }
