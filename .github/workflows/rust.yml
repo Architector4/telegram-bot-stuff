@@ -25,7 +25,9 @@ jobs:
           ./configure --with-magick-plus-plus=no --with-perl=no 
           make -j
           sudo make install
+    - uses: Swatinem/rust-cache@v2
     - name: Build
       run: cargo build --verbose
+    - uses: Swatinem/rust-cache@v2
     - name: Run tests
       run: cargo test --verbose
