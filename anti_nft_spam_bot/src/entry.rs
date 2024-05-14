@@ -1,7 +1,10 @@
 use std::{fs, sync::Arc};
 use teloxide::{dptree::deps, prelude::*};
 
-use crate::{database::Database, handlers::reviews::parse_callback_query};
+use crate::{
+    database::Database,
+    handlers::{generate_bot_commands, reviews::parse_callback_query},
+};
 
 /// # Panics
 ///
@@ -15,6 +18,11 @@ pub async fn entry() {
     .expect("Could not load bot key file!");
 
     let bot = Bot::new(key);
+
+    let commands = generate_bot_commands();
+    bot.set_my_commands(commands)
+        .await
+        .expect("Failed to set bot commands!");
 
     let db: Arc<Database> = Database::new(bot.clone()).await.unwrap();
 

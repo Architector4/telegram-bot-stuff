@@ -4,7 +4,7 @@ use arch_bot_commons::useful_methods::BotArchSendMsg;
 use html_escape::encode_text;
 use teloxide::{
     prelude::*,
-    types::{ChatMember, Me, MessageEntityKind, MessageEntityRef},
+    types::{BotCommand, ChatMember, Me, MessageEntityKind, MessageEntityRef},
     ApiError, RequestError,
 };
 use url::Url;
@@ -15,9 +15,8 @@ use crate::{
     types::{Domain, IsSpam},
 };
 
-use self::reviews::handle_review_command;
-
 pub mod reviews;
+use self::reviews::handle_review_command;
 
 /// Get a domain and a URL from this entity, if available.
 fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
@@ -64,6 +63,24 @@ fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
     Some((url, domain))
 }
 
+/// Returns `true` if this chat is private.
+async fn is_sender_admin(bot: &Bot, message: &Message) -> Result<bool, RequestError> {
+    if message.chat.is_private() {
+        return Ok(true);
+    }
+    let is_admin = if let Some(user) = message.from() {
+        let ChatMember { kind, .. } = bot.get_chat_member(message.chat.id, user.id).await?;
+        kind.is_privileged()
+    } else if let Some(chat) = message.sender_chat() {
+        // If it's posted by the chat itself, it's probably an admin.
+        chat.id == message.chat.id
+    } else {
+        false
+    };
+
+    Ok(is_admin)
+}
+
 pub async fn handle_message(
     bot: Bot,
     me: Me,
@@ -79,7 +96,11 @@ pub async fn handle_message(
 
     // First check if it's a private message.
     if message.chat.is_private() {
-        return handle_private_message(bot, me, message, database).await;
+        // Will try handling commands at the end of this function too.
+        if !handle_command(&bot, &me, &message, &database, None).await? {
+            handle_private_message(bot, message).await?;
+        }
+        return Ok(());
     }
 
     // Check if it has any links we want to ban.
@@ -111,23 +132,17 @@ pub async fn handle_message(
         }
     }
 
+    // We may need to check if the sender is an admin in two different places in this function.
+    // If that happens, store the result determined first and reuse.
+    let mut sent_by_admin: Option<bool> = None;
+
     let should_delete = if bad_links_present {
         // oh no!
         // Check if this is an admin of the chat or not.
 
-        let is_admin = {
-            if let Some(user) = message.from() {
-                let ChatMember { kind, .. } = bot.get_chat_member(message.chat.id, user.id).await?;
-                kind.is_privileged()
-            } else if let Some(chat) = message.sender_chat() {
-                // If it's posted by the chat itself, it's probably an admin.
-                chat.id == message.chat.id
-            } else {
-                false
-            }
-        };
+        sent_by_admin = Some(is_sender_admin(&bot, &message).await?);
 
-        if is_admin {
+        if sent_by_admin == Some(true) {
             log::debug!("Skipping deleting message from an admin.");
             false
         } else {
@@ -168,16 +183,22 @@ pub async fn handle_message(
                         }
                     };
 
-                    bot.archsendmsg(
-                        message.chat.id,
-                        format!(
-                            "Removed a message from <code>{}</code> containing a spam link.",
-                            encode_text(&offending_user_name)
+                    if !database
+                        .get_hide_deletes(message.chat.id)
+                        .await
+                        .expect("Database died!")
+                    {
+                        bot.archsendmsg(
+                            message.chat.id,
+                            format!(
+                                "Removed a message from <code>{}</code> containing a spam link.",
+                                encode_text(&offending_user_name)
+                            )
+                            .as_str(),
+                            None,
                         )
-                        .as_str(),
-                        None,
-                    )
-                    .await?;
+                        .await?;
+                    }
                     break;
                 }
                 Err(RequestError::Api(
@@ -208,6 +229,10 @@ pub async fn handle_message(
     } else {
         // It's not spam. Do the other things.
         gather_suspicion(&bot, &message, &database).await?;
+
+        if handle_command(&bot, &me, &message, &database, sent_by_admin).await? {
+            return Ok(());
+        }
     }
 
     Ok(())
@@ -309,8 +334,30 @@ async fn handle_command(
     me: &Me,
     message: &Message,
     database: &Database,
+    mut sent_by_admin: Option<bool>,
 ) -> Result<bool, RequestError> {
-    // Get text of the message.
+    macro_rules! byadmin {
+        () => {{
+            if sent_by_admin.is_none() {
+                sent_by_admin = Some(is_sender_admin(bot, message).await?);
+            }
+            sent_by_admin.unwrap()
+        }};
+    }
+    macro_rules! respond {
+        ($text:expr) => {
+            bot.archsendmsg(message.chat.id, $text, message.id).await?;
+        };
+    }
+
+    macro_rules! goodbye {
+        ($text:expr) => {{
+            respond!($text);
+            return Ok(true);
+        }};
+    }
+    let is_private = message.chat.is_private();
+
     let Some(text) = message.text() else {
         return Ok(false);
     };
@@ -343,26 +390,53 @@ async fn handle_command(
     //.await?;
 
     let command_processed: bool = match command.as_str() {
-        "/review" => handle_review_command(bot, message, database).await?,
+        "/review" if is_private => handle_review_command(bot, message, database).await?,
+        "/hide_deletes" | "/show_deletes" => {
+            if message.chat.is_private() || !byadmin!() {
+                goodbye!("This command can only be used by admins in group chats.");
+            }
+
+            let new_state = command.as_str() == "/hide_deletes";
+
+            let old_state = database
+                .set_hide_deletes(message.chat.id, new_state)
+                .await
+                .expect("Database died!");
+
+            let response = match (old_state, new_state) {
+                (false, false) => "This chat doesn't hide spam deletion notifications already.",
+                (false, true) => concat!(
+                    "I will no longer notify about messages being deleted. ",
+                    "Note that this may lead to confusion in case I delete a ",
+                    "message with a legitimate link due to a false positive. "
+                ),
+                (true, false) => "From now on I will notify about spam messages being deleted.",
+                (true, true) => "This chat has spam delete notifications hidden already.",
+            };
+
+            goodbye!(response);
+        }
         // Any kind of "/start", "/help" commands would yield false and
-        // hence cause the help message to be printed.
+        // hence cause the help message to be printed if this is a private chat.
+        // See definition of handle_private_message.
         _ => false,
     };
 
     Ok(command_processed)
 }
 
-pub async fn handle_private_message(
-    bot: Bot,
-    me: Me,
-    message: Message,
-    database: Arc<Database>,
-) -> Result<(), RequestError> {
-    // Telegram automatically trims preceding and following newlines, so this is fine.
+pub fn generate_bot_commands() -> Vec<BotCommand> {
+    vec![
+        BotCommand::new("/hide_deletes", "Hide spam deletion notification messages."),
+        BotCommand::new(
+            "/show_deletes",
+            "Don't hide spam deletion notification messages.",
+        ),
+    ]
+}
 
-    if handle_command(&bot, &me, &message, &database).await? {
-        return Ok(());
-    }
+pub async fn handle_private_message(bot: Bot, message: Message) -> Result<(), RequestError> {
+    // Nothing much to do here lol
 
     bot.send_message(
         message.chat.id,
@@ -373,7 +447,7 @@ To use this bot, add it to a chat and give it administrator status with \"Remove
 
 No further setup is required. A message will be sent when spam is removed.
 
-This bot may have more commands in the future, but not yet.",
+For available commands, type / into the message text box below and see the previews.",
     )
     .await?;
     Ok(())

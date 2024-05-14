@@ -13,7 +13,7 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
     Executor, Row, Sqlite,
 };
-use teloxide::Bot;
+use teloxide::{types::ChatId, Bot};
 use tokio::sync::{watch, Mutex, Notify};
 use url::Url;
 
@@ -101,6 +101,18 @@ impl Database {
                     manually_reviewed INTEGER NOT NULL DEFAULT 0,
                     from_spam_list INTEGER NOT NULL DEFAULT 0,
                     spam_checker_version INTEGER NOT NULL DEFAULT 0
+                ) STRICT;",
+        ))
+        .await?;
+
+        // HIDE_DELETES:
+        //      An admin of chats listed here asked to hide
+        //      bot's notifications about deleting a message.
+        // chatid (unique primary key, i64)
+        pool.execute(sqlx::query(
+            "
+                CREATE TABLE IF NOT EXISTS hide_deletes (
+                    chatid INTEGER PRIMARY KEY NOT NULL
                 ) STRICT;",
         ))
         .await?;
@@ -603,6 +615,47 @@ impl Database {
         }
 
         Ok(())
+    }
+
+    /// Gets whether or not admins of this chat want the bot to not show
+    /// notifications about deleting a message.
+    pub async fn get_hide_deletes(&self, chatid: ChatId) -> Result<bool, Error> {
+        sqlx::query("SELECT 1 FROM hide_deletes WHERE chatid=?")
+            .bind(chatid.0)
+            .fetch_optional(&self.pool)
+            .await
+            .map(|x| x.is_some())
+    }
+
+    /// Sets whether or not admins of this chat want the bot to not show
+    /// notifications about deleting a message. Returns the previous state.
+    pub async fn set_hide_deletes(&self, chatid: ChatId, hide: bool) -> Result<bool, Error> {
+        let old_state = self.get_hide_deletes(chatid).await?;
+
+        if old_state == hide {
+            // It's already set to that. Do nothing, return true.
+            return Ok(hide);
+        }
+
+        // Aw, we actually have to do things now :(
+
+        if hide {
+            sqlx::query(
+                "INSERT INTO hide_deletes (chatid)
+                    VALUES (?)
+                    ON CONFLICT DO NOTHING;",
+            )
+            .bind(chatid.0)
+            .execute(&self.pool)
+            .await?;
+        } else {
+            sqlx::query("DELETE FROM hide_deletes WHERE chatid=?;")
+                .bind(chatid.0)
+                .execute(&self.pool)
+                .await?;
+        }
+
+        Ok(old_state)
     }
 }
 
