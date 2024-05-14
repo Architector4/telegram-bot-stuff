@@ -372,18 +372,21 @@ pub fn resize_video(
             .enumerate()
             .par_bridge()
             .map(|(count, frame)| match frame {
-                Ok(frame) => Ok((
-                    count,
-                    resize_image(
+                Ok(frame) => {
+                    let resize_result = resize_image(
                         &frame,
                         width,
                         height,
                         rotation,
                         resize_type,
                         ImageFormat::Bmp,
-                    )
-                    .expect("ImageMagick failed!"),
-                )),
+                    );
+
+                    match resize_result {
+                        Ok(resize) => Ok((count, resize)),
+                        Err(e) => Err(std::io::Error::other(e)),
+                    }
+                }
                 Err(e) => Err(e),
             })
     };
