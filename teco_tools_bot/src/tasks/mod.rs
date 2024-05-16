@@ -635,8 +635,10 @@ impl Task {
                     (a, mut b): (&str, &str),
                     starting_dimensions: (NonZeroU32, NonZeroU32),
                 ) -> Option<(NonZeroU32, NonZeroU32)> {
-                    let (width, height) =
-                        (starting_dimensions.0.get(), starting_dimensions.1.get());
+                    let (width, height) = (
+                        starting_dimensions.0.get() as f64,
+                        starting_dimensions.1.get() as f64,
+                    );
                     let ends_in_plus = if b.ends_with('+') {
                         b = &b[0..b.len() - 1];
                         true
@@ -644,9 +646,7 @@ impl Task {
                         false
                     };
 
-                    let (a_nzu32, b_nzu32): (NonZeroU32, NonZeroU32) =
-                        (a.parse().ok()?, b.parse().ok()?);
-                    let (a, b) = (a_nzu32.get(), b_nzu32.get());
+                    let (a, b): (f64, f64) = (a.parse().ok()?, b.parse().ok()?);
 
                     // We now have an aspect ratio. Figure out two resolutions.
                     // A smaller one that will fit within the original image snugly,
@@ -672,11 +672,27 @@ impl Task {
                         fit_by_width
                     };
 
+                    let wanted = (wanted.0.round(), wanted.1.round());
+
+                    // Resulting dimensions may not fit as u32 or be nonsense. Fail if so.
+                    if !wanted.0.is_finite()
+                        || !wanted.1.is_finite()
+                        || wanted.0 <= 0.0
+                        || wanted.0 > u32::MAX.into()
+                        || wanted.1 <= 0.0
+                        || wanted.1 > u32::MAX.into()
+                    {
+                        return None;
+                    }
+
                     // This is very unlikely to fail. It was already parsed as NonZeroU32 in the
                     // first place, and the math shouldn't exceed the limits.
                     // Still, maybe the user would specify insanely huge numbers for an aspect
                     // ratio? lol
-                    Some((NonZeroU32::new(wanted.0)?, NonZeroU32::new(wanted.1)?))
+                    Some((
+                        NonZeroU32::new(wanted.0 as u32)?,
+                        NonZeroU32::new(wanted.1 as u32)?,
+                    ))
                 }
 
                 /// Returns rotation in degrees, and a boolean denoting if there
