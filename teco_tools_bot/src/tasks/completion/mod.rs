@@ -58,13 +58,9 @@ impl Task {
 
                 let mut response;
 
-                // Those are maximum amogus counts that can fit in
-                // a 4096 characters long message lol
-                //let response_str = if sign == -1 && count > 255 || sign == 1 && count > 585 {
-                // Let's be more modest than that.
                 let response_str = if count > 16 {
                     if sign == -1 {
-                        "<b>TOO MUCH NEGATIVE AMOGUS</b>"
+                        "<b>TOO MUCH ANTIMOGUS</b>"
                     } else {
                         "<b>TOO MUCH AMOGUS</b>"
                     }
@@ -72,7 +68,7 @@ impl Task {
                     response = String::from("<b>");
 
                     let response_single = match sign {
-                        -1 => "NEGATIVE AMOGUS ",
+                        -1 => "ANTIMOGUS ",
                         1 => "AMOGUS ",
                         0 => return Ok(()),
                         _ => unreachable!(),
