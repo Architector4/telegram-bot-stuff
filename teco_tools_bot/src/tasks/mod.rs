@@ -27,7 +27,7 @@ pub enum ResizeType {
 impl ResizeType {
     pub fn default_seam_carve() -> Self {
         Self::SeamCarve {
-            delta_x: 1.0,
+            delta_x: 2.0,
             rigidity: 0.0,
         }
     }
@@ -161,7 +161,7 @@ impl Task {
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>rot</code>: Rotate the image by this much after distorting.\n",
-                            "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 1. ",
+                            "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
                             "Same requirements as with <code>delta_x</code>."
@@ -184,7 +184,7 @@ impl Task {
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>rot</code>: Rotate the video by this much after distorting.\n",
-                            "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 1. ",
+                            "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
                             "Same requirements as with <code>delta_x</code>."
