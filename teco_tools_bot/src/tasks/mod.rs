@@ -156,9 +156,9 @@ impl Task {
                     ResizeType::ToSticker => "",
                     ResizeType::SeamCarve { .. } =>
                         concat!(
-                            "<code>format</code>: Format to save the image in: png, jpeg or preserve\n",
-                            "<code>WxH</code>: Width and height of the output image, can't be 0 or too big; OR\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big; OR\n",
+                            "<code>format</code>: Format to save the image in: jpeg, webp or preserve\n",
+                            "<code>WxH</code>: Width and height of the output image, can't be 0 or bigger than 2048x2048; OR\n",
+                            "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>rot</code>: Rotate the image by this much after distorting.\n",
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 1. ",
@@ -168,8 +168,8 @@ impl Task {
                             ),
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop =>
                         concat!(
-                            "<code>WxH</code>: Width and height of the output image, can't be 0 or too big; OR\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big; OR\n",
+                            "<code>WxH</code>: Width and height of the output image, can't be 0 or bigger than 2048x2048; OR\n",
+                            "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>rot</code>: Rotate the image by this much after resizing.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
@@ -180,8 +180,8 @@ impl Task {
                 match resize_type {
                     ResizeType::ToSticker => "",
                     ResizeType::SeamCarve { ..} => concat!(
-                            "<code>WxH</code>: Width and height of the output video, can't be 0 or too big; OR\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big; OR\n",
+                            "<code>WxH</code>: Width and height of the output video, can't be 0 or bigger than 2048x2048; OR\n",
+                            "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>rot</code>: Rotate the video by this much after distorting.\n",
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 1. ",
@@ -191,8 +191,8 @@ impl Task {
 
                         ),
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop => concat!(
-                            "<code>WxH</code>: Width and height of the output video, can't be 0 or too big; OR\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or too big; OR\n",
+                            "<code>WxH</code>: Width and height of the output video, can't be 0 or bigger than 2048x2048; OR\n",
+                            "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>rot</code>: Rotate the video by this much after resizing.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
