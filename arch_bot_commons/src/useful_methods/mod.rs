@@ -15,20 +15,26 @@ pub struct MessageMediaInfo<'a> {
     pub is_sticker: bool,
     pub is_gif: bool,
     pub is_video: bool,
+    pub is_image: bool,
+    pub is_sound: bool,
+    pub is_voice_or_video_note: bool,
     pub is_vector_sticker: bool,
     pub file: &'a FileMeta,
 }
 
 impl<'a> MessageMediaInfo<'a> {
     pub fn is_image(&self) -> bool {
-        !self.is_video && !self.is_vector_sticker
+        !self.is_video && self.is_raster()
+    }
+    pub fn is_raster(&self) -> bool {
+        !self.is_vector_sticker && !self.is_sound
     }
 }
 
 pub trait MessageStuff {
     fn text_full(&self) -> Option<&str>;
     #[allow(clippy::result_unit_err)] // i'm lazy lol
-    /// On success, returns width, height and file metadata of the image,
+    /// On success, returns info about image/video/sound in the video,
     /// as well as bool that is `true` if it's a sticker.
     ///
     /// # Errors
@@ -49,6 +55,9 @@ impl MessageStuff for Message {
                 is_sticker: false,
                 is_gif: false,
                 is_video: false,
+                is_image: true,
+                is_sound: false,
+                is_voice_or_video_note: false,
                 is_vector_sticker: false,
                 file: &biggest.file,
             });
@@ -61,6 +70,9 @@ impl MessageStuff for Message {
                 is_sticker: true,
                 is_gif: false,
                 is_video: sticker.is_video(),
+                is_sound: false,
+                is_image: !sticker.is_video() && !sticker.is_animated(),
+                is_voice_or_video_note: false,
                 is_vector_sticker: sticker.is_animated(),
                 file: &sticker.file,
             });
@@ -73,6 +85,9 @@ impl MessageStuff for Message {
                 is_sticker: false,
                 is_gif: false,
                 is_video: true,
+                is_image: false,
+                is_sound: false,
+                is_voice_or_video_note: false,
                 is_vector_sticker: false,
                 file: &video.file,
             });
@@ -85,10 +100,46 @@ impl MessageStuff for Message {
                 is_sticker: false,
                 is_video: true,
                 is_gif: true,
+                is_image: false,
+                is_sound: false,
+                is_voice_or_video_note: false,
                 is_vector_sticker: false,
                 file: &animation.file,
             });
         }
+
+        if let Some(video_note) = self.video_note() {
+            if let Some(thumb) = &video_note.thumb {
+            return Some(MessageMediaInfo {
+                width: thumb.width,
+                height: thumb.height,
+                is_sticker: false,
+                is_video: true,
+                is_gif: false,
+                is_image: false,
+                is_sound: false,
+                is_voice_or_video_note: true,
+                is_vector_sticker: false,
+                file: &video_note.file,
+            });
+            }
+        }
+
+        if let Some(voice) = self.voice() {
+            return Some(MessageMediaInfo {
+                width: 0,
+                height: 0,
+                is_sticker: false,
+                is_video: false,
+                is_gif: false,
+                is_image: false,
+                is_sound: true,
+                is_voice_or_video_note: true,
+                is_vector_sticker: false,
+                file: &voice.file,
+            });
+        }
+        
 
         if let Some(reply_to) = self.reply_to_message() {
             return reply_to.get_media_info();

@@ -331,8 +331,8 @@ async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
     let media = tp.message.get_media_info();
     let media = match media {
         Some(media) => {
-            if media.is_vector_sticker {
-                goodbye_cancel!("can't work with animated stickers.");
+            if !media.is_raster() {
+                goodbye_cancel!("can't work with animated stickers nor voice messages.");
             }
             if media.file.size > 20 * 1000 * 1000 {
                 goodbye_cancel!("media is too large.");

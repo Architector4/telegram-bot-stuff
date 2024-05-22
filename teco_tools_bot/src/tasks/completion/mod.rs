@@ -104,8 +104,10 @@ impl Task {
                 let media = data.message.get_media_info();
                 let media = match media {
                     Some(media) => {
-                        if media.is_vector_sticker {
-                            goodbye!("Error: can't work with animated stickers.");
+                        if !media.is_raster() {
+                            goodbye!(
+                                "Error: can't work with animated stickers nor voice messages."
+                            );
                         }
                         if media.file.size > 20 * 1000 * 1000 {
                             goodbye!("Error: media is too large.");
