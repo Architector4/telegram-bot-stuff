@@ -72,7 +72,7 @@ pub fn resize_image(
         ResizeType::Fit | ResizeType::ToSticker => {
             wand.fit(width, height);
         }
-        ResizeType::Crop => {
+        ResizeType::Crop | ResizeType::ToCustomEmoji => {
             // We want to scale the image so that it completely covers the area,
             // where at least one dimension is exactly as big,
             // and then crop the other dimension.

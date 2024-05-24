@@ -21,6 +21,7 @@ pub enum ResizeType {
     Fit,
     Crop,
     ToSticker,
+    ToCustomEmoji,
     SeamCarve { delta_x: f64, rigidity: f64 },
 }
 
@@ -60,6 +61,7 @@ impl Display for ResizeType {
                 writeln!(f, "<b>rigidity</b>: {}", rigidity)
             }
             Self::ToSticker => write!(f, "To sticker"),
+            Self::ToCustomEmoji => write!(f, "To custom emoji"),
         }
     }
 }
@@ -153,7 +155,7 @@ impl Task {
             }
             Task::ImageResize { resize_type, ..} => {
                 match resize_type {
-                    ResizeType::ToSticker => "",
+                    ResizeType::ToSticker | ResizeType::ToCustomEmoji => "",
                     ResizeType::SeamCarve { .. } =>
                         concat!(
                             "<code>format</code>: Format to save the image in: jpeg, webp or preserve\n",
@@ -178,7 +180,7 @@ impl Task {
             },
             Task::VideoResize { resize_type, .. } => {
                 match resize_type {
-                    ResizeType::ToSticker => "",
+                    ResizeType::ToSticker| ResizeType::ToCustomEmoji  => "",
                     ResizeType::SeamCarve { ..} => concat!(
                             "<code>WxH</code>: Width and height of the output video, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
@@ -250,10 +252,12 @@ impl Task {
                 format: _,
                 resize_type,
             } => {
-                write_header!();
-                if *resize_type == ResizeType::ToSticker {
+                if let ResizeType::ToSticker | ResizeType::ToCustomEmoji = resize_type {
                     return Ok(());
                 }
+
+                write_header!();
+
                 if let Task::ImageResize { format, .. } = self {
                     write_param!("Format", format)?;
                 }
@@ -309,6 +313,15 @@ impl Task {
             percentage: 100.0,
             format: ImageFormat::Webp,
             resize_type: ResizeType::ToSticker,
+        }
+    }
+    pub fn default_to_custom_emoji() -> Task {
+        Task::ImageResize {
+            new_dimensions: (NonZeroU32::new(100).unwrap(), NonZeroU32::new(100).unwrap()),
+            rotation: 0.0,
+            percentage: 100.0,
+            format: ImageFormat::Webp,
+            resize_type: ResizeType::ToCustomEmoji,
         }
     }
     pub fn default_amogus() -> Task {
@@ -529,7 +542,7 @@ impl Task {
                     (true, ImageFormat::Preserve)
                 };
 
-                if resize_type == ResizeType::ToSticker {
+                if let ResizeType::ToSticker | ResizeType::ToCustomEmoji = resize_type {
                     return Ok(self.clone());
                 }
                 let mut rot = *rotation;

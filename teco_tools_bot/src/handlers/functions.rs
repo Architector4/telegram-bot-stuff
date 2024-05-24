@@ -23,6 +23,7 @@ pub const COMMANDS: &[Command] = &[
     RESIZE,
     REVERSE_TEXT,
     TO_STICKER,
+    TO_CUSTOM_EMOJI,
     ____SEPARATOR,
     PREMIUM,
     UNPREMIUM,
@@ -381,6 +382,31 @@ async fn to_sticker(tp: TaskParams<'_>) -> Ret {
 
     Ok(Ok(Task::default_to_sticker()))
 }
+pub const TO_CUSTOM_EMOJI: Command = Command {
+    callname: "/to_custom_emoji &lt;image&gt;",
+    description: "Converts the image into a 100x100 WEBP suitable for usage as a custom emoji.",
+    function: wrap!(to_custom_emoji),
+    hidden: false,
+};
+async fn to_custom_emoji(tp: TaskParams<'_>) -> Ret {
+    let photo = tp.message.get_media_info();
+    let _photo = match photo {
+        Some(photo) => {
+            if !photo.is_image() {
+                goodbye_cancel!("can't work with video nor animated nor video stickers.");
+            }
+            if photo.file.size > 20 * 1000 * 1000 {
+                goodbye_cancel!("media is too large.");
+            }
+            photo
+        }
+        None => goodbye_cancel!("can't find an image."),
+    };
+
+    Ok(Ok(Task::default_to_custom_emoji()))
+}
+
+
 pub const RESIZE: Command = Command {
     callname: concat!(
         "/resize &lt;image&gt; ",
