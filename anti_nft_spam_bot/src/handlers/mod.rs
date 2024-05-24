@@ -432,6 +432,7 @@ pub fn generate_bot_commands() -> Vec<BotCommand> {
             "/show_deletes",
             "Don't hide spam deletion notification messages.",
         ),
+        BotCommand::new("/spam", "Mark links in a message for review as spam."),
     ]
 }
 
