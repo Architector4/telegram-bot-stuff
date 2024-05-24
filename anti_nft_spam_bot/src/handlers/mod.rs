@@ -377,20 +377,12 @@ async fn handle_command(
     let command = command.trim_end_matches(username.as_str()).to_lowercase();
     let _params = &text[command_full_len..].trim_start();
 
-    //bot.send_message(
-    //    message.chat.id,
-    //    format!(
-    //        "Seen command: {}\nWith params of length {}: {}",
-    //        command,
-    //        params.len(),
-    //        params
-    //    ),
-    //)
-    //.reply_to_message_id(message.id)
-    //.await?;
-
     let command_processed: bool = match command.as_str() {
         "/review" if is_private => handle_review_command(bot, message, database).await?,
+        "/spam" | "/scam" => {
+            gather_suspicion(bot, message, database).await?;
+            true
+        }
         "/hide_deletes" | "/show_deletes" => {
             if message.chat.is_private() || !byadmin!() {
                 goodbye!("This command can only be used by admins in group chats.");
