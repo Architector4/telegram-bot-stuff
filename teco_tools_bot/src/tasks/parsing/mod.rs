@@ -255,9 +255,7 @@ impl Task {
                     return Ok(self.clone());
                 }
                 let mut rot = *rotation;
-                // The -1.0 is a "default"; if it stays that way after parsing params,
-                // then it will be autocalculated at the end of the function
-                let mut new_dimensions = (old_dimensions.0, old_dimensions.1, -1.0);
+                let mut new_dimensions = (old_dimensions.0, old_dimensions.1, None);
                 let ResizeType::SeamCarve {
                     mut delta_x,
                     mut rigidity,
@@ -318,7 +316,7 @@ impl Task {
                         let v = (k, v);
                         // Try to parse it as an aspect ratio lol
                         if let Some(parse) = aspect_ratio_parser(v, *old_dimensions) {
-                            new_dimensions = (parse.0, parse.1, 0.0);
+                            new_dimensions = (parse.0, parse.1, None);
                             continue;
                         }
                         // If it fails to parse, the format parser below will complain with all the
@@ -355,7 +353,7 @@ impl Task {
                     smallest_percent as f32
                 }
 
-                if new_dimensions.2 == -1.0 {
+                if new_dimensions.2.is_none() {
                     // No width/height nor percentage was specified.
                     // Preset one.
 
@@ -382,7 +380,7 @@ impl Task {
                         perc_calc(default_percentage, old_dimensions.0),
                         perc_calc(default_percentage, old_dimensions.1),
                     ) {
-                        new_dimensions = (new_width, new_height, default_percentage);
+                        new_dimensions = (new_width, new_height, Some(default_percentage));
                     }
                 } else if media_too_big {
                     return Err(TaskError::Error(format!(
@@ -724,14 +722,15 @@ fn width_height_parser_test() {
 
 /// Given either a percentage or width/height specification
 /// and starting dimensions, parse, compute, return output dimensions.
-/// Also computes a percentage value, if applicable, else returns 0.0 for it.
+/// Also computes a percentage value of starting dimensions, if applicable.
 fn dimensions_parser(
     data: &str,
     starting_dimensions: (NonZeroU32, NonZeroU32),
-) -> Option<(NonZeroU32, NonZeroU32, f32)> {
+) -> Option<(NonZeroU32, NonZeroU32, Option<f32>)> {
     if let Some(x) = width_height_parser(data, starting_dimensions) {
-        Some((x.0, x.1, 0.0))
+        Some((x.0, x.1, None))
     } else {
-        percentage_parser(data, starting_dimensions)
+        let result = percentage_parser(data, starting_dimensions)?;
+        Some((result.0, result.1, Some(result.2)))
     }
 }

@@ -122,14 +122,14 @@ pub enum Task {
     ImageResize {
         new_dimensions: (NonZeroU32, NonZeroU32),
         rotation: f64,
-        percentage: f32,
+        percentage: Option<f32>,
         format: ImageFormat,
         resize_type: ResizeType,
     },
     VideoResize {
         new_dimensions: (NonZeroU32, NonZeroU32),
         rotation: f64,
-        percentage: f32,
+        percentage: Option<f32>,
         resize_type: ResizeType,
     },
 }
@@ -214,7 +214,7 @@ impl Task {
                         new_dimensions.0, new_dimensions.1
                     )?;
                 }
-                if *percentage != 0.0 {
+                if let Some(percentage) = percentage {
                     write!(output, ", or {}%", percentage)?;
                 }
                 writeln!(output)?;
@@ -250,7 +250,7 @@ impl Task {
         Task::ImageResize {
             new_dimensions: (NonZeroU32::new(512).unwrap(), NonZeroU32::new(512).unwrap()),
             rotation: 0.0,
-            percentage: 100.0,
+            percentage: None,
             format: ImageFormat::Webp,
             resize_type: ResizeType::ToSticker,
         }
@@ -259,7 +259,7 @@ impl Task {
         Task::ImageResize {
             new_dimensions: (NonZeroU32::new(100).unwrap(), NonZeroU32::new(100).unwrap()),
             rotation: 0.0,
-            percentage: 100.0,
+            percentage: None,
             format: ImageFormat::Webp,
             resize_type: ResizeType::ToCustomEmoji,
         }
@@ -276,7 +276,7 @@ impl Task {
         Task::ImageResize {
             new_dimensions: (width, height),
             rotation: 0.0,
-            percentage: 100.0,
+            percentage: Some(100.0),
             format,
             resize_type,
         }
@@ -289,7 +289,7 @@ impl Task {
         Task::VideoResize {
             new_dimensions: (width, height),
             rotation: 0.0,
-            percentage: 100.0,
+            percentage: Some(100.0),
             resize_type,
         }
     }
