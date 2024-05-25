@@ -144,62 +144,6 @@ impl Task {
         task_params.make_task()
     }
 
-    pub fn param_help(&self) -> &'static str {
-        match self {
-            Task::Amogus { .. } => {
-                "<code>amogus</code>: How much amogus. Negative numbers are allowed."
-            }
-            Task::ImageResize { resize_type, ..} => {
-                match resize_type {
-                    ResizeType::ToSticker | ResizeType::ToCustomEmoji => "",
-                    ResizeType::SeamCarve { .. } =>
-                        concat!(
-                            "<code>format</code>: Format to save the image in: jpeg, webp or preserve\n",
-                            "<code>WxH</code>: Width and height of the output image, can't be 0 or bigger than 2048x2048; OR\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
-                            "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
-                            "<code>rot</code>: Rotate the image by this much after distorting.\n",
-                            "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
-                            "Can't be less than -4 or bigger than 4.\n",
-                            "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
-                            "Same requirements as with <code>delta_x</code>."
-                            ),
-                    ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop =>
-                        concat!(
-                            "<code>WxH</code>: Width and height of the output image, can't be 0 or bigger than 2048x2048; OR\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
-                            "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
-                            "<code>rot</code>: Rotate the image by this much after resizing.\n",
-                            "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
-                            ),
-                }
-            },
-            Task::VideoResize { resize_type, .. } => {
-                match resize_type {
-                    ResizeType::ToSticker| ResizeType::ToCustomEmoji  => "",
-                    ResizeType::SeamCarve { ..} => concat!(
-                            "<code>WxH</code>: Width and height of the output video, can't be 0 or bigger than 2048x2048; OR\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
-                            "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
-                            "<code>rot</code>: Rotate the video by this much after distorting.\n",
-                            "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
-                            "Can't be less than -4 or bigger than 4.\n",
-                            "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
-                            "Same requirements as with <code>delta_x</code>."
-
-                        ),
-                    ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop => concat!(
-                            "<code>WxH</code>: Width and height of the output video, can't be 0 or bigger than 2048x2048; OR\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
-                            "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
-                            "<code>rot</code>: Rotate the video by this much after resizing.\n",
-                            "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
-                        ),
-                }
-            }
-        }
-    }
-
     pub fn write_params(
         &self,
         mut output: impl std::fmt::Write,
