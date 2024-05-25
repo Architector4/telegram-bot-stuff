@@ -10,7 +10,7 @@ use teloxide::{
     Bot, RequestError,
 };
 
-use crate::tasks::{taskman::Taskman, Task, TaskError};
+use crate::tasks::{parsing::TaskError, taskman::Taskman, Task};
 
 pub async fn parse_command_into_task(
     taskman: &Taskman,

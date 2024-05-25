@@ -10,7 +10,9 @@ use teloxide::{
 
 use crate::{
     tasks::{
-        param_parsing::ParamParser, taskman::Taskman, ImageFormat, ResizeType, Task, TaskError,
+        parsing::{tokenizer::Tokenizer, TaskError},
+        taskman::Taskman,
+        ImageFormat, ResizeType, Task,
     },
     OWNER_ID,
 };
@@ -89,8 +91,8 @@ impl<'a> TaskParams<'a> {
         text[command_full_len..].trim_start()
     }
 
-    fn get_params(&self) -> ParamParser {
-        ParamParser::new(self.get_text_params())
+    fn get_params(&self) -> Tokenizer {
+        Tokenizer::new(self.get_text_params())
     }
 }
 
@@ -405,7 +407,6 @@ async fn to_custom_emoji(tp: TaskParams<'_>) -> Ret {
 
     Ok(Ok(Task::default_to_custom_emoji()))
 }
-
 
 pub const RESIZE: Command = Command {
     callname: concat!(
