@@ -9,11 +9,7 @@ use teloxide::{
 };
 
 use crate::{
-    tasks::{
-        parsing::{tokenizer::Tokenizer, TaskError},
-        taskman::Taskman,
-        ImageFormat, ResizeType, Task,
-    },
+    tasks::{parsing::TaskError, taskman::Taskman, ImageFormat, ResizeType, Task},
     OWNER_ID,
 };
 
@@ -82,17 +78,17 @@ impl<'a> TaskParams<'a> {
         None
     }
 
-    fn get_text_params(&self) -> &str {
+    /// Get text parameters for this task.
+    ///
+    /// If the input command is `/hewwo everypony bazinga`,
+    /// this will be the substring `everypony bazinga`.
+    fn get_params(&self) -> &str {
         // SAFETY: this type can only be constructed if the message
         // has non-empty text in it.
         let text = self.message.text_full().unwrap();
         let command_full_len = self.command.len();
 
         text[command_full_len..].trim_start()
-    }
-
-    fn get_params(&self) -> Tokenizer {
-        Tokenizer::new(self.get_text_params())
     }
 }
 
@@ -450,11 +446,11 @@ async fn premium_inner(tp: TaskParams<'_>, premium: bool) -> Ret {
     if tp.message.from().map(|x| x.id) != Some(OWNER_ID) {
         goodbye_desc!("");
     }
-    let params = tp.get_text_params();
+    let params = tp.get_params();
 
     let mut response = String::with_capacity(params.len());
 
-    for thing in tp.get_text_params().split_whitespace() {
+    for thing in tp.get_params().split_whitespace() {
         use std::fmt::Write;
         let Ok(woot): Result<u64, _> = thing.parse() else {
             writeln!(response, "wtf is {}", thing).expect("no");

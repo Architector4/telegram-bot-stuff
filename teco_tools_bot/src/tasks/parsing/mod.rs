@@ -2,7 +2,7 @@ pub mod tokenizer;
 
 use super::*;
 use html_escape::encode_text;
-use tokenizer::Tokenizer;
+use tokenizer::{Token, Tokenizer};
 
 pub static MAX_OUTPUT_MEDIA_DIMENSION_SIZE: u32 = 2048;
 
@@ -64,7 +64,7 @@ const PARAM_HELP: &str = concat!(
 macro_rules! parse_plain_param_with_parser_optional {
     ($input: expr, $name: expr, $parser: expr, $help: expr) => {{
         #[allow(clippy::redundant_closure_call)]
-        if let Err(value) = $input {
+        if let Token::Plain(value) = $input {
             if let Ok(value) = $parser(value) {
                 $name = value;
                 continue;
@@ -85,7 +85,7 @@ macro_rules! parse_plain_param_optional {
 macro_rules! parse_plain_param_with_parser_mandatory {
     ($input: expr, $name: expr, $parser: expr, $help: expr) => {
         #[allow(clippy::redundant_closure_call)]
-        if let Err(value) = $input {
+        if let Token::Plain(value) = $input {
             let Ok(value) = $parser(value) else {
                 return Err(TaskError::Error(format!(
                     "the value <code>{}</code> is incorrect for parameter <code>{}</code>.{}{}",
@@ -108,17 +108,20 @@ macro_rules! parse_plain_param {
 
 macro_rules! parse_keyval_param_with_parser {
     ($input: expr, $name: expr, $parser: expr, $help: expr) => {
-        let Ok((key, value)) = $input else {
-            return Err(TaskError::Error(format!(
-                "can't parse <code>{}</code> as a parameter.{}{}",
-                encode_text($input.unwrap_err()),
-                PARAM_HELP,
-                $help
-            )));
+        let (key, value) = match $input {
+            Token::KeyVal(key, value) => (key, value),
+            Token::Plain(plain) => {
+                return Err(TaskError::Error(format!(
+                    "can't parse <code>{}</code> as a parameter.{}{}",
+                    encode_text(plain),
+                    PARAM_HELP,
+                    $help
+                )));
+            }
         };
 
         if key == stringify!($name).to_lowercase() {
-            parse_plain_param_with_parser_mandatory!(Err::<(), _>(value), $name, $parser, $help);
+            parse_plain_param_with_parser_mandatory!(Token::Plain(value), $name, $parser, $help);
             continue;
         }
     };
@@ -132,14 +135,14 @@ macro_rules! parse_keyval_param {
 macro_rules! parse_stop {
     ($input: expr, $help: expr) => {
         let response = match $input {
-            Ok((key, val)) => format!(
+            Token::KeyVal(key, val) => format!(
                 "unexpected parameter <code>{}</code> with value <code>{}</code>{}{}",
                 encode_text(key),
                 encode_text(val),
                 PARAM_HELP,
                 $help
             ),
-            Err(plain) => format!(
+            Token::Plain(plain) => format!(
                 "unexpected parameter <code>{}</code>{}{}",
                 encode_text(plain),
                 PARAM_HELP,
@@ -152,7 +155,8 @@ macro_rules! parse_stop {
 }
 
 impl Task {
-    pub fn parse_params(&self, params: Tokenizer) -> Result<Task, TaskError> {
+    pub fn parse_params(&self, params: &str) -> Result<Task, TaskError> {
+        let params = Tokenizer::new(params);
         let help = self.param_help();
         match self {
             Task::Amogus { amogus } => {
@@ -447,7 +451,8 @@ impl Task {
                         parse_plain_param_optional!(param, resize_type, help);
                     }
 
-                    if let Ok(v) = param {
+                    if let Token::KeyVal(k, v) = param {
+                        let v = (k, v);
                         // Try to parse it as an aspect ratio lol
                         if let Some(parse) = aspect_ratio_parser(v, *old_dimensions) {
                             new_dimensions = (parse.0, parse.1, 0.0);

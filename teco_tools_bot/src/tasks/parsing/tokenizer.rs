@@ -1,5 +1,11 @@
 pub struct Tokenizer<'a>(&'a str);
 
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub enum Token<'a> {
+    Plain(&'a str),
+    KeyVal(&'a str, &'a str),
+}
+
 impl<'a> Tokenizer<'a> {
     pub fn new(input: &str) -> Tokenizer {
         Tokenizer(input)
@@ -25,7 +31,7 @@ impl<'a> Tokenizer<'a> {
 }
 
 impl<'a> Iterator for Tokenizer<'a> {
-    type Item = Result<(&'a str, &'a str), &'a str>;
+    type Item = Token<'a>;
     fn next(&mut self) -> Option<Self::Item> {
         let this_param = self.chomp_until_whitespace();
 
@@ -46,9 +52,9 @@ impl<'a> Iterator for Tokenizer<'a> {
                 b = self.chomp_until_whitespace();
             }
 
-            Some(Ok((a, b)))
+            Some(Token::KeyVal(a, b))
         } else {
-            Some(Err(this_param))
+            Some(Token::Plain(this_param))
         }
     }
 }
