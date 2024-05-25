@@ -173,7 +173,8 @@ impl Task {
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
-                            "Same requirements as with <code>delta_x</code>."
+                            "Same requirements as with <code>delta_x</code>.\n",
+                            "<code>format</code>: Output image format. Can be \"webp\" or \"jpg\"."
                             ),
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop =>
                         concat!(
@@ -182,6 +183,7 @@ impl Task {
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>rot</code>: Rotate the image by this much after resizing.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
+                            "<code>format</code>: Output image format. Can be \"webp\" or \"jpg\"."
                             ),
                 }
             },
