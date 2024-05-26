@@ -354,9 +354,10 @@ impl Task {
                     if media_too_big {
                         return Err(TaskError::Error(format!(
                         concat!(
-                            "output size {}x{} is too big. ",
-                            "This bot only allows generating media no bigger than {}x{}.\n",
-                            "For reference, input media's size is {}x{}, so the output must be no bigger than {}% of it."
+                            "output size <b>{}x{}</b> is too big. ",
+                            "This bot only allows generating media no bigger than <b>{}x{}</b>.\n",
+                            "For reference, input media's size is <b>{}x{}</b>, ",
+                            "so the output must be no bigger than <b>{}%</b> of it."
                         ),
                         new_dimensions.0,
                         new_dimensions.1,
@@ -397,7 +398,6 @@ impl Task {
                         } else {
                             100.0
                         };
-
 
                     if let (Some(new_width), Some(new_height)) = (
                         perc_calc(default_percentage, old_dimensions.0),
