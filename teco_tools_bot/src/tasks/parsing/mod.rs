@@ -165,10 +165,12 @@ impl Task {
                     ResizeType::ToSticker | ResizeType::ToCustomEmoji => "",
                     ResizeType::SeamCarve { .. } =>
                         concat!(
-                            "<code>format</code>: Format to save the image in: jpeg, webp or preserve\n",
+                            "Size specification (values can be negative for mirroring):\n",
                             "<code>WxH</code>: Width and height of the output image, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
+                            "\n",
+                            "<code>format</code>: Format to save the image in: jpeg, webp or preserve\n",
                             "<code>rot</code>: Rotate the image by this much after distorting.\n",
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
                             "Can't be less than -4 or bigger than 4.\n",
@@ -178,9 +180,11 @@ impl Task {
                             ),
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop =>
                         concat!(
+                            "Size specification (values can be negative for mirroring):\n",
                             "<code>WxH</code>: Width and height of the output image, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
+                            "\n",
                             "<code>rot</code>: Rotate the image by this much after resizing.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
                             "<code>format</code>: Output image format. Can be \"webp\" or \"jpg\"."
@@ -191,10 +195,12 @@ impl Task {
                 match resize_type {
                     ResizeType::ToSticker| ResizeType::ToCustomEmoji  => "",
                     ResizeType::SeamCarve { ..} => concat!(
+                            "Size specification (values can be negative for mirroring):\n",
                             "<code>WxH</code>: Width and height of the output video, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>rot</code>: Rotate the video by this much after distorting.\n",
+                            "\n",
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
@@ -202,9 +208,11 @@ impl Task {
 
                         ),
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop => concat!(
+                            "Size specification (values can be negative for mirroring):\n",
                             "<code>WxH</code>: Width and height of the output video, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
+                            "\n",
                             "<code>rot</code>: Rotate the video by this much after resizing.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
                         ),
