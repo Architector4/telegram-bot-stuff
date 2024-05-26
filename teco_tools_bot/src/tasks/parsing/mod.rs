@@ -6,6 +6,7 @@ use tokenizer::{Token, Tokenizer};
 
 pub static MAX_OUTPUT_MEDIA_DIMENSION_SIZE: u32 = 2048;
 
+#[derive(Debug)]
 pub enum TaskError {
     Error(String),
     Descriptory(String),
@@ -267,7 +268,7 @@ impl Task {
 
                 let mut rot = *rotation;
                 // Width, height, and percentage.
-                let mut new_dimensions = Some((old_dimensions.0, old_dimensions.1, None));
+                let mut new_dimensions = None;
                 let ResizeType::SeamCarve {
                     mut delta_x,
                     mut rigidity,
@@ -397,6 +398,7 @@ impl Task {
                             100.0
                         };
 
+
                     if let (Some(new_width), Some(new_height)) = (
                         perc_calc(default_percentage, old_dimensions.0),
                         perc_calc(default_percentage, old_dimensions.1),
@@ -450,6 +452,37 @@ impl Task {
             }
         }
     }
+}
+
+#[test]
+fn image_resize_parse_test() -> Result<(), TaskError> {
+    let x = NonZeroI32::new(512).unwrap();
+    let y = NonZeroI32::new(256).unwrap();
+    let default = Task::default_image_resize(x, y, ResizeType::Fit, ImageFormat::Preserve);
+
+    let result = default.parse_params("")?;
+    let Task::ImageResize { new_dimensions, .. } = result else {
+        unreachable!()
+    };
+    assert_eq!(new_dimensions.0.get(), 256);
+    assert_eq!(new_dimensions.1.get(), 128);
+
+    let result = default.parse_params("150%x-100% 86deg webp")?;
+    let Task::ImageResize {
+        new_dimensions,
+        rotation,
+        format,
+        ..
+    } = result
+    else {
+        unreachable!()
+    };
+    assert_eq!(new_dimensions.0.get(), 768);
+    assert_eq!(new_dimensions.1.get(), -256);
+    assert_eq!(rotation, 86.0);
+    assert_eq!(format, ImageFormat::Webp);
+
+    Ok(())
 }
 
 ///////////////////////
