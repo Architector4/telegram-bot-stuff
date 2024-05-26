@@ -245,15 +245,18 @@ impl Task {
                 percentage: _,
                 mut resize_type,
             } => {
+                if let ResizeType::ToSticker | ResizeType::ToCustomEmoji = resize_type {
+                    return Ok(self.clone());
+                }
+
+                let old_dimensions = (old_dimensions.0.get(), old_dimensions.1.get());
+
                 let (is_video, mut format) = if let Task::ImageResize { format, .. } = self {
                     (false, *format)
                 } else {
                     (true, ImageFormat::Preserve)
                 };
 
-                if let ResizeType::ToSticker | ResizeType::ToCustomEmoji = resize_type {
-                    return Ok(self.clone());
-                }
                 let mut rot = *rotation;
                 let mut new_dimensions = (old_dimensions.0, old_dimensions.1, None);
                 let ResizeType::SeamCarve {
@@ -265,7 +268,7 @@ impl Task {
                 };
 
                 let dimensions_parser_err =
-                    |data| dimensions_parser(data, *old_dimensions).ok_or(());
+                    |data| dimensions_parser(data, old_dimensions).ok_or(());
 
                 let sanitized_f64_parser = |val: &str| -> Result<f64, ()> {
                     let result: f64 = val.parse().map_err(|_| ())?;
@@ -315,7 +318,7 @@ impl Task {
                     if let Token::KeyVal(k, v) = param {
                         let v = (k, v);
                         // Try to parse it as an aspect ratio lol
-                        if let Some(parse) = aspect_ratio_parser(v, *old_dimensions) {
+                        if let Some(parse) = aspect_ratio_parser(v, old_dimensions) {
                             new_dimensions = (parse.0, parse.1, None);
                             continue;
                         }
@@ -334,24 +337,12 @@ impl Task {
                 }
 
                 // Calculate if the media after any specified rescaling is too big.
-                let media_too_big = new_dimensions.0.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE
-                    || new_dimensions.1.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
-                let media_too_big_2x = new_dimensions.0.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2
-                    || new_dimensions.1.get() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2;
-
-                fn smallest_percentage_that_can_fit(
-                    (width, height): &(NonZeroU32, NonZeroU32),
-                ) -> f32 {
-                    // May be a bit approximate, but meh.
-                    let smallest_width_percent =
-                        (MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 100) / width.get();
-                    let smallest_height_percent =
-                        (MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 100) / height.get();
-
-                    let smallest_percent =
-                        u32::min(smallest_width_percent, smallest_height_percent);
-                    smallest_percent as f32
-                }
+                let media_too_big = new_dimensions.0.unsigned_abs()
+                    > MAX_OUTPUT_MEDIA_DIMENSION_SIZE
+                    || new_dimensions.1.unsigned_abs() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
+                let media_too_big_2x = new_dimensions.0.unsigned_abs()
+                    > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2
+                    || new_dimensions.1.unsigned_abs() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2;
 
                 if new_dimensions.2.is_none() {
                     // No width/height nor percentage was specified.
@@ -364,14 +355,14 @@ impl Task {
                             if media_too_big_2x {
                                 // Image is more than 200% big.
                                 // Scalling it to 50% will still be too big. Scale down.
-                                smallest_percentage_that_can_fit(old_dimensions)
+                                biggest_percentage_that_can_fit(old_dimensions)
                             } else {
                                 50.0
                             }
                         } else if media_too_big {
                             // We want to preserve the media size, but it's too big.
                             // Scale down.
-                            smallest_percentage_that_can_fit(old_dimensions)
+                            biggest_percentage_that_can_fit(old_dimensions)
                         } else {
                             100.0
                         };
@@ -395,7 +386,7 @@ impl Task {
                         MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
                         old_dimensions.0,
                         old_dimensions.1,
-                        smallest_percentage_that_can_fit(old_dimensions)
+                        biggest_percentage_that_can_fit(old_dimensions)
                     )));
                 }
 
@@ -407,16 +398,29 @@ impl Task {
                     *dx = delta_x;
                     *rg = rigidity;
                 }
+
+                // Ensure none of the sizes are zero.
+
+                let (Some(new_x), Some(new_y)) = (
+                    NonZeroI32::new(new_dimensions.0),
+                    NonZeroI32::new(new_dimensions.1),
+                ) else {
+                    return Err(TaskError::Error(format!(
+                        concat!("output size {}x{} has an empty dimension in it. ",),
+                        new_dimensions.0, new_dimensions.1,
+                    )));
+                };
+
                 if is_video {
                     Ok(Task::VideoResize {
-                        new_dimensions: (new_dimensions.0, new_dimensions.1),
+                        new_dimensions: (new_x, new_y),
                         rotation: rot,
                         percentage: new_dimensions.2,
                         resize_type,
                     })
                 } else {
                     Ok(Task::ImageResize {
-                        new_dimensions: (new_dimensions.0, new_dimensions.1),
+                        new_dimensions: (new_x, new_y),
                         rotation: rot,
                         percentage: new_dimensions.2,
                         resize_type,
@@ -434,25 +438,26 @@ impl Task {
 
 /// Given a `percentage` and a `input`, sanitize `percentage` and
 /// compute a value that is that much percentage of that input.
-fn perc_calc(percentage: f32, input: NonZeroU32) -> Option<NonZeroU32> {
+fn perc_calc(percentage: f32, input: i32) -> Option<i32> {
     let factor = percentage / 100.0;
 
-    if !factor.is_normal() || factor <= 0.0 {
+    if !factor.is_normal() && factor != 0.0 && factor != -0.0 {
         return None;
     }
 
-    let dim = (input.get() as f32 * factor) as u32;
+    let dim = input as f32 * factor;
 
-    dim.try_into().ok()
+    Some(dim as i32)
 }
 
 #[test]
 fn perc_calc_test() {
-    let input = NonZeroU32::new(144).unwrap();
-    assert_eq!(perc_calc(100.0, input), Some(input));
-    let result = NonZeroU32::new(72).unwrap();
-    assert_eq!(perc_calc(50.0, input), Some(result));
-    assert_eq!(perc_calc(f32::NAN, input), None);
+    assert_eq!(perc_calc(100.0, 144), Some(144));
+    assert_eq!(perc_calc(50.0, 144), Some(72));
+    assert_eq!(perc_calc(f32::NAN, 144), None);
+    assert_eq!(perc_calc(100.0, -144), Some(-144));
+    assert_eq!(perc_calc(-50.0, 144), Some(-72));
+    assert_eq!(perc_calc(0.0, 144), Some(0));
 }
 
 /// Returns rotation in degrees, and a boolean denoting if there
@@ -526,12 +531,9 @@ fn rotation_parser_test() {
 /// outputs result.
 fn aspect_ratio_parser(
     (a, mut b): (&str, &str),
-    starting_dimensions: (NonZeroU32, NonZeroU32),
-) -> Option<(NonZeroU32, NonZeroU32)> {
-    let (width, height) = (
-        starting_dimensions.0.get() as f64,
-        starting_dimensions.1.get() as f64,
-    );
+    starting_dimensions: (i32, i32),
+) -> Option<(i32, i32)> {
+    let (width, height) = (starting_dimensions.0 as f64, starting_dimensions.1 as f64);
     let ends_in_plus = if b.ends_with('+') {
         b = &b[0..b.len() - 1];
         true
@@ -540,6 +542,13 @@ fn aspect_ratio_parser(
     };
 
     let (a, b): (f64, f64) = (a.parse().ok()?, b.parse().ok()?);
+
+    // Record the signs.
+    let x_is_negative = (a.is_sign_negative()) ^ (starting_dimensions.0.is_negative());
+    let y_is_negative = (b.is_sign_negative()) ^ (starting_dimensions.1.is_negative());
+    // Sanitize them.
+    let (a, b) = (a.abs(), b.abs());
+    let (width, height) = (width.abs(), height.abs());
 
     // We now have an aspect ratio. Figure out two resolutions.
     // A smaller one that will fit within the original image snugly,
@@ -578,34 +587,41 @@ fn aspect_ratio_parser(
         return None;
     }
 
-    // This is very unlikely to fail. It was already parsed as NonZeroU32 in the
-    // first place, and the math shouldn't exceed the limits.
-    // Still, maybe the user would specify insanely huge numbers for an aspect
-    // ratio? lol
     Some((
-        NonZeroU32::new(wanted.0 as u32)?,
-        NonZeroU32::new(wanted.1 as u32)?,
+        wanted.0 as i32 * if x_is_negative { -1 } else { 1 },
+        wanted.1 as i32 * if y_is_negative { -1 } else { 1 },
     ))
 }
 
 #[test]
 fn aspect_ratio_parser_test() {
-    let start_dim = (NonZeroU32::new(100).unwrap(), NonZeroU32::new(150).unwrap());
-    let crop_1_1 = (NonZeroU32::new(100).unwrap(), NonZeroU32::new(100).unwrap());
-    let extend_1_1 = (NonZeroU32::new(150).unwrap(), NonZeroU32::new(150).unwrap());
-
-    assert_eq!(aspect_ratio_parser(("1", "1"), start_dim), Some(crop_1_1));
     assert_eq!(
-        aspect_ratio_parser(("1", "1+"), start_dim),
-        Some(extend_1_1)
+        aspect_ratio_parser(("1", "1"), (100, 150)),
+        Some((100, 100))
     );
-    assert_eq!(aspect_ratio_parser(("2", "3"), start_dim), Some(start_dim));
+    assert_eq!(
+        aspect_ratio_parser(("1", "1+"), (100, 150)),
+        Some((150, 150))
+    );
+    assert_eq!(
+        aspect_ratio_parser(("2", "3"), (100, 150)),
+        Some((100, 150))
+    );
+    assert_eq!(
+        aspect_ratio_parser(("-2", "3"), (100, 150)),
+        Some((-100, 150))
+    );
+    assert_eq!(
+        aspect_ratio_parser(("-2", "-3"), (100, 150)),
+        Some((-100, -150))
+    );
+    assert_eq!(
+        aspect_ratio_parser(("2", "-3"), (-100, -150)),
+        Some((-100, 150))
+    );
 }
 
-fn single_dimension_parser(
-    data: &str,
-    starting: impl Into<Option<NonZeroU32>>,
-) -> Option<NonZeroU32> {
+fn single_dimension_parser(data: &str, starting: impl Into<Option<i32>>) -> Option<i32> {
     if let Some(starting) = starting.into() {
         // Check if it's a percentage.
         if let Some(percent) = data.find('%') {
@@ -619,34 +635,27 @@ fn single_dimension_parser(
             }
         }
     }
-    let woot: NonZeroU32 = data.parse().ok()?;
-    Some(woot)
+
+    data.parse().ok()
 }
 
 #[test]
 fn single_dimension_parser_test() {
-    let nzu32_60 = NonZeroU32::new(60).unwrap();
-    let nzu32_36 = NonZeroU32::new(36).unwrap();
-    assert_eq!(single_dimension_parser("60", None), Some(nzu32_60));
+    assert_eq!(single_dimension_parser("60", None), Some(60));
     assert_eq!(single_dimension_parser("60%", None), None);
-    assert_eq!(
-        single_dimension_parser("60", Some(nzu32_60)),
-        Some(nzu32_60)
-    );
-    assert_eq!(
-        single_dimension_parser("60%", Some(nzu32_60)),
-        Some(nzu32_36)
-    );
-    assert_eq!(single_dimension_parser("60%wasd", Some(nzu32_60)), None);
+    assert_eq!(single_dimension_parser("60", Some(60)), Some(60));
+    assert_eq!(single_dimension_parser("60%", Some(60)), Some(36));
+    assert_eq!(single_dimension_parser("60%wasd", Some(60)), None);
+    assert_eq!(single_dimension_parser("-60", Some(60)), Some(-60));
+    assert_eq!(single_dimension_parser("-60%", Some(60)), Some(-36));
+    assert_eq!(single_dimension_parser("60", Some(-60)), Some(60));
+    assert_eq!(single_dimension_parser("60%", Some(-60)), Some(-36));
 }
 
 /// Given a percentage in `data` and starting dimensions,
 /// parse and compute the percentage of those dimensions
 /// and return result.
-fn percentage_parser(
-    data: &str,
-    starting_dimensions: (NonZeroU32, NonZeroU32),
-) -> Option<(NonZeroU32, NonZeroU32, f32)> {
+fn percentage_parser(data: &str, starting_dimensions: (i32, i32)) -> Option<(i32, i32, f32)> {
     let percent = data.find('%')?;
 
     // Check for garbage after the % sign.
@@ -663,44 +672,36 @@ fn percentage_parser(
 
 #[test]
 fn percentage_parser_test() {
-    let start_dim = (NonZeroU32::new(100).unwrap(), NonZeroU32::new(150).unwrap());
-    let dim_150percent = (
-        NonZeroU32::new(150).unwrap(),
-        NonZeroU32::new(225).unwrap(),
-        150.0,
-    );
-    let dim_50percent = (
-        NonZeroU32::new(50).unwrap(),
-        NonZeroU32::new(75).unwrap(),
-        50.0,
+    assert_eq!(
+        percentage_parser("100%", (100, 150)),
+        Some((100, 150, 100.0))
     );
     assert_eq!(
-        percentage_parser("100%", start_dim),
-        Some((start_dim.0, start_dim.1, 100.0))
+        percentage_parser("150%", (100, 150)),
+        Some((150, 225, 150.0))
     );
-    assert_eq!(percentage_parser("150%", start_dim), Some(dim_150percent));
-    assert_eq!(percentage_parser("50%", start_dim), Some(dim_50percent));
-    assert_eq!(percentage_parser("50%woidahjsod", start_dim), None);
-    assert_eq!(percentage_parser("6", start_dim), None);
+    assert_eq!(percentage_parser("50%", (100, 150)), Some((50, 75, 50.0)));
+    assert_eq!(percentage_parser("50%woidahjsod", (100, 150)), None);
+    assert_eq!(percentage_parser("6", (100, 150)), None);
+
+    assert_eq!(
+        percentage_parser("-50%", (100, 150)),
+        Some((-50, -75, -50.0))
+    );
+    assert_eq!(
+        percentage_parser("-50%", (100, -150)),
+        Some((-50, 75, -50.0))
+    );
 }
 
 /// Given a width and height specification, either in percentages of
 /// starting dimensions or absolute values, and those starting dimensions,
 /// parse, compute and return result.
-fn width_height_parser(
-    data: &str,
-    starting_dimensions: (NonZeroU32, NonZeroU32),
-) -> Option<(NonZeroU32, NonZeroU32)> {
+fn width_height_parser(data: &str, starting_dimensions: (i32, i32)) -> Option<(i32, i32)> {
     let x = data.find('x')?;
     let w = &data[0..x];
     let h = &data[x + 1..];
-    // It's width and height.
-    // Try in pixels...
-    if let Some(width) = single_dimension_parser(w, starting_dimensions.0) {
-        if let Some(height) = single_dimension_parser(h, starting_dimensions.1) {
-            return Some((width, height));
-        }
-    }
+
     let width = single_dimension_parser(w, starting_dimensions.0)?;
     let height = single_dimension_parser(h, starting_dimensions.1)?;
 
@@ -708,16 +709,18 @@ fn width_height_parser(
 }
 #[test]
 fn width_height_parser_test() {
-    let start_dim = (NonZeroU32::new(100).unwrap(), NonZeroU32::new(150).unwrap());
-    let dim_150x150 = (NonZeroU32::new(150).unwrap(), NonZeroU32::new(150).unwrap());
-
     // to make it shorter so that rustfmt doesn't split the asserts into many lines lol
     let the_fn = width_height_parser;
 
-    assert_eq!(the_fn("150x150", start_dim), Some(dim_150x150));
-    assert_eq!(the_fn("150x100%", start_dim), Some(dim_150x150));
-    assert_eq!(the_fn("150%x100%", start_dim), Some(dim_150x150));
-    assert_eq!(the_fn("150x0%", start_dim), None);
+    assert_eq!(the_fn("150x150", (100, 150)), Some((150, 150)));
+    assert_eq!(the_fn("150x100%", (100, 150)), Some((150, 150)));
+    assert_eq!(the_fn("150%x100%", (100, 150)), Some((150, 150)));
+    assert_eq!(the_fn("150x0%", (100, 150)), Some((150, 0)));
+
+    assert_eq!(the_fn("-150x150", (100, 150)), Some((-150, 150)));
+    assert_eq!(the_fn("-150x-100%", (100, 150)), Some((-150, -150)));
+    assert_eq!(the_fn("-150%x100%", (100, -150)), Some((-150, -150)));
+    assert_eq!(the_fn("-150x0%", (100, 150)), Some((-150, 0)));
 }
 
 /// Given either a percentage or width/height specification
@@ -725,12 +728,26 @@ fn width_height_parser_test() {
 /// Also computes a percentage value of starting dimensions, if applicable.
 fn dimensions_parser(
     data: &str,
-    starting_dimensions: (NonZeroU32, NonZeroU32),
-) -> Option<(NonZeroU32, NonZeroU32, Option<f32>)> {
+    starting_dimensions: (i32, i32),
+) -> Option<(i32, i32, Option<f32>)> {
+    dbg!(data);
+    dbg!(starting_dimensions);
     if let Some(x) = width_height_parser(data, starting_dimensions) {
+        dbg!(x);
         Some((x.0, x.1, None))
     } else {
         let result = percentage_parser(data, starting_dimensions)?;
         Some((result.0, result.1, Some(result.2)))
     }
+}
+
+/// Given a width and a height, compute the maximum factor, as a percentage (*100),
+/// that can fit within a square with length side of [`MAX_OUTPUT_MEDIA_DIMENSION_SIZE`].
+fn biggest_percentage_that_can_fit((width, height): (i32, i32)) -> f32 {
+    // May be a bit approximate, but meh.
+    let smallest_width_percent = (MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 100) / width.unsigned_abs();
+    let smallest_height_percent = (MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 100) / height.unsigned_abs();
+
+    let biggest_percent = u32::min(smallest_width_percent, smallest_height_percent);
+    biggest_percent as f32
 }

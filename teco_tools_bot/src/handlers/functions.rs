@@ -1,4 +1,4 @@
-use std::{future::Future, num::NonZeroU32, pin::Pin};
+use std::{future::Future, num::NonZeroI32, pin::Pin};
 
 use arch_bot_commons::useful_methods::*;
 use html_escape::encode_text;
@@ -340,8 +340,10 @@ async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
         }
         None => goodbye_cancel!("can't find a video or an image."),
     };
-    let (Some(width), Some(height)) = (NonZeroU32::new(media.width), NonZeroU32::new(media.height))
-    else {
+    let (Some(width), Some(height)) = (
+        NonZeroI32::new(media.width as i32),
+        NonZeroI32::new(media.height as i32),
+    ) else {
         goodbye_cancel!("media is too small.");
     };
 

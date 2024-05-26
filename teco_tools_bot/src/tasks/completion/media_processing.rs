@@ -15,8 +15,8 @@ use crate::tasks::{ImageFormat, ResizeType};
 /// Will error if [`ImageFormat::Preserve`] is sent.
 pub fn resize_image(
     data: &[u8],
-    width: usize,
-    height: usize,
+    width: isize,
+    height: isize,
     rotation: f64,
     mut resize_type: ResizeType,
     format: ImageFormat,
@@ -30,6 +30,13 @@ pub fn resize_image(
     let wand = MagickWand::new();
 
     wand.read_image_blob(data)?;
+
+    // Record and sanitize signs...
+    let width_is_negative = width.is_negative();
+    let height_is_negative = height.is_negative();
+
+    let width = width.unsigned_abs();
+    let height = height.unsigned_abs();
 
     // The second and third arguments are "delta_x" and "rigidity"
     // This library doesn't document them, but another bindings
@@ -127,6 +134,14 @@ pub fn resize_image(
             )?;
             wand.reset_image_page("")?;
         }
+    }
+
+    // Flip it according to the signs.
+    if width_is_negative {
+        wand.flop_image()?;
+    }
+    if height_is_negative {
+        wand.flip_image()?;
     }
 
     if rotation.signum() % 360.0 != 0.0 {
@@ -318,8 +333,8 @@ pub fn count_video_frames_and_framerate_and_audio(
 pub fn resize_video(
     status_report: Sender<String>,
     data: Vec<u8>,
-    mut width: usize,
-    mut height: usize,
+    mut width: isize,
+    mut height: isize,
     rotation: f64,
     resize_type: ResizeType,
 ) -> Result<Vec<u8>, String> {

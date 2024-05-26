@@ -144,8 +144,8 @@ impl Task {
                     .await?;
 
                 let dimensions = (
-                    new_dimensions.0.get() as usize,
-                    new_dimensions.1.get() as usize,
+                    new_dimensions.0.get() as isize,
+                    new_dimensions.1.get() as isize,
                 );
                 let resize_type = *resize_type;
                 let rotation = *rotation;
