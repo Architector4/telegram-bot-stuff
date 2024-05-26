@@ -258,7 +258,8 @@ impl Task {
                 };
 
                 let mut rot = *rotation;
-                let mut new_dimensions = (old_dimensions.0, old_dimensions.1, None);
+                // Width, height, and percentage.
+                let mut new_dimensions = Some((old_dimensions.0, old_dimensions.1, None));
                 let ResizeType::SeamCarve {
                     mut delta_x,
                     mut rigidity,
@@ -268,7 +269,7 @@ impl Task {
                 };
 
                 let dimensions_parser_err =
-                    |data| dimensions_parser(data, old_dimensions).ok_or(());
+                    |data| dimensions_parser(data, old_dimensions).map(Some).ok_or(());
 
                 let sanitized_f64_parser = |val: &str| -> Result<f64, ()> {
                     let result: f64 = val.parse().map_err(|_| ())?;
@@ -319,7 +320,7 @@ impl Task {
                         let v = (k, v);
                         // Try to parse it as an aspect ratio lol
                         if let Some(parse) = aspect_ratio_parser(v, old_dimensions) {
-                            new_dimensions = (parse.0, parse.1, None);
+                            new_dimensions = Some((parse.0, parse.1, None));
                             continue;
                         }
                         // If it fails to parse, the format parser below will complain with all the
@@ -336,18 +337,39 @@ impl Task {
                     parse_stop!(param, help);
                 }
 
-                // Calculate if the media after any specified rescaling is too big.
-                let media_too_big = new_dimensions.0.unsigned_abs()
-                    > MAX_OUTPUT_MEDIA_DIMENSION_SIZE
-                    || new_dimensions.1.unsigned_abs() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
-                let media_too_big_2x = new_dimensions.0.unsigned_abs()
-                    > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2
-                    || new_dimensions.1.unsigned_abs() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2;
-
-                if new_dimensions.2.is_none() {
+                let new_dimensions = if let Some(new_dimensions) = new_dimensions {
+                    // Ensure it's not too big.
+                    let media_too_big = new_dimensions.0.unsigned_abs()
+                        > MAX_OUTPUT_MEDIA_DIMENSION_SIZE
+                        || new_dimensions.1.unsigned_abs() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
+                    if media_too_big {
+                        return Err(TaskError::Error(format!(
+                        concat!(
+                            "output size {}x{} is too big. ",
+                            "This bot only allows generating media no bigger than {}x{}.\n",
+                            "For reference, input media's size is {}x{}, so the output must be no bigger than {}% of it."
+                        ),
+                        new_dimensions.0,
+                        new_dimensions.1,
+                        MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
+                        MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
+                        old_dimensions.0,
+                        old_dimensions.1,
+                        biggest_percentage_that_can_fit(old_dimensions)
+                    )));
+                    };
+                    new_dimensions
+                } else {
                     // No width/height nor percentage was specified.
                     // Preset one.
 
+                    // Calculate if the input media is too big.
+                    let media_too_big = old_dimensions.0.unsigned_abs()
+                        > MAX_OUTPUT_MEDIA_DIMENSION_SIZE
+                        || old_dimensions.1.unsigned_abs() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
+                    let media_too_big_2x = old_dimensions.0.unsigned_abs()
+                        > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2
+                        || old_dimensions.1.unsigned_abs() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2;
                     let default_percentage =
                         if format == ImageFormat::Preserve || resize_type.is_seam_carve() {
                             // We aren't changing format and/or we want seam carving.
@@ -371,24 +393,14 @@ impl Task {
                         perc_calc(default_percentage, old_dimensions.0),
                         perc_calc(default_percentage, old_dimensions.1),
                     ) {
-                        new_dimensions = (new_width, new_height, Some(default_percentage));
+                        (new_width, new_height, Some(default_percentage))
+                    } else {
+                        panic!(
+                            "computed bad default percentage {} from dimensions {:?}",
+                            default_percentage, old_dimensions
+                        );
                     }
-                } else if media_too_big {
-                    return Err(TaskError::Error(format!(
-                        concat!(
-                            "output size {}x{} is too big. ",
-                            "This bot only allows generating media no bigger than {}x{}.\n",
-                            "For reference, input media's size is {}x{}, so the output must be no bigger than {}% of it."
-                        ),
-                        new_dimensions.0,
-                        new_dimensions.1,
-                        MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
-                        MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
-                        old_dimensions.0,
-                        old_dimensions.1,
-                        biggest_percentage_that_can_fit(old_dimensions)
-                    )));
-                }
+                };
 
                 if let ResizeType::SeamCarve {
                     delta_x: dx,
@@ -730,10 +742,7 @@ fn dimensions_parser(
     data: &str,
     starting_dimensions: (i32, i32),
 ) -> Option<(i32, i32, Option<f32>)> {
-    dbg!(data);
-    dbg!(starting_dimensions);
     if let Some(x) = width_height_parser(data, starting_dimensions) {
-        dbg!(x);
         Some((x.0, x.1, None))
     } else {
         let result = percentage_parser(data, starting_dimensions)?;
