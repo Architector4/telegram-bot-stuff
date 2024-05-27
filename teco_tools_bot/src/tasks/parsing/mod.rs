@@ -167,7 +167,8 @@ impl Task {
                     ResizeType::SeamCarve { .. } =>
                         concat!(
                             "Size specification (values can be negative for mirroring):\n",
-                            "<code>WxH</code>: Width and height of the output image, can't be 0 or bigger than 2048x2048; OR\n",
+                            "<code>WxH</code>: Width and height of the output image, in pixels or percentages; ",
+                            "can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "\n",
@@ -182,7 +183,8 @@ impl Task {
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop =>
                         concat!(
                             "Size specification (values can be negative for mirroring):\n",
-                            "<code>WxH</code>: Width and height of the output image, can't be 0 or bigger than 2048x2048; OR\n",
+                            "<code>WxH</code>: Width and height of the output image, in pixels or percentages; ",
+                            "can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "\n",
@@ -197,7 +199,8 @@ impl Task {
                     ResizeType::ToSticker| ResizeType::ToCustomEmoji  => "",
                     ResizeType::SeamCarve { ..} => concat!(
                             "Size specification (values can be negative for mirroring):\n",
-                            "<code>WxH</code>: Width and height of the output video, can't be 0 or bigger than 2048x2048; OR\n",
+                            "<code>WxH</code>: Width and height of the output video, in pixels or percentages; ",
+                            "can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "<code>rot</code>: Rotate the video by this much after distorting.\n",
@@ -210,7 +213,8 @@ impl Task {
                         ),
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop => concat!(
                             "Size specification (values can be negative for mirroring):\n",
-                            "<code>WxH</code>: Width and height of the output video, can't be 0 or bigger than 2048x2048; OR\n",
+                            "<code>WxH</code>: Width and height of the output video, in pixels or percentages; ",
+                            "can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "\n",
