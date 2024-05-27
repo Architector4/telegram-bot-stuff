@@ -357,20 +357,20 @@ impl Task {
                         || new_dimensions.1.unsigned_abs() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
                     if media_too_big {
                         return Err(TaskError::Error(format!(
-                        concat!(
+                            concat!(
                             "output size <b>{}x{}</b> is too big. ",
                             "This bot only allows generating media no bigger than <b>{}x{}</b>.\n",
                             "For reference, input media's size is <b>{}x{}</b>, ",
                             "so the output must be no bigger than <b>{}%</b> of it."
                         ),
-                        new_dimensions.0,
-                        new_dimensions.1,
-                        MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
-                        MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
-                        old_dimensions.0,
-                        old_dimensions.1,
-                        biggest_percentage_that_can_fit(old_dimensions)
-                    )));
+                            new_dimensions.0,
+                            new_dimensions.1,
+                            MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
+                            MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
+                            old_dimensions.0,
+                            old_dimensions.1,
+                            biggest_percentage_that_can_fit(old_dimensions)
+                        )));
                     };
                     new_dimensions
                 } else {
@@ -759,8 +759,16 @@ fn width_height_parser(data: &str, starting_dimensions: (i32, i32)) -> Option<(i
     let w = &data[0..x];
     let h = &data[x + 1..];
 
-    let width = single_dimension_parser(w, starting_dimensions.0)?;
-    let height = single_dimension_parser(h, starting_dimensions.1)?;
+    let width = if w.is_empty() {
+        starting_dimensions.0
+    } else {
+        single_dimension_parser(w, starting_dimensions.0)?
+    };
+    let height = if h.is_empty() {
+        starting_dimensions.1
+    } else {
+        single_dimension_parser(h, starting_dimensions.1)?
+    };
 
     Some((width, height))
 }
@@ -778,6 +786,10 @@ fn width_height_parser_test() {
     assert_eq!(the_fn("-150x-100%", (100, 150)), Some((-150, -150)));
     assert_eq!(the_fn("-150%x100%", (100, -150)), Some((-150, -150)));
     assert_eq!(the_fn("-150x0%", (100, 150)), Some((-150, 0)));
+
+    assert_eq!(the_fn("x150", (100, 150)), Some((100, 150)));
+    assert_eq!(the_fn("50%x", (100, 150)), Some((50, 150)));
+    assert_eq!(the_fn("x", (100, 150)), Some((100, 150)));
 }
 
 /// Given either a percentage or width/height specification
