@@ -227,11 +227,13 @@ pub async fn handle_message(
             }
         }
     } else {
-        // It's not spam. Do the other things.
-        gather_suspicion(&bot, &message, &database).await?;
+        // It's not spam. Do the other things, if it's not an edit.
+        if message.edit_date().is_none() {
+            gather_suspicion(&bot, &message, &database).await?;
 
-        if handle_command(&bot, &me, &message, &database, sent_by_admin).await? {
-            return Ok(());
+            if handle_command(&bot, &me, &message, &database, sent_by_admin).await? {
+                return Ok(());
+            }
         }
     }
 
@@ -336,6 +338,11 @@ async fn handle_command(
     database: &Database,
     mut sent_by_admin: Option<bool>,
 ) -> Result<bool, RequestError> {
+    if message.edit_date().is_some() {
+        // Ignore message edits here.
+        return Ok(false);
+    }
+
     macro_rules! byadmin {
         () => {{
             if sent_by_admin.is_none() {
@@ -429,6 +436,10 @@ pub fn generate_bot_commands() -> Vec<BotCommand> {
 }
 
 pub async fn handle_private_message(bot: Bot, message: Message) -> Result<(), RequestError> {
+    if message.edit_date().is_some() {
+        // Ignore message edits here.
+        return Ok(());
+    }
     // Nothing much to do here lol
 
     bot.send_message(

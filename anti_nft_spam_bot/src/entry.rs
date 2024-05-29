@@ -30,7 +30,10 @@ pub async fn entry() {
 
     let handler = dptree::entry()
         .branch(Update::filter_message().branch(dptree::endpoint(crate::handlers::handle_message)))
-        .branch(Update::filter_edited_message().branch(dptree::endpoint(crate::handlers::handle_message)))
+        .branch(
+            Update::filter_edited_message()
+                .branch(dptree::endpoint(crate::handlers::handle_message)),
+        )
         .branch(Update::filter_callback_query().endpoint(parse_callback_query));
 
     log::info!("Dispatching the dispatcher!");
