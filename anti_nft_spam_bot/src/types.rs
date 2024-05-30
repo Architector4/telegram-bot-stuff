@@ -14,6 +14,18 @@ pub enum IsSpam {
     Maybe = 2,
 }
 
+impl IsSpam {
+    /// Picks the option that is most condemning.
+    pub fn pick_most_condemning(a: Option<Self>, b: Option<Self>) -> Option<Self> {
+        match (a, b) {
+            (Some(Self::Yes), _) | (_, Some(Self::Yes)) => Some(Self::Yes),
+            (Some(Self::Maybe), _) | (_, Some(Self::Maybe)) => Some(Self::Maybe),
+            (Some(Self::No), _) | (_, Some(Self::No)) => Some(Self::No),
+            (None, _) => None,
+        }
+    }
+}
+
 impl From<u8> for IsSpam {
     fn from(value: u8) -> Self {
         use IsSpam::*;
