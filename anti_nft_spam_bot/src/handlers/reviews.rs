@@ -197,9 +197,6 @@ pub async fn parse_callback_query(
     };
 
     let user = query.from;
-    if !authenticate_control(&bot, &user).await? {
-        goodbye!("Access denied.");
-    }
 
     let response = match ReviewResponse::from_str(query_data.as_str(), &db).await {
         Ok(r) => r,
@@ -208,8 +205,40 @@ pub async fn parse_callback_query(
         }
     };
 
+    if !apply_review(&bot, &user, &db, &response).await? {
+        goodbye!("Access denied.");
+    }
+
+    let Some(message) = query.message else {
+        // May happen if the message is too old
+        goodbye!("Review taken. Please send /review to perform more reviews.");
+    };
+
+    edit_message_into_a_review(&bot, &db, &message).await?;
+    goodbye!();
+}
+
+/// Apply this review response as coming from this user.
+///
+/// Returns true if succeeded, false if the user is not in control chat.
+pub async fn apply_review(
+    bot: &Bot,
+    user: &User,
+    db: &Arc<Database>,
+    response: &ReviewResponse,
+) -> Result<bool, RequestError> {
+    if !authenticate_control(bot, user).await? {
+        return Ok(false);
+    }
+
+    // Ingest it into the database...
+    db.read_review_response(response)
+        .await
+        .expect("Database died!");
+
+    // Write it to the log...
     if response
-        .conflicts_with_db(&db)
+        .conflicts_with_db(db)
         .await
         .expect("Database died!")
     {
@@ -228,18 +257,5 @@ pub async fn parse_callback_query(
             .disable_web_page_preview(true)
             .await?;
     }
-
-    // Ingest it into the database...
-
-    db.read_review_response(&response)
-        .await
-        .expect("Database died!");
-
-    let Some(message) = query.message else {
-        // May happen if the message is too old
-        goodbye!("Review taken. Please send /review to perform more reviews.");
-    };
-
-    edit_message_into_a_review(&bot, &db, &message).await?;
-    goodbye!();
+    Ok(true)
 }
