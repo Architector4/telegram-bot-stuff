@@ -932,4 +932,82 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn review_response_conflicts_with_db() -> Ret {
+        // Check all possible cases of `ReviewResponse` in
+        // relation to the database's state.
+        let url = parse_url_like_telegram("example.com/notspam").unwrap();
+        let domain = Domain::from_url(&url).unwrap();
+
+        // Test cases.
+        let skip = ReviewResponse::Skip;
+        let notspam = ReviewResponse::NotSpam(Some(domain.clone()), url.clone());
+        let urlspam = ReviewResponse::UrlSpam(Some(domain.clone()), url.clone());
+        let domainspam = ReviewResponse::DomainSpam(domain.clone(), url.clone());
+
+        // Neither URL nor domain is in the database.
+        let db = new_temp().await?;
+        assert!(!skip.conflicts_with_db(&db).await?);
+        assert!(notspam.conflicts_with_db(&db).await?);
+        assert!(urlspam.conflicts_with_db(&db).await?);
+        assert!(domainspam.conflicts_with_db(&db).await?);
+
+        //
+
+        // The URL is marked as not spam.
+        let db = new_temp().await?;
+        db.add_url(&url, IsSpam::No, false, false).await?;
+        assert!(!skip.conflicts_with_db(&db).await?);
+        assert!(!notspam.conflicts_with_db(&db).await?);
+        assert!(urlspam.conflicts_with_db(&db).await?);
+        assert!(domainspam.conflicts_with_db(&db).await?);
+
+        // The URL is marked as maybe spam.
+        let db = new_temp().await?;
+        db.add_url(&url, IsSpam::Maybe, false, false).await?;
+        assert!(!skip.conflicts_with_db(&db).await?);
+        assert!(notspam.conflicts_with_db(&db).await?);
+        assert!(urlspam.conflicts_with_db(&db).await?);
+        assert!(domainspam.conflicts_with_db(&db).await?);
+
+        // The URL is marked as yes spam.
+        let db = new_temp().await?;
+        db.add_url(&url, IsSpam::Yes, false, false).await?;
+        assert!(!skip.conflicts_with_db(&db).await?);
+        assert!(notspam.conflicts_with_db(&db).await?);
+        assert!(!urlspam.conflicts_with_db(&db).await?);
+        assert!(domainspam.conflicts_with_db(&db).await?);
+
+        //
+
+        // The domain is marked as not spam.
+        let db = new_temp().await?;
+        db.add_domain(&domain, &url, IsSpam::No, false, false)
+            .await?;
+        assert!(!skip.conflicts_with_db(&db).await?);
+        assert!(!notspam.conflicts_with_db(&db).await?);
+        assert!(urlspam.conflicts_with_db(&db).await?);
+        assert!(domainspam.conflicts_with_db(&db).await?);
+
+        // The domain is marked as maybe spam.
+        let db = new_temp().await?;
+        db.add_domain(&domain, &url, IsSpam::Maybe, false, false)
+            .await?;
+        assert!(!skip.conflicts_with_db(&db).await?);
+        assert!(notspam.conflicts_with_db(&db).await?);
+        assert!(urlspam.conflicts_with_db(&db).await?);
+        assert!(domainspam.conflicts_with_db(&db).await?);
+
+        // The domain is marked as yes spam.
+        let db = new_temp().await?;
+        db.add_domain(&domain, &url, IsSpam::Yes, false, false)
+            .await?;
+        assert!(!skip.conflicts_with_db(&db).await?);
+        assert!(notspam.conflicts_with_db(&db).await?);
+        assert!(urlspam.conflicts_with_db(&db).await?);
+        assert!(!domainspam.conflicts_with_db(&db).await?);
+
+        Ok(())
+    }
 }

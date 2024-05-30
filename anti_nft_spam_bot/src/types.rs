@@ -127,7 +127,7 @@ impl ReviewResponse {
                 .is_spam(url, domain.as_ref(), true)
                 .await?
                 // `IsSpam::Maybe` case here is ignored too.
-                .map_or(true, |x| x == IsSpam::Yes),
+                .map_or(true, |x| x != IsSpam::No),
         })
     }
 
