@@ -895,4 +895,22 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn adding_links_actually_adds() -> Ret {
+        let url = parse_url_like_telegram("example.com/notspam").unwrap();
+        let domain = Domain::from_url(&url).unwrap();
+
+        for spam_status in [IsSpam::No, IsSpam::Maybe, IsSpam::Yes] {
+            let db = new_temp().await?;
+            db.add_domain(&domain, &url, spam_status, false, false)
+                .await?;
+            assert_eq!(db.is_spam(&url, &domain, true).await?, Some(spam_status));
+            let db = new_temp().await?;
+            db.add_url(&url, spam_status, false, false).await?;
+            assert_eq!(db.is_spam(&url, &domain, true).await?, Some(spam_status));
+        }
+
+        Ok(())
+    }
 }
