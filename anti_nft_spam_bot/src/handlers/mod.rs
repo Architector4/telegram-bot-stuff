@@ -12,7 +12,7 @@ use url::Url;
 use crate::{
     database::Database,
     parse_url_like_telegram,
-    types::{Domain, IsSpam},
+    types::{Domain, IsSpam, ReviewResponse},
 };
 
 pub mod reviews;
@@ -415,6 +415,83 @@ async fn handle_command(
 
             goodbye!(response);
         }
+        "/mark_not_spam" | "/mark_url_spam" | "/mark_domain_spam" => {
+            // If it's not a private chat, or no sender,or they're not
+            // in control chat, pretend we do not see it.
+            if !message.chat.is_private() {
+                return Ok(false);
+            }
+            let Some(sender) = message.from() else {
+                return Ok(false);
+            };
+            if !reviews::authenticate_control(bot, sender).await? {
+                return Ok(false);
+            }
+
+            // Get message "entities".
+            let Some(entities) = message
+                .parse_entities()
+                .or_else(|| message.parse_caption_entities())
+            else {
+                goodbye!("Please specify links. Replies don't count to avoid accidents.");
+            };
+
+            let mut response = String::new();
+            let mut wrote_header = false;
+
+            // Scan all URLs in the message...
+            for entity in &entities {
+                let Some((mut url, domain)) = get_entity_url_domain(entity) else {
+                    continue;
+                };
+
+                match command.as_str() {
+                    "/mark_not_spam" => {
+                        let action = ReviewResponse::NotSpam(Some(domain), url);
+                        reviews::apply_review_unverified(bot, sender, database, &action).await?;
+                        // Get the URL back lol
+                        url = action.deconstruct().unwrap().1;
+
+                        if !wrote_header {
+                            response.push_str("Marked as not spam:\n");
+                            wrote_header = true;
+                        }
+                    }
+                    "/mark_url_spam" => {
+                        let action = ReviewResponse::UrlSpam(Some(domain), url);
+                        reviews::apply_review_unverified(bot, sender, database, &action).await?;
+                        // Get the URL back lol
+                        url = action.deconstruct().unwrap().1;
+
+                        if !wrote_header {
+                            response.push_str("Marked these URLs as spam:\n");
+                            wrote_header = true;
+                        }
+                    }
+                    "/mark_domain_spam" => {
+                        let action = ReviewResponse::DomainSpam(domain, url);
+                        reviews::apply_review_unverified(bot, sender, database, &action).await?;
+                        // Get the URL back lol
+                        url = action.deconstruct().unwrap().1;
+
+                        if !wrote_header {
+                            response.push_str("Marked domains of these URLs as spam:\n");
+                            wrote_header = true;
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                response.push_str(url.as_str());
+                response.push('\n');
+            }
+
+            if response.is_empty() {
+                goodbye!("Please specify links. Replies don't count to avoid accidents.");
+            }
+
+            goodbye!(response.as_str());
+        }
         // Any kind of "/start", "/help" commands would yield false and
         // hence cause the help message to be printed if this is a private chat.
         // See definition of handle_private_message.
@@ -451,7 +528,11 @@ To use this bot, add it to a chat and give it administrator status with \"Remove
 
 No further setup is required. A message will be sent when spam is removed.
 
-For available commands, type / into the message text box below and see the previews.",
+For available commands, type / into the message text box below and see the previews.
+
+If you're in the group for volunteers to manually review chats, you can also use commands here in private chat:
+
+/mark_not_spam, /mark_url_spam and /mark_domain_spam"
     )
     .await?;
     Ok(())

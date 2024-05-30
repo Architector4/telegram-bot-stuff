@@ -89,6 +89,15 @@ impl ReviewResponse {
         }
     }
 
+    pub fn deconstruct(self) -> Option<(Option<Domain>, Url)> {
+        match self {
+            ReviewResponse::Skip => None,
+            ReviewResponse::UrlSpam(d, u) => Some((d, u)),
+            ReviewResponse::DomainSpam(d, u) => Some((Some(d), u)),
+            ReviewResponse::NotSpam(d, u) => Some((d, u)),
+        }
+    }
+
     /// Returns true if ingesting this into the database
     /// would cause a change that we are interested in.
     pub async fn conflicts_with_db(&self, database: &Database) -> Result<bool, database::Error> {

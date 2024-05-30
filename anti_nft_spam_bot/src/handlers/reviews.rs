@@ -15,7 +15,7 @@ use crate::{
 
 /// Check if this user is in the control chat and can do reviews, and
 /// delay their requests if appropriate.
-async fn authenticate_control(bot: &Bot, user: &User) -> Result<bool, RequestError> {
+pub async fn authenticate_control(bot: &Bot, user: &User) -> Result<bool, RequestError> {
     let control = bot
         .get_chat_member(CONTROL_CHAT_ID, user.id)
         .await?
@@ -35,12 +35,15 @@ async fn authenticate_control(bot: &Bot, user: &User) -> Result<bool, RequestErr
         // Not a member.
         // Now, facts:
         // 1. This function will only be run in context of a private chat.
+        //
         // 2. Teloxide intentionally processes messages from one chat
         //    not-concurrently; that is, if we delay now, this will delay
         //    processing all following direct messages sent by that person
         //    to this bot.
-        // 3. There is no other reason to DM this bot other than to get
-        //    the help message and for these reviews.
+        //
+        // 3. There is no pertinent reason to DM this bot other than to get
+        //    the help message.
+        //
         // 4. If a user is sending DMs to this bot, that means that they
         //    have already sent `/start`, and hence have already seen the
         //    help message.
@@ -221,26 +224,41 @@ pub async fn parse_callback_query(
 /// Apply this review response as coming from this user.
 ///
 /// Returns true if succeeded, false if the user is not in control chat.
+///
+/// If `verify_user` is set to `false`, it will always return true.
 pub async fn apply_review(
     bot: &Bot,
     user: &User,
-    db: &Arc<Database>,
+    db: &Database,
     response: &ReviewResponse,
 ) -> Result<bool, RequestError> {
     if !authenticate_control(bot, user).await? {
         return Ok(false);
     }
 
+    apply_review_unverified(bot, user, db, response).await?;
+    Ok(true)
+}
+
+/// Apply this review response as coming from this user.
+///
+/// Will not check if this user actually is in control chat.
+pub async fn apply_review_unverified(
+    bot: &Bot,
+    user: &User,
+    db: &Database,
+    response: &ReviewResponse,
+) -> Result<(), RequestError> {
     // Ingest it into the database...
     db.read_review_response(response)
         .await
         .expect("Database died!");
 
     // Write it to the log...
-    if response
+    if dbg!(response
         .conflicts_with_db(db)
         .await
-        .expect("Database died!")
+        .expect("Database died!"))
     {
         // Something wasn't marked as spam, but now will be.
         // This warrants logging.
@@ -257,5 +275,5 @@ pub async fn apply_review(
             .disable_web_page_preview(true)
             .await?;
     }
-    Ok(true)
+    Ok(())
 }
