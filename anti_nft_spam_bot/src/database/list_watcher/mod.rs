@@ -7,15 +7,16 @@ use std::{
 };
 
 use notify::{RecursiveMode, Watcher};
+use teloxide::Bot;
 
 use crate::types::IsSpam;
 use parser::Line;
 
 static LIST_FILE: &str = "spam_website_list.txt";
 
-pub async fn watch_list(db_arc: Arc<super::Database>) {
+pub async fn watch_list(bot: Bot, db_arc: Arc<super::Database>) {
     // First ingest ASAP...
-    let _ = ingest_list_to_database(&db_arc).await;
+    let _ = ingest_list_to_database(&bot, &db_arc).await;
 
     let mut receiver = db_arc.drop_watch.0.subscribe();
     let database = Arc::downgrade(&db_arc);
@@ -53,7 +54,7 @@ pub async fn watch_list(db_arc: Arc<super::Database>) {
                     break;
                 };
 
-                let _ = ingest_list_to_database(&database).await;
+                let _ = ingest_list_to_database(&bot, &database).await;
 
             },
             e = receiver.changed() => {
@@ -70,7 +71,7 @@ pub async fn watch_list(db_arc: Arc<super::Database>) {
     }
 }
 
-async fn ingest_list_to_database(database: &super::Database) -> std::io::Result<()> {
+async fn ingest_list_to_database(bot: &Bot, database: &super::Database) -> std::io::Result<()> {
     log::info!("Ingesting list to database...");
     use std::{fs::File, io::BufReader};
     use teloxide::requests::Requester;
@@ -100,8 +101,7 @@ async fn ingest_list_to_database(database: &super::Database) -> std::io::Result<
 
                     // Don't care if this fails. What can we do, log it?
                     // The error above will show up in the log anyway lol
-                    let _ = database
-                        .bot
+                    let _ = bot
                         .send_message(crate::CONTROL_CHAT_ID, error_message)
                         .await;
                 }
@@ -138,8 +138,7 @@ async fn ingest_list_to_database(database: &super::Database) -> std::io::Result<
             log::warn!("{}", error_message);
             // Don't care if this fails. What can we do, log it?
             // The error above will show up in the log anyway lol
-            let _ = database
-                .bot
+            let _ = bot
                 .send_message(crate::CONTROL_CHAT_ID, error_message)
                 .await;
             return Err(Error::new(ErrorKind::BrokenPipe, e));

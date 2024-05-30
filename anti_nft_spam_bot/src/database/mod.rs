@@ -28,7 +28,6 @@ static WAS_CONSTRUCTED: AtomicBool = AtomicBool::new(false);
 pub struct Database {
     pool: Pool,
     drop_watch: (watch::Sender<()>, watch::Receiver<()>),
-    bot: Bot,
     // Mutexes are bad. However, this will only be used for reviews,
     // which can only be done by a few people in the control chat.
     review_lock: Mutex<()>,
@@ -42,19 +41,33 @@ pub struct Database {
 }
 
 impl Database {
-    pub async fn new(bot: Bot) -> Result<Arc<Database>, Error> {
-        assert!(
-            !WAS_CONSTRUCTED.swap(true, std::sync::atomic::Ordering::SeqCst),
-            "Second database was constructed. This is not allowed."
-        );
+    pub fn new(bot: Bot) -> impl std::future::Future<Output = Result<Arc<Database>, Error>> + Send {
+        Self::new_by_path(bot, DB_PATH, true)
+    }
 
-        if !Sqlite::database_exists(DB_PATH).await.unwrap_or(false) {
-            Sqlite::create_database(DB_PATH).await?;
+    /// Create a new database with specified path. Will check if it's a unique database if `unique`
+    /// is set. If `bot` is provided, it will also ingest the `spam_website_list.txt` file and
+    /// watch it for changes.
+    async fn new_by_path(
+        bot: impl Into<Option<Bot>>,
+        path: &str,
+        unique: bool,
+    ) -> Result<Arc<Database>, Error> {
+        if unique {
+            assert!(
+                !WAS_CONSTRUCTED.swap(true, std::sync::atomic::Ordering::SeqCst),
+                "Second database was constructed. This is not allowed."
+            );
         }
+
+        if !Sqlite::database_exists(path).await.unwrap_or(false) {
+            Sqlite::create_database(path).await?;
+        }
+
         let pool = SqlitePoolOptions::new()
             .max_connections(32)
             .connect_with(
-                SqliteConnectOptions::from_str(DB_PATH)
+                SqliteConnectOptions::from_str(path)
                     .unwrap()
                     .pragma("cache_size", "-32768")
                     .busy_timeout(std::time::Duration::from_secs(600)),
@@ -152,15 +165,16 @@ impl Database {
 
         let db_arc = Arc::new(Database {
             pool,
-            bot,
             review_lock: Mutex::new(()),
             drop_watch: watch::channel(()),
             domains_currently_being_visited: Mutex::new(HashSet::with_capacity(4)),
             domains_visit_notify: Notify::new(),
         });
 
-        // Spawn the watcher.
-        tokio::spawn(list_watcher::watch_list(db_arc.clone()));
+        if let Some(bot) = bot.into() {
+            // Spawn the watcher.
+            tokio::spawn(list_watcher::watch_list(bot, db_arc.clone()));
+        }
 
         Ok(db_arc)
     }
