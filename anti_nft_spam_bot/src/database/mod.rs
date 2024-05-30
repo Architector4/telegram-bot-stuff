@@ -847,11 +847,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mark_sus_does_not_affect_reviewed_links() -> Ret {
+    async fn mark_sus_workflow() -> Ret {
         let db = new_temp().await?;
-        let link: Url = parse_url_like_telegram("example.com/notspam").unwrap();
+        let link = parse_url_like_telegram("example.com/notspam").unwrap();
+        let domain = Domain::from_url(&link).unwrap();
 
-        // Someone marks it as sus...
+        // Let's say the link is posted in a chat.
+        // First, check `crate::spam_checker::check` is run, which defers to the db.
+        assert_eq!(db.is_spam(&link, None, false).await?, None);
+
+        // Then, the checker determines it as not spam and adds it to
+        // the database.
+        db.add_domain(&domain, &link, IsSpam::No, false, false)
+            .await
+            .expect("Database died!");
+
+        // Then, someone marks it as sus.
         assert!(db.mark_sus(&link, None).await?);
 
         // Check if this is what it is in the database.
@@ -872,6 +883,7 @@ mod tests {
         let response = ReviewResponse::NotSpam(from_db.1, from_db.0);
         db.read_review_response(&response).await?;
 
+        // Someone later posts the link again.
         // Check if this is what it is in the database.
         assert_eq!(db.is_spam(&link, None, false).await?, Some(IsSpam::No));
 
