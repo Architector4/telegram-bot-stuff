@@ -359,15 +359,25 @@ impl Database {
         example_url: Option<&Url>,
     ) -> Result<(), Error> {
         sqlx::query(
-            "INSERT INTO domains(domain, example_url, is_spam)
-            VALUES (?, ?, 2)
-        ON CONFLICT DO
-            UPDATE SET example_url=COALESCE(?, example_url), is_spam=2
-        WHERE is_spam=0 AND manually_reviewed=0;",
+            "
+            INSERT INTO domains(
+                domain,
+                example_url,
+                is_spam,
+                spam_checker_version
+            ) VALUES (?, ?, 2, ?)
+            ON CONFLICT DO
+            UPDATE SET
+                example_url=COALESCE(?, example_url),
+                is_spam=2,
+                spam_checker_version=?
+            WHERE is_spam=0 AND manually_reviewed=0;",
         )
         .bind(domain.as_str())
         .bind(example_url.map(Url::as_str))
+        .bind(SPAM_CHECKER_VERSION)
         .bind(example_url.map(Url::as_str))
+        .bind(SPAM_CHECKER_VERSION)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -415,13 +425,19 @@ impl Database {
     /// and wasn't manually reviewed.
     pub async fn mark_url_sus(&self, url: &Url) -> Result<(), Error> {
         sqlx::query(
-            "INSERT INTO urls(url, is_spam)
-            VALUES (?, 2)
-        ON CONFLICT DO
-            UPDATE SET is_spam=2
-        WHERE is_spam=0 AND manually_reviewed=0;",
+            "
+            INSERT INTO urls(
+                    url,
+                    is_spam,
+                    spam_checker_version
+            ) VALUES (?, 2, ?)
+            ON CONFLICT DO
+                UPDATE SET is_spam=2, spam_checker_version=?
+                WHERE is_spam=0 AND manually_reviewed=0;",
         )
         .bind(url.as_str())
+        .bind(SPAM_CHECKER_VERSION)
+        .bind(SPAM_CHECKER_VERSION)
         .execute(&self.pool)
         .await?;
         Ok(())
