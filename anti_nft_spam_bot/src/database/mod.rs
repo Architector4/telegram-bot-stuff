@@ -267,14 +267,11 @@ impl Database {
         return_old_checker_results: bool,
     ) -> Result<Option<IsSpam>, Error> {
         let mut domain = domain.into();
-        let mut url_maybe_spam = false;
-        // Look for direct URL match...
-        if let Some(url_result) = self.is_url_spam(url, return_old_checker_results).await? {
-            if url_result == IsSpam::Maybe {
-                url_maybe_spam = true;
-            } else {
-                return Ok(Some(url_result));
-            }
+        // Look for URL match...
+        let url_result = self.is_url_spam(url, return_old_checker_results).await?;
+
+        if let Some(IsSpam::Yes) = url_result {
+            return Ok(url_result);
         }
 
         // If no provided domain, try to get one from the URL.
@@ -286,16 +283,22 @@ impl Database {
         }
 
         // Look for domain match...
-        if let Some(domain) = domain {
+        let domain_result = if let Some(domain) = domain {
             self.is_domain_spam(domain, return_old_checker_results)
-                .await
+                .await?
         } else {
-            // If it's not a domain, but URL is marked as "maybe", return "maybe".
-            match url_maybe_spam {
-                true => Ok(Some(IsSpam::Maybe)),
-                false => Ok(None),
-            }
-        }
+            None
+        };
+
+        // Pick the most condemning one.
+        let result = match (url_result, domain_result) {
+            (Some(IsSpam::Yes), _) | (_, Some(IsSpam::Yes)) => Some(IsSpam::Yes),
+            (Some(IsSpam::Maybe), _) | (_, Some(IsSpam::Maybe)) => Some(IsSpam::Maybe),
+            (Some(IsSpam::No), _) | (_, Some(IsSpam::No)) => Some(IsSpam::No),
+            (None, _) => None,
+        };
+
+        Ok(result)
     }
 
     /// Inserts a domain into the database and tags it as spam or not.
