@@ -771,3 +771,116 @@ impl Database {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type Ret = Result<(), Error>;
+
+    pub fn new_temp() -> impl std::future::Future<Output = Result<Arc<Database>, Error>> + Send {
+        Database::new_by_path(None, "sqlite::memory:", false)
+    }
+
+    #[tokio::test]
+    async fn create_db() -> Ret {
+        new_temp().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn is_url_spam() -> Ret {
+        let db = new_temp().await?;
+        let spam: Url = parse_url_like_telegram("amogus.com/badspam").unwrap();
+
+        assert_eq!(db.is_url_spam(&spam, false).await?, None);
+        assert_eq!(db.is_spam(&spam, None, false).await?, None);
+
+        db.add_url(&spam, IsSpam::Yes, false, false).await?;
+        assert_eq!(db.is_url_spam(&spam, false).await?, Some(IsSpam::Yes));
+
+        let other: Url = parse_url_like_telegram("amogus.com/otherurl").unwrap();
+        assert_eq!(db.is_url_spam(&other, false).await?, None);
+
+        let spamdomain: Domain = Domain::from_url(&spam).unwrap();
+        // This checks if the domain specifically is a spam, so it will return None.
+        assert_eq!(db.is_domain_spam(&spamdomain, false).await?, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn is_domain_spam() -> Ret {
+        let db = new_temp().await?;
+        let spamurl: Url = parse_url_like_telegram("amogus.com/badspam").unwrap();
+        let spamdomain: Domain = Domain::from_url(&spamurl).unwrap();
+
+        assert_eq!(db.is_url_spam(&spamurl, false).await?, None);
+        assert_eq!(db.is_domain_spam(&spamdomain, false).await?, None);
+        assert_eq!(db.is_spam(&spamurl, None, false).await?, None);
+        assert_eq!(db.is_spam(&spamurl, Some(&spamdomain), false).await?, None);
+
+        db.add_domain(&spamdomain, Some(&spamurl), IsSpam::Yes, false, false)
+            .await?;
+        // This checks if the URL specifically is a spam, so it will return None.
+        assert_eq!(db.is_url_spam(&spamurl, false).await?, None);
+        assert_eq!(
+            db.is_domain_spam(&spamdomain, false).await?,
+            Some(IsSpam::Yes)
+        );
+        assert_eq!(db.is_spam(&spamurl, None, false).await?, Some(IsSpam::Yes));
+        assert_eq!(
+            db.is_spam(&spamurl, Some(&spamdomain), false).await?,
+            Some(IsSpam::Yes)
+        );
+
+        let other: Url = parse_url_like_telegram("amogus.com/otherurl").unwrap();
+        let otherdomain: Domain = Domain::from_url(&other).unwrap();
+        assert_eq!(spamdomain, otherdomain);
+        // This checks if the URL specifically is a spam, so it will return None.
+        assert_eq!(db.is_url_spam(&other, false).await?, None);
+        assert_eq!(db.is_spam(&other, None, false).await?, Some(IsSpam::Yes));
+        assert_eq!(
+            db.is_spam(&other, Some(&otherdomain), false).await?,
+            Some(IsSpam::Yes)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mark_sus_does_not_affect_reviewed_links() -> Ret {
+        let db = new_temp().await?;
+        let link: Url = parse_url_like_telegram("example.com/notspam").unwrap();
+
+        // Someone marks it as sus...
+        assert!(db.mark_sus(&link, None).await?);
+
+        // Check if this is what it is in the database.
+        assert_eq!(db.is_spam(&link, None, false).await?, Some(IsSpam::Maybe));
+
+        // Someone gets it in review...
+        let (review_url, review_table, review_id, db_state) =
+            db.get_url_for_review().await?.unwrap();
+        assert_eq!(review_url, link);
+        assert_eq!(db_state, IsSpam::Maybe);
+
+        // They mark it as not spam...
+        let from_db = db
+            .get_url_from_table_and_rowid(review_table, review_id)
+            .await?
+            .unwrap();
+        assert_eq!(from_db.0, link);
+        let response = ReviewResponse::NotSpam(from_db.1, from_db.0);
+        db.read_review_response(&response).await?;
+
+        // Check if this is what it is in the database.
+        assert_eq!(db.is_spam(&link, None, false).await?, Some(IsSpam::No));
+
+        // Someone marks it as sus again...
+        assert!(db.mark_sus(&link, None).await?);
+
+        // It should still be not spam.
+        assert_eq!(db.is_spam(&link, None, false).await?, Some(IsSpam::No));
+
+        Ok(())
+    }
+}
