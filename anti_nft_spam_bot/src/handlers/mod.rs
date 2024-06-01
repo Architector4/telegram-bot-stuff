@@ -114,11 +114,15 @@ async fn handle_message_inner(
         }
     }
 
+    let is_edited = message.edit_date().is_some();
+
     // First check if it's a private message.
     if message.chat.is_private() {
-        // Will try handling commands at the end of this function too.
-        if !is_replied_to && !handle_command(bot, me, message, database, None).await? {
-            handle_private_message(bot, message).await?;
+        if !is_replied_to && !is_edited {
+            // Will try handling commands at the end of this function too.
+            if !handle_command(bot, me, message, database, None).await? {
+                handle_private_message(bot, message).await?;
+            }
         }
         return Ok(());
     }
@@ -248,7 +252,7 @@ async fn handle_message_inner(
         }
     } else {
         // It's not spam. Do the other things, if it's not an edit nor a replied-to message
-        if !is_replied_to && message.edit_date().is_none() {
+        if !is_replied_to && is_edited {
             gather_suspicion(bot, message, database).await?;
 
             if handle_command(bot, me, message, database, sent_by_admin).await? {
