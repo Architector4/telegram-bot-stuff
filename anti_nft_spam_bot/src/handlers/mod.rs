@@ -87,6 +87,26 @@ pub async fn handle_message(
     message: Message,
     database: Arc<Database>,
 ) -> Result<(), RequestError> {
+    handle_message_inner(&bot, &me, &message, &database, false).await?;
+
+    // Also handle the message it's a reply to.
+    if let Some(replied_to) = message.reply_to_message() {
+        handle_message_inner(&bot, &me, replied_to, &database, true).await?;
+    }
+
+    Ok(())
+}
+
+/// Set `is_replied_to` to true if this message is being handled in context of being an older
+/// message that was replied to and is being checked again. If so, this handler will ignore
+/// commands and such.
+async fn handle_message_inner(
+    bot: &Bot,
+    me: &Me,
+    message: &Message,
+    database: &Arc<Database>,
+    is_replied_to: bool,
+) -> Result<(), RequestError> {
     if let Some(sender) = message.from() {
         if sender.id == me.id {
             // Ignore messages sent by ourselves.
@@ -97,7 +117,7 @@ pub async fn handle_message(
     // First check if it's a private message.
     if message.chat.is_private() {
         // Will try handling commands at the end of this function too.
-        if !handle_command(&bot, &me, &message, &database, None).await? {
+        if !is_replied_to && !handle_command(bot, me, message, database, None).await? {
             handle_private_message(bot, message).await?;
         }
         return Ok(());
@@ -122,7 +142,7 @@ pub async fn handle_message(
         };
         log::debug!("Spotted URL with domain {}", domain);
 
-        let Some(is_spam) = crate::spam_checker::check(&database, &domain, &url).await else {
+        let Some(is_spam) = crate::spam_checker::check(database, &domain, &url).await else {
             continue;
         };
 
@@ -140,7 +160,7 @@ pub async fn handle_message(
         // oh no!
         // Check if this is an admin of the chat or not.
 
-        sent_by_admin = Some(is_sender_admin(&bot, &message).await?);
+        sent_by_admin = Some(is_sender_admin(bot, message).await?);
 
         if sent_by_admin == Some(true) {
             log::debug!("Skipping deleting message from an admin.");
@@ -227,11 +247,11 @@ pub async fn handle_message(
             }
         }
     } else {
-        // It's not spam. Do the other things, if it's not an edit.
-        if message.edit_date().is_none() {
-            gather_suspicion(&bot, &message, &database).await?;
+        // It's not spam. Do the other things, if it's not an edit nor a replied-to message
+        if !is_replied_to && message.edit_date().is_none() {
+            gather_suspicion(bot, message, database).await?;
 
-            if handle_command(&bot, &me, &message, &database, sent_by_admin).await? {
+            if handle_command(bot, me, message, database, sent_by_admin).await? {
                 return Ok(());
             }
         }
@@ -512,7 +532,7 @@ pub fn generate_bot_commands() -> Vec<BotCommand> {
     ]
 }
 
-pub async fn handle_private_message(bot: Bot, message: Message) -> Result<(), RequestError> {
+pub async fn handle_private_message(bot: &Bot, message: &Message) -> Result<(), RequestError> {
     if message.edit_date().is_some() {
         // Ignore message edits here.
         return Ok(());
