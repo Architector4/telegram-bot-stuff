@@ -252,7 +252,7 @@ async fn handle_message_inner(
         }
     } else {
         // It's not spam. Do the other things, if it's not an edit nor a replied-to message
-        if !is_replied_to && is_edited {
+        if !is_replied_to && !is_edited {
             gather_suspicion(bot, message, database).await?;
 
             if handle_command(bot, me, message, database, sent_by_admin).await? {
