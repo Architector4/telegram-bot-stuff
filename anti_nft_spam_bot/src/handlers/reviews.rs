@@ -255,10 +255,10 @@ pub async fn apply_review_unverified(
         .expect("Database died!");
 
     // Write it to the log...
-    if dbg!(response
+    if response
         .conflicts_with_db(db)
         .await
-        .expect("Database died!"))
+        .expect("Database died!")
     {
         // Something wasn't marked as spam, but now will be.
         // This warrants logging.
