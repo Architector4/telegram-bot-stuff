@@ -94,7 +94,7 @@ mod tests {
         let random_telegram_bot_url = Url::parse("https://t.me/Anti_NFT_Spam_Bot").unwrap();
         assert!(matches!(
             is_spam_telegram_url(&random_telegram_bot_url),
-            Some(IsSpam::Maybe)
+            Some(IsSpam::No)
         ));
 
         let spam_url = Url::parse("https://t.me/FawunBot/claim").unwrap();

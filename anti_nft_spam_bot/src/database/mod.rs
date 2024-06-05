@@ -883,7 +883,7 @@ mod tests {
             .expect("Database died!");
 
         // Then, someone marks it as sus.
-        assert!(db.mark_sus(&link, None).await?);
+        assert_eq!(db.mark_sus(&link, None).await?, Some(IsSpam::No));
 
         // Check if this is what it is in the database.
         assert_eq!(db.is_spam(&link, None, false).await?, Some(IsSpam::Maybe));
@@ -908,7 +908,7 @@ mod tests {
         assert_eq!(db.is_spam(&link, None, false).await?, Some(IsSpam::No));
 
         // Someone marks it as sus again...
-        assert!(db.mark_sus(&link, None).await?);
+        assert_eq!(db.mark_sus(&link, None).await?, Some(IsSpam::No));
         //db.mark_url_sus(&link).await?;
 
         //// It should still be not spam.
