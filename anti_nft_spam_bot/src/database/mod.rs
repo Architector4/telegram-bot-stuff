@@ -929,7 +929,10 @@ mod tests {
         assert_eq!(db.is_spam(&link, None, false).await?, Some(IsSpam::No));
 
         // Someone marks it as sus again...
-        assert_eq!(db.mark_sus(&link, None).await?, MarkSusResult::ManuallyReviewedNotSpam);
+        assert_eq!(
+            db.mark_sus(&link, None).await?,
+            MarkSusResult::ManuallyReviewedNotSpam
+        );
         //db.mark_url_sus(&link).await?;
 
         //// It should still be not spam.
@@ -1030,6 +1033,108 @@ mod tests {
         assert!(notspam.conflicts_with_db(&db).await?);
         assert!(urlspam.conflicts_with_db(&db).await?);
         assert!(!domainspam.conflicts_with_db(&db).await?);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn marking_telegram_as_spam_by_accident() -> Ret {
+        // Scenario:
+        // 1. Someone puts a normal non-spam telegram link in review.
+        // 2. Admin marks it as not spam.
+        // 3. Someone puts a spam telegram link in review.
+        // 4. Admin accidentally responds that telegram's entire domain is spam.
+        //
+        // The make_a_db() function below creates a database in this state.
+
+        let spam: Url = parse_url_like_telegram("t.me/badspam").unwrap();
+        let normal: Url = parse_url_like_telegram("t.me/channels").unwrap();
+        let tg = parse_url_like_telegram("t.me").unwrap();
+        let tgdomain = Domain::from_url(&tg).unwrap();
+
+        /// Make a database with initial state.
+        async fn make_a_db() -> Result<Arc<Database>, Error> {
+            let db = new_temp().await?;
+            let spam: Url = parse_url_like_telegram("t.me/badspam").unwrap();
+            let normal: Url = parse_url_like_telegram("t.me/channels").unwrap();
+            let tg = parse_url_like_telegram("t.me").unwrap();
+            let tgdomain = Domain::from_url(&tg).unwrap();
+
+            // Let's say someone marks Telegram itself as spam on accident.
+
+            // Someone gets the normal link in review...
+            assert_eq!(db.mark_sus(&normal, None).await?, MarkSusResult::Marked);
+
+            // Someone gets it in review...
+            let (_, review_table, review_id, _) = db.get_url_for_review().await?.unwrap();
+
+            // They mark it as not spam...
+            let from_db = db
+                .get_url_from_table_and_rowid(review_table, review_id)
+                .await?
+                .unwrap();
+            assert_eq!(from_db.0, normal);
+            let response = ReviewResponse::NotSpam(from_db.1, from_db.0);
+            db.read_review_response(&response).await?;
+
+            // Someone gets the spam link in review...
+            assert_eq!(db.mark_sus(&spam, None).await?, MarkSusResult::Marked);
+
+            // Someone gets it in review...
+            let (_, review_table, review_id, _) = db.get_url_for_review().await?.unwrap();
+
+            // They mark the DOMAIN as spam on accident...
+            let from_db = db
+                .get_url_from_table_and_rowid(review_table, review_id)
+                .await?
+                .unwrap();
+            assert_eq!(from_db.0, spam);
+            let response = ReviewResponse::DomainSpam(tgdomain.clone(), from_db.0);
+            db.read_review_response(&response).await?;
+
+            // Oh no. The normal link is spam too.
+            assert_eq!(
+                db.is_spam(&normal, None, false).await.unwrap(),
+                Some(IsSpam::Yes)
+            );
+
+            // How will our heroes get out of this one? Find out on next episode of...
+            Ok(db)
+        }
+
+        // Scenario continuation:
+        // 5. Admin tries to fix this by marking "t.me" as not spam.
+        let db = make_a_db().await?;
+        let response = ReviewResponse::NotSpam(Some(tgdomain.clone()), tg);
+        db.read_review_response(&response).await?;
+
+        // Normal link shouldn't be spam now.
+        assert_eq!(
+            db.is_spam(&normal, None, false).await.unwrap(),
+            Some(IsSpam::No)
+        );
+        // In this case the spam link isn't either though.
+        assert_eq!(
+            db.is_spam(&spam, None, false).await.unwrap(),
+            Some(IsSpam::No)
+        );
+
+        // Scenario continuation:
+        // 5. Admin tries to fix this by marking the spam link as URL spam.
+        let db = make_a_db().await?;
+        let response = ReviewResponse::UrlSpam(Some(tgdomain), spam.clone());
+        db.read_review_response(&response).await?;
+
+        // Normal link shouldn't be spam now.
+        assert_eq!(
+            db.is_spam(&normal, None, false).await.unwrap(),
+            Some(IsSpam::No)
+        );
+        // In this case the spam link should still be considered spam.
+        assert_eq!(
+            db.is_spam(&spam, None, false).await.unwrap(),
+            Some(IsSpam::Yes)
+        );
 
         Ok(())
     }
