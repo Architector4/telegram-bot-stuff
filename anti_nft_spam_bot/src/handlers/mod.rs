@@ -304,9 +304,12 @@ async fn gather_suspicion(
             }
         }
 
-        let mut marked_anything_as_sus = false;
-        let mut everything_already_banned = true;
         let mut had_links = false;
+
+        let mut marked_count = 0u32;
+        let mut already_marked_sus_count = 0u32;
+        let mut already_marked_spam_count = 0u32;
+        let mut manually_reviewed_not_spam_count = 0u32;
 
         for entity in &entities {
             let Some((url, domain)) = get_entity_url_domain(entity) else {
@@ -322,15 +325,23 @@ async fn gather_suspicion(
                 .await
                 .expect("Database died!");
 
-            if result.is_none() || result == Some(IsSpam::No) {
-                marked_anything_as_sus = true;
-                everything_already_banned = false;
-            }
+            {
+                use crate::types::MarkSusResult::*;
 
-            if result != Some(IsSpam::Yes) {
-                everything_already_banned = false;
+                match result {
+                    Marked => marked_count += 1,
+                    AlreadyMarkedSus => already_marked_sus_count += 1,
+                    AlreadyMarkedSpam => already_marked_spam_count += 1,
+                    ManuallyReviewedNotSpam => manually_reviewed_not_spam_count += 1,
+                }
             }
         }
+
+        let mut response;
+        let marked = marked_count > 0;
+        let already_marked_sus = already_marked_sus_count > 0;
+        let already_marked_spam = already_marked_spam_count > 0;
+        let manually_reviewed_not_spam = manually_reviewed_not_spam_count > 0;
 
         if text.starts_with("/spam") | text.starts_with("/scam") {
             // That's the bot command, most likely. Users like indication that it does things.
@@ -338,15 +349,34 @@ async fn gather_suspicion(
             // Purposefully ambiguous message wording, where "this" both refers to the
             // message we're replying to and the message they replied to lol
 
-            let response = if marked_anything_as_sus {
+            let response = if marked {
                 "Thank you, links in this message will be reviewed for spam."
             } else if had_links {
                 // Didn't mark anything as sus, but the message had links.
-                if everything_already_banned {
-                    "Thank you, but the links in this message are already marked as spam."
-                } else {
-                    "Thank you, but the links in this message are already up for review."
+
+                response = String::from("Thank you, but the links in this message are ");
+
+                if already_marked_sus {
+                    response.push_str("already marked for review");
+                    if already_marked_spam | manually_reviewed_not_spam {
+                        response.push_str(", and some are ");
+                    }
                 }
+
+                if already_marked_spam {
+                    response.push_str("already marked for spam");
+                    if manually_reviewed_not_spam {
+                        response.push_str(", and some are ");
+                    }
+                }
+
+                if manually_reviewed_not_spam {
+                    response.push_str("manually reviewed and were determined to be not spam");
+                }
+
+                response.push('.');
+
+                response.as_str()
             } else {
                 // No links at all.
                 "Sorry, but I could not find any links."

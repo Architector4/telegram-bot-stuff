@@ -17,7 +17,11 @@ use teloxide::{types::ChatId, Bot};
 use tokio::sync::{watch, Mutex, Notify};
 use url::Url;
 
-use crate::{parse_url_like_telegram, spam_checker::SPAM_CHECKER_VERSION, types::ReviewResponse};
+use crate::{
+    parse_url_like_telegram,
+    spam_checker::SPAM_CHECKER_VERSION,
+    types::{MarkSusResult, ReviewResponse},
+};
 
 use super::types::{Domain, IsSpam};
 
@@ -350,7 +354,7 @@ impl Database {
     }
 
     /// Mark a domain as maybe spam, if it's not already marked as spam
-    /// and wasn't manually reviewed.
+    /// and wasn't manually reviewed. Returns true if anything is actually done.
     ///
     /// Note that this adds a URL entry if one doesn't exist,
     /// even if there's a meaningful domain entry.
@@ -358,8 +362,8 @@ impl Database {
         &self,
         domain: &Domain,
         example_url: Option<&Url>,
-    ) -> Result<(), Error> {
-        sqlx::query(
+    ) -> Result<bool, Error> {
+        let result = sqlx::query(
             "
             INSERT INTO domains(
                 domain,
@@ -380,8 +384,10 @@ impl Database {
         .bind(example_url.map(Url::as_str))
         .bind(SPAM_CHECKER_VERSION)
         .execute(&self.pool)
-        .await?;
-        Ok(())
+        .await?
+        .rows_affected()
+            > 0;
+        Ok(result)
     }
 
     /// Inserts a URL into the database and tags it as spam or not.
@@ -423,12 +429,12 @@ impl Database {
     }
 
     /// Mark a URL as maybe spam, if it's not already marked as spam
-    /// and wasn't manually reviewed.
+    /// and wasn't manually reviewed. Returns true if anything is actually done.
     ///
     /// Note that this adds a URL entry if one doesn't exist,
     /// even if there's a meaningful domain entry.
-    async fn mark_url_sus(&self, url: &Url) -> Result<(), Error> {
-        sqlx::query(
+    async fn mark_url_sus(&self, url: &Url) -> Result<bool, Error> {
+        let result = sqlx::query(
             "
             INSERT INTO urls(
                     url,
@@ -443,28 +449,36 @@ impl Database {
         .bind(SPAM_CHECKER_VERSION)
         .bind(SPAM_CHECKER_VERSION)
         .execute(&self.pool)
-        .await?;
-        Ok(())
+        .await?
+        .rows_affected()
+            > 0;
+        Ok(result)
     }
 
     /// Convenience function to mark both a URL and its domain as maybe spam.
-    /// Returns the previous state of the link if any; if it's not [`IsSpam::No`] nothing was done.
     pub async fn mark_sus(
         &self,
         url: &Url,
         mut domain: Option<&Domain>,
-    ) -> Result<Option<IsSpam>, Error> {
+    ) -> Result<MarkSusResult, Error> {
         // We only want to deal with entries in the database that exist.
 
         // Check the URL one.
         if let Some(is_spam_url) = self.is_url_spam(url, false).await? {
-            if is_spam_url == IsSpam::Yes || is_spam_url == IsSpam::Maybe {
-                // Nothing needs to be done, it's already banned or sus.
-            } else {
-                // Indeed, mark it as sus.
-                self.mark_url_sus(url).await?;
-            }
-            return Ok(Some(is_spam_url));
+            let result = match is_spam_url {
+                IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
+                IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
+                IsSpam::No => {
+                    let mark_result = self.mark_url_sus(url).await?;
+                    if mark_result {
+                        MarkSusResult::Marked
+                    } else {
+                        MarkSusResult::ManuallyReviewedNotSpam
+                    }
+                }
+            };
+
+            return Ok(result);
         }
 
         // If no provided domain, try to get one from the URL.
@@ -477,20 +491,27 @@ impl Database {
         if let Some(domain) = domain {
             // Check the domain one.
             if let Some(is_spam_domain) = self.is_domain_spam(domain, false).await? {
-                if is_spam_domain == IsSpam::Yes || is_spam_domain == IsSpam::Maybe {
-                    // Nothing needs to be done, it's already banned or sus.
-                } else {
-                    // Indeed, mark it as sus.
-                    self.mark_domain_sus(domain, Some(url)).await?;
-                }
-                return Ok(Some(is_spam_domain));
+                let result = match is_spam_domain {
+                    IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
+                    IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
+                    IsSpam::No => {
+                        let mark_result = self.mark_domain_sus(domain, Some(url)).await?;
+                        if mark_result {
+                            MarkSusResult::Marked
+                        } else {
+                            MarkSusResult::ManuallyReviewedNotSpam
+                        }
+                    }
+                };
+
+                return Ok(result);
             }
         }
 
         // It is in neither URL nor Domain tables.
         // Add it in as a URL entry.
         self.mark_url_sus(url).await?;
-        Ok(None)
+        Ok(MarkSusResult::Marked)
     }
 
     /// Delete all entries added from the spam list.
@@ -883,7 +904,7 @@ mod tests {
             .expect("Database died!");
 
         // Then, someone marks it as sus.
-        assert_eq!(db.mark_sus(&link, None).await?, Some(IsSpam::No));
+        assert_eq!(db.mark_sus(&link, None).await?, MarkSusResult::Marked);
 
         // Check if this is what it is in the database.
         assert_eq!(db.is_spam(&link, None, false).await?, Some(IsSpam::Maybe));
@@ -908,7 +929,7 @@ mod tests {
         assert_eq!(db.is_spam(&link, None, false).await?, Some(IsSpam::No));
 
         // Someone marks it as sus again...
-        assert_eq!(db.mark_sus(&link, None).await?, Some(IsSpam::No));
+        assert_eq!(db.mark_sus(&link, None).await?, MarkSusResult::ManuallyReviewedNotSpam);
         //db.mark_url_sus(&link).await?;
 
         //// It should still be not spam.

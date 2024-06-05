@@ -189,3 +189,11 @@ impl Display for ReviewResponse {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarkSusResult {
+    Marked,
+    AlreadyMarkedSus,
+    AlreadyMarkedSpam,
+    ManuallyReviewedNotSpam,
+}
