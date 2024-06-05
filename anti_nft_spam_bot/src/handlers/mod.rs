@@ -305,6 +305,7 @@ async fn gather_suspicion(
         }
 
         let mut marked_anything_as_sus = false;
+        let mut everything_already_banned = true;
         let mut had_links = false;
 
         for entity in &entities {
@@ -316,12 +317,18 @@ async fn gather_suspicion(
 
             had_links = true;
 
-            if database
+            let result = database
                 .mark_sus(&url, Some(&domain))
                 .await
-                .expect("Database died!")
-            {
+                .expect("Database died!");
+
+            if result.is_none() || result == Some(IsSpam::No) {
                 marked_anything_as_sus = true;
+                everything_already_banned = false;
+            }
+
+            if result != Some(IsSpam::Yes) {
+                everything_already_banned = false;
             }
         }
 
@@ -331,23 +338,21 @@ async fn gather_suspicion(
             // Purposefully ambiguous message wording, where "this" both refers to the
             // message we're replying to and the message they replied to lol
 
-            if marked_anything_as_sus {
-                bot.archsendmsg(
-                    message.chat.id,
-                    "Thank you, links in this message will be reviewed for spam.",
-                    message.id,
-                )
-                .await?;
+            let response = if marked_anything_as_sus {
+                "Thank you, links in this message will be reviewed for spam."
             } else if had_links {
                 // Didn't mark anything as sus, but the message had links.
-                // Deductively, this means the links it had are already marked as spam.
-                bot.archsendmsg(
-                    message.chat.id,
-                    "Thank you, but the links in this message are already marked as spam.",
-                    message.id,
-                )
+                if everything_already_banned {
+                    "Thank you, but the links in this message are already marked as spam."
+                } else {
+                    "Thank you, but the links in this message are already up for review."
+                }
+            } else {
+                // No links at all.
+                "Sorry, but I could not find any links."
+            };
+            bot.archsendmsg(message.chat.id, response, message.id)
                 .await?;
-            }
         }
     }
 
@@ -410,7 +415,9 @@ async fn handle_command(
 
     let command_processed: bool = match command.as_str() {
         "/review" if is_private => handle_review_command(bot, message, database).await?,
-        "/spam" | "/scam" => {
+        "/spam" | "/scam" if is_private => {
+            // This is a private messages only handler. This is already run for public messages
+            // differently, to catch non-command suspicions, so running it here would run it twice.
             gather_suspicion(bot, message, database).await?;
             true
         }
