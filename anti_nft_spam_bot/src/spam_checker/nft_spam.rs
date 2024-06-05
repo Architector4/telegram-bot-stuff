@@ -64,7 +64,6 @@ pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
         return Some(IsSpam::Yes);
     }
 
-
     Some(IsSpam::Maybe)
 }
 
@@ -106,7 +105,8 @@ mod tests {
                 .unwrap();
         assert!(matches!(is_spam_telegram_url(&spam_url), Some(IsSpam::Yes)));
 
-        let spam_url = Url::parse("https://t.me/hAmster_kombat_bot/start?startapp=kentId677635570").unwrap();
+        let spam_url =
+            Url::parse("https://t.me/hAmster_kombat_bot/start?startapp=kentId677635570").unwrap();
         assert!(matches!(is_spam_telegram_url(&spam_url), Some(IsSpam::Yes)));
     }
 }
