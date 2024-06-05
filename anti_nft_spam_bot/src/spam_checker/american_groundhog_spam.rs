@@ -91,6 +91,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_wikileaks() {
-        check_url("https://telegra.ph/Sex-Trafficking-Ring-Organized-By-Famous-People-03-31").await
+        check_url("https://telegra.ph/Sex-Trafficking-Ring-Organized-By-Famous-People-03-31").await;
+        check_url("https://telegra.ph/No-Way-He-Did-That-05-28").await;
     }
 }

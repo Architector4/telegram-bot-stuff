@@ -10,7 +10,7 @@ use crate::{
 /////// IMPORTANT!!
 /////// IMPORTANT!!
 /////// If spam checking logic is updated to catch more spam, increment this.
-pub const SPAM_CHECKER_VERSION: u32 = 1;
+pub const SPAM_CHECKER_VERSION: u32 = 2;
 
 // Checkers
 mod american_groundhog_spam;
