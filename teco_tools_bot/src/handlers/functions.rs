@@ -338,7 +338,10 @@ async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
             }
             media
         }
-        None => goodbye_cancel!("can't find a video or an image."),
+        None => goodbye_cancel!(concat!(
+            "can't find a video or an image. ",
+            "This command needs to be used as either a reply or caption to one."
+        )),
     };
     let (Some(width), Some(height)) = (
         NonZeroI32::new(media.width as i32),
@@ -377,7 +380,10 @@ async fn to_sticker(tp: TaskParams<'_>) -> Ret {
             }
             photo
         }
-        None => goodbye_cancel!("can't find an image."),
+        None => goodbye_cancel!(concat!(
+            "can't find an image. ",
+            "This command needs to be used as either a reply or caption to one."
+        )),
     };
 
     Ok(Ok(Task::default_to_sticker()))
@@ -400,7 +406,10 @@ async fn to_custom_emoji(tp: TaskParams<'_>) -> Ret {
             }
             photo
         }
-        None => goodbye_cancel!("can't find an image."),
+        None => goodbye_cancel!(concat!(
+            "can't find an image. ",
+            "This command needs to be used as either a reply or caption to one."
+        )),
     };
 
     Ok(Ok(Task::default_to_custom_emoji()))
