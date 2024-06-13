@@ -138,6 +138,8 @@ pub enum Task {
         vibrato_hz: f64,
         vibrato_depth: f64,
     },
+    /// Optical Character Recognition, i.e. extracting text from an image
+    Ocr,
 }
 
 impl Task {
@@ -240,6 +242,7 @@ impl Task {
                 };
                 Ok(())
             }
+            Task::Ocr => Ok(()),
         }
     }
 
@@ -320,5 +323,8 @@ impl Task {
                 0.0
             },
         }
+    }
+    pub fn default_ocr() -> Task {
+        Task::Ocr
     }
 }

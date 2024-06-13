@@ -19,6 +19,7 @@ pub const COMMANDS: &[Command] = &[
     AMOGUS,
     DISTORT,
     RESIZE,
+    OCR,
     REVERSE_TEXT,
     TO_STICKER,
     TO_CUSTOM_EMOJI,
@@ -451,6 +452,36 @@ pub const DISTORT: Command = Command {
 };
 fn distort(tp: TaskParams<'_>) -> impl Future<Output = Ret> + '_ {
     resize_inner(tp, ResizeType::default_seam_carve())
+}
+
+pub const OCR: Command = Command {
+    callname: "/ocr",
+    description: concat!(
+        "Try to extract text from an image using Optical Character Recognition. ",
+        "This uses the Tesseract OCR engine."
+    ),
+    function: wrap!(ocr),
+    hidden: false,
+};
+async fn ocr(tp: TaskParams<'_>) -> Ret {
+    let photo = tp.message.get_media_info();
+    let _photo = match photo {
+        Some(photo) => {
+            if !photo.is_image() {
+                goodbye_cancel!("can't work with video nor animated nor video stickers.");
+            }
+            if photo.file.size > 20 * 1000 * 1000 {
+                goodbye_cancel!("media is too large.");
+            }
+            photo
+        }
+        None => goodbye_cancel!(concat!(
+            "can't find an image. ",
+            "This command needs to be used as either a reply or caption to one."
+        )),
+    };
+
+    Ok(Ok(Task::default_ocr()))
 }
 
 async fn premium_inner(tp: TaskParams<'_>, premium: bool) -> Ret {

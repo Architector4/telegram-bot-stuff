@@ -236,6 +236,7 @@ impl Task {
                         ),
                 }
             }
+        Task::Ocr => ""
         }
     }
 
@@ -526,6 +527,7 @@ impl Task {
                     })
                 }
             }
+            Task::Ocr => Ok(Task::Ocr),
         }
     }
 }

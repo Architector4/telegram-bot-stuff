@@ -1,11 +1,9 @@
 mod media_processing;
 use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use crossbeam_channel::Sender;
+use html_escape::encode_text;
 use teloxide::{
-    payloads::{
-        SendAnimationSetters, SendMessageSetters, SendPhotoSetters, SendStickerSetters,
-        SendVideoSetters,
-    },
+    payloads::{SendAnimationSetters, SendPhotoSetters, SendStickerSetters, SendVideoSetters},
     requests::Requester,
     types::InputFile,
     Bot, RequestError,
@@ -22,9 +20,7 @@ impl Task {
     ) -> Result<(), RequestError> {
         macro_rules! respond {
             ($text:expr) => {
-                bot.send_message(data.message.chat.id, $text)
-                    .reply_to_message_id(data.message.id)
-                    .parse_mode(teloxide::types::ParseMode::Html)
+                bot.archsendmsg(data.message.chat.id, $text, data.message.id)
                     .await?;
             };
         }
@@ -189,11 +185,12 @@ impl Task {
                 })
                 .await
                 .expect("Worker died!");
-                let Ok(media_data) = woot else {
-                    let wat = woot.unwrap_err();
-                    log::error!("{}", wat);
-
-                    goodbye!("Error: failed to process the media");
+                let media_data = match woot {
+                    Ok(m) => m,
+                    Err(e) => {
+                        log::error!("Error when resizing media: {}", e);
+                        goodbye!("Error: failed to process the media");
+                    }
                 };
 
                 if media_data.is_empty() {
@@ -233,12 +230,56 @@ impl Task {
                         goodbye!(format!(
                             "Error: the resulting media is too big ({}MB, max is 50MB). Sorry!",
                             media_data.len() / 1024 / 1024
-                        ));
+                        )
+                        .as_str());
                     } else {
                         result
                     }
                 })?;
                 Ok(())
+            }
+            Task::Ocr => {
+                let photo = data.message.get_media_info();
+                let photo = match photo {
+                    Some(photo) => {
+                        if !photo.is_image() {
+                            goodbye!(
+                                "Error: can't work with video nor animated nor video stickers."
+                            );
+                        }
+                        if photo.file.size > 20 * 1000 * 1000 {
+                            goodbye!("Error: image is too large.");
+                        }
+                        photo
+                    }
+                    None => goodbye!("Error: can't find an image. "),
+                };
+
+                let mut photo_data: Vec<u8> = Vec::new();
+                bot.download_file_to_vec(photo.file, &mut photo_data)
+                    .await?;
+
+                // Perform extraction.
+                let woot =
+                    tokio::task::spawn_blocking(move || media_processing::ocr_image(&photo_data))
+                        .await
+                        .expect("Worker died!");
+
+                let mut text = match woot {
+                    Ok(t) => t,
+                    Err(e) => {
+                        log::error!("Failed when OCRing: {}", e);
+                        goodbye!("Error: failed to process the media.");
+                    }
+                };
+
+                if text.is_empty() {
+                    goodbye!("Sorry, could not find any text.");
+                }
+
+                text.push_str("\n\n(automatically generated caption)");
+
+                goodbye!(encode_text(&text).as_ref());
             }
         }
     }

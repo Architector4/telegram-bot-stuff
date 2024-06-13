@@ -2,12 +2,14 @@ use std::{
     ffi::OsStr,
     io::{BufReader, Read, Write},
     process::{ChildStdout, Command, Stdio},
+    sync::OnceLock,
 };
 
 use crossbeam_channel::Sender;
 use rayon::prelude::*;
 
 use magick_rust::{MagickError, MagickWand, PixelWand};
+use regex::Regex;
 use tempfile::NamedTempFile;
 
 use crate::tasks::{ImageFormat, ResizeType};
@@ -574,4 +576,78 @@ pub fn resize_video(
     unfail!(finalfile.read_to_end(&mut output));
 
     Ok(output)
+}
+
+pub fn ocr_image(data: &[u8]) -> Result<String, MagickError> {
+    // Use ImageMagick to normalize colors and export to PNG,
+    // which Tesseract can read.
+    let wand = MagickWand::new();
+    wand.read_image_blob(data)?;
+    wand.normalize_image()?;
+
+    let data = wand.write_image_blob("png")?;
+
+    let mut result = String::new();
+
+    fn tesseract_it(data: &[u8], buffer: &mut String, grab_all_text: bool) {
+        let args_grab_all = &[
+            OsStr::new("--psm"),
+            // PSM mode 12's name sounds more attractive than 11,
+            // but in my experience it produces worse results.
+            OsStr::new("11"),
+            OsStr::new("-"),
+            OsStr::new("-"),
+        ];
+        let args_default = &[OsStr::new("-"), OsStr::new("-")];
+
+        let args = if grab_all_text {
+            &args_grab_all[..]
+        } else {
+            &args_default[..]
+        };
+
+        let tesseract = Command::new("tesseract")
+            .args(args)
+            .stdout(Stdio::piped())
+            .stdin(Stdio::piped())
+            .stderr(Stdio::null()) // Tesseract is noisy and I don't want to make a config file lol
+            .spawn()
+            .expect("Spawning tesseract failed!");
+
+        tesseract
+            .stdin
+            .unwrap()
+            .write_all(data)
+            .expect("Failed sending image to Tesseract!");
+
+        tesseract
+            .stdout
+            .unwrap()
+            .read_to_string(buffer)
+            .expect("Failed reading Tesseract's output!");
+
+        // Postprocess the text...
+        let new = {
+            static OCR_REGEX_1: OnceLock<Regex> = OnceLock::new();
+            static OCR_REGEX_2: OnceLock<Regex> = OnceLock::new();
+            let regex_1 = OCR_REGEX_1.get_or_init(|| Regex::new(r#"[ \t]{2,}"#).unwrap());
+            let regex_2 = OCR_REGEX_2.get_or_init(|| Regex::new(r#"\s\s\s+"#).unwrap());
+
+            let stripped = regex_1.replace_all(buffer, " ");
+            let stripped = regex_2.replace_all(&stripped, "\n");
+            let stripped = stripped.trim();
+
+            stripped.to_string()
+        };
+        buffer.clear();
+        buffer.push_str(&new);
+    }
+
+    tesseract_it(&data, &mut result, false);
+
+    if result.is_empty() {
+        tesseract_it(&data, &mut result, true);
+    }
+
+    Ok(result)
 }
