@@ -441,9 +441,11 @@ pub fn resize_video(
 
         std::thread::spawn(move || {
             let mut frame_number: usize = 0;
+            let mut frames_received: usize = 0;
             let mut out_of_order_frames: Vec<(usize, Vec<u8>)> = Vec::new();
 
             while let Ok(frame) = frame_receiver.recv() {
+                frames_received += 1;
                 if frame.0 == frame_number {
                     // Frame received in order. Push it in directly.
                     encoder_stdin
@@ -458,13 +460,9 @@ pub fn resize_video(
                 if !out_of_order_frames.is_empty() {
                     // If possible, send them in order.
 
-                    loop {
-                        let Some(in_order_frame) =
-                            out_of_order_frames.iter().position(|x| x.0 == frame_number)
-                        else {
-                            break;
-                        };
-
+                    while let Some(in_order_frame) =
+                        out_of_order_frames.iter().position(|x| x.0 == frame_number)
+                    {
                         let in_order_frame = out_of_order_frames.swap_remove(in_order_frame);
 
                         encoder_stdin
@@ -476,9 +474,9 @@ pub fn resize_video(
 
                 if input_frame_count != 0 {
                     let _ = status_report_for_encoder
-                        .send(format!("Frame {} / {}", frame_number, input_frame_count));
+                        .send(format!("Frame {} / {}", frames_received, input_frame_count));
                 } else {
-                    let _ = status_report_for_encoder.send(format!("Frame {}", frame_number));
+                    let _ = status_report_for_encoder.send(format!("Frame {}", frames_received));
                 }
             }
             drop(encoder_stdin);
