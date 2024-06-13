@@ -635,9 +635,25 @@ pub fn ocr_image(data: &[u8]) -> Result<String, MagickError> {
 
             let stripped = regex_1.replace_all(buffer, " ");
             let stripped = regex_2.replace_all(&stripped, "\n");
+
             let stripped = stripped.trim();
 
-            stripped.to_string()
+            // Count amount of empty lines and non-empty lines.
+            let (empty_lines, non_empty_lines) = stripped.split('\n').fold((0usize, 0usize), |(empty, non_empty), line| {
+                if line.len() < 4 {
+                    // Count lines with less than 4 bytes as empty.
+                    (empty+1, non_empty)
+                } else {
+                    (empty, non_empty+1)
+                }
+            });
+
+            // If there's more empty lines than non-empty, get rid of them.
+            if empty_lines >= non_empty_lines {
+                stripped.replace("\n\n", "\n")
+            } else {
+                stripped.to_string()
+            }
         };
         buffer.clear();
         buffer.push_str(&new);
