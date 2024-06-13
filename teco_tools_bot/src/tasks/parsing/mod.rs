@@ -171,6 +171,7 @@ impl Task {
                             "can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
+                            "Above parameters may be specified multiple times and will be applied cumulatively.\n",
                             "\n",
                             "<code>format</code>: Format to save the image in: jpeg, webp or preserve\n",
                             "<code>rot</code>: Rotate the image by this much after distorting.\n",
@@ -187,6 +188,7 @@ impl Task {
                             "can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
+                            "Above parameters may be specified multiple times and will be applied cumulatively.\n",
                             "\n",
                             "<code>rot</code>: Rotate the image by this much after resizing.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
@@ -203,8 +205,9 @@ impl Task {
                             "can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
-                            "<code>rot</code>: Rotate the video by this much after distorting.\n",
+                            "Above parameters may be specified multiple times and will be applied cumulatively.\n",
                             "\n",
+                            "<code>rot</code>: Rotate the video by this much after distorting.\n",
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
@@ -217,6 +220,7 @@ impl Task {
                             "can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
+                            "Above parameters may be specified multiple times and will be applied cumulatively.\n",
                             "\n",
                             "<code>rot</code>: Rotate the video by this much after resizing.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
@@ -246,14 +250,14 @@ impl Task {
                 Ok(Task::Amogus { amogus })
             }
             Task::ImageResize {
-                new_dimensions: old_dimensions,
+                new_dimensions: original_dimensions,
                 rotation,
                 percentage: _,
                 format: _,
                 mut resize_type,
             }
             | Task::VideoResize {
-                new_dimensions: old_dimensions,
+                new_dimensions: original_dimensions,
                 rotation,
                 percentage: _,
                 mut resize_type,
@@ -262,7 +266,7 @@ impl Task {
                     return Ok(self.clone());
                 }
 
-                let old_dimensions = (old_dimensions.0.get(), old_dimensions.1.get());
+                let mut old_dimensions = (original_dimensions.0.get(), original_dimensions.1.get());
 
                 let (is_video, mut format) = if let Task::ImageResize { format, .. } = self {
                     (false, *format)
@@ -272,7 +276,7 @@ impl Task {
 
                 let mut rot = *rotation;
                 // Width, height, and percentage.
-                let mut new_dimensions = None;
+                let mut new_dimensions: Option<(i32, i32)> = None;
                 let ResizeType::SeamCarve {
                     mut delta_x,
                     mut rigidity,
@@ -280,9 +284,6 @@ impl Task {
                 else {
                     unreachable!();
                 };
-
-                let dimensions_parser_err =
-                    |data| dimensions_parser(data, old_dimensions).map(Some).ok_or(());
 
                 let sanitized_f64_parser = |val: &str| -> Result<f64, ()> {
                     let result: f64 = val.parse().map_err(|_| ())?;
@@ -295,6 +296,19 @@ impl Task {
                 };
 
                 for param in params {
+                    if let Some(new_dimensions) = new_dimensions {
+                        // If new dimensions were set by anything here,
+                        // reset them to old dimensions.
+                        // This makes dimension changing parameters accumulate.
+                        old_dimensions = (new_dimensions.0, new_dimensions.1);
+                    }
+
+                    let dimensions_parser_err = |data| {
+                        dimensions_parser(data, old_dimensions)
+                            .map(|x| Some((x.0, x.1)))
+                            .ok_or(())
+                    };
+
                     if !is_video {
                         parse_plain_param_optional!(param, format, help);
                     }
@@ -333,7 +347,7 @@ impl Task {
                         let v = (k, v);
                         // Try to parse it as an aspect ratio lol
                         if let Some(parse) = aspect_ratio_parser(v, old_dimensions) {
-                            new_dimensions = Some((parse.0, parse.1, None));
+                            new_dimensions = Some((parse.0, parse.1));
                             continue;
                         }
                         // If it fails to parse, the format parser below will complain with all the
@@ -350,7 +364,10 @@ impl Task {
                     parse_stop!(param, help);
                 }
 
-                let new_dimensions = if let Some(new_dimensions) = new_dimensions {
+                // New dimension, and maybe the percentage of the original size it is.
+                let new_dimensions: (i32, i32, Option<f32>) = if let Some(new_dimensions) =
+                    new_dimensions
+                {
                     // Ensure it's not too big.
                     let media_too_big = new_dimensions.0.unsigned_abs()
                         > MAX_OUTPUT_MEDIA_DIMENSION_SIZE
@@ -372,7 +389,19 @@ impl Task {
                             biggest_percentage_that_can_fit(old_dimensions)
                         )));
                     };
-                    new_dimensions
+
+                    // Calculate percentages.
+                    let p_x = 100.0 * new_dimensions.0 as f32 / original_dimensions.0.get() as f32;
+                    let p_y = 100.0 * new_dimensions.1 as f32 / original_dimensions.1.get() as f32;
+
+                    // Only true if the X and Y percentages are close enough.
+                    let percentage = if (p_x - p_y).abs() < 1.5 {
+                        Some((p_x + p_y) / 2.0)
+                    } else {
+                        None
+                    };
+
+                    (new_dimensions.0, new_dimensions.1, percentage)
                 } else {
                     // No width/height nor percentage was specified.
                     // Preset one.
