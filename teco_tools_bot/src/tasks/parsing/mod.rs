@@ -178,7 +178,7 @@ impl Task {
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
-                            "Same requirements as with <code>delta_x</code>.\n",
+                            "Can't be less than -1024 or bigger than 1024.\n",
                             "<code>format</code>: Output image format. Can be \"webp\" or \"jpg\"."
                             ),
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop =>
@@ -211,7 +211,7 @@ impl Task {
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
-                            "Same requirements as with <code>delta_x</code>."
+                            "Can't be less than -1024 or bigger than 1024.\n",
 
                         ),
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop => concat!(
@@ -285,13 +285,17 @@ impl Task {
                     unreachable!();
                 };
 
-                let sanitized_f64_parser = |val: &str| -> Result<f64, ()> {
-                    let result: f64 = val.parse().map_err(|_| ())?;
+                // This closure returns a closure that parses a
+                // string to a float within specified range inclusively lol
+                let sanitized_f64_parser = |min: f64, max: f64| {
+                    move |val: &str| -> Result<f64, ()> {
+                        let result: f64 = val.parse().map_err(|_| ())?;
 
-                    if result.is_finite() && (-4.0..=4.0).contains(&result) {
-                        Ok(result)
-                    } else {
-                        Err(())
+                        if result.is_finite() && (min..=max).contains(&result) {
+                            Ok(result)
+                        } else {
+                            Err(())
+                        }
                     }
                 };
 
@@ -332,11 +336,16 @@ impl Task {
                     );
 
                     if let ResizeType::SeamCarve { .. } = &mut resize_type {
-                        parse_keyval_param_with_parser!(param, delta_x, sanitized_f64_parser, help);
+                        parse_keyval_param_with_parser!(
+                            param,
+                            delta_x,
+                            sanitized_f64_parser(-4.0, 4.0),
+                            help
+                        );
                         parse_keyval_param_with_parser!(
                             param,
                             rigidity,
-                            sanitized_f64_parser,
+                            sanitized_f64_parser(-1024.0, 1024.0),
                             help
                         );
                     } else {
