@@ -189,7 +189,7 @@ impl Task {
 
                 teloxide_retry!({
                     let send = media_data.clone();
-                    if media.is_video {
+                    let result = if media.is_video {
                         if media.is_gif || media.is_sticker {
                             bot.send_animation(
                                 data.message.chat.id,
@@ -210,6 +210,17 @@ impl Task {
                         bot.send_photo(data.message.chat.id, InputFile::memory(send))
                             .reply_to_message_id(data.message.id)
                             .await
+                    };
+
+                    if let Err(RequestError::Api(teloxide::ApiError::RequestEntityTooLarge)) =
+                        result
+                    {
+                        goodbye!(format!(
+                            "Error: the resulting media is too big ({}MB, max is 50MB). Sorry!",
+                            media_data.len() / 1024 / 1024
+                        ));
+                    } else {
+                        result
                     }
                 })?;
                 Ok(())
