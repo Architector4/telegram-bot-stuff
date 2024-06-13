@@ -100,6 +100,8 @@ impl Task {
                 rotation,
                 percentage: _,
                 resize_type,
+                vibrato_hz: _,
+                vibrato_depth: _,
             } => {
                 let media = data.message.get_media_info();
                 let media = match media {
@@ -150,6 +152,17 @@ impl Task {
                 let resize_type = *resize_type;
                 let rotation = *rotation;
 
+                let (vibrato_hz, vibrato_depth) = if let Task::VideoResize {
+                    vibrato_hz,
+                    vibrato_depth,
+                    ..
+                } = self
+                {
+                    (*vibrato_hz, *vibrato_depth)
+                } else {
+                    (7.0, 0.0)
+                };
+
                 let woot = tokio::task::spawn_blocking(move || {
                     if media.is_video {
                         media_processing::resize_video(
@@ -159,6 +172,8 @@ impl Task {
                             dimensions.1,
                             rotation,
                             resize_type,
+                            vibrato_hz,
+                            vibrato_depth,
                         )
                     } else {
                         media_processing::resize_image(

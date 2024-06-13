@@ -54,7 +54,7 @@ impl Display for ResizeType {
             Self::SeamCarve { delta_x, rigidity } => {
                 writeln!(f, "Seam Carving")?;
                 writeln!(f, "<b>delta_x</b>: {}", delta_x)?;
-                writeln!(f, "<b>rigidity</b>: {}", rigidity)
+                write!(f, "<b>rigidity</b>: {}", rigidity)
             }
             Self::ToSticker => write!(f, "To sticker"),
             Self::ToCustomEmoji => write!(f, "To custom emoji"),
@@ -135,6 +135,8 @@ pub enum Task {
         rotation: f64,
         percentage: Option<f32>,
         resize_type: ResizeType,
+        vibrato_hz: f64,
+        vibrato_depth: f64,
     },
 }
 
@@ -188,6 +190,8 @@ impl Task {
                 rotation,
                 percentage,
                 resize_type,
+                vibrato_hz: _,
+                vibrato_depth: _,
             }
             | Task::ImageResize {
                 new_dimensions,
@@ -224,6 +228,16 @@ impl Task {
                 writeln!(output)?;
                 writeln!(output, "<b>Rotation</b>: {}°", rotation)?;
                 write_param!("Resize type", resize_type)?;
+
+                if let Task::VideoResize {
+                    vibrato_hz,
+                    vibrato_depth,
+                    ..
+                } = self
+                {
+                    wp!(vibrato_hz)?;
+                    wp!(vibrato_depth)?;
+                };
                 Ok(())
             }
         }
@@ -295,6 +309,16 @@ impl Task {
             rotation: 0.0,
             percentage: Some(100.0),
             resize_type,
+            vibrato_hz: if resize_type.is_seam_carve() {
+                7.0
+            } else {
+                0.0
+            },
+            vibrato_depth: if resize_type.is_seam_carve() {
+                1.0
+            } else {
+                0.0
+            },
         }
     }
 }

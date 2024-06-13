@@ -212,6 +212,10 @@ impl Task {
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
                             "Can't be less than -1024 or bigger than 1024.\n",
+                            "\n",
+                            "<code>vibrato_hz</code>: Frequency of vibrato applied to audio. ",
+                            "Can only be between 0.1 or 20000.0. Default is 7.\n",
+                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 1.0. Default is 1."
 
                         ),
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop => concat!(
@@ -224,6 +228,11 @@ impl Task {
                             "\n",
                             "<code>rot</code>: Rotate the video by this much after resizing.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
+                            "\n",
+                            "<code>vibrato_hz</code>: Frequency of vibrato applied to audio. ",
+                            "Can only be between 0.1 or 20000.0. Default is 7.",
+                            "<code>vibrato_depth</code> also needs to be set for this to apply.\n",
+                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 1.0. Default is 0."
                         ),
                 }
             }
@@ -261,6 +270,8 @@ impl Task {
                 rotation,
                 percentage: _,
                 mut resize_type,
+                vibrato_hz: _,
+                vibrato_depth: _,
             } => {
                 if let ResizeType::ToSticker | ResizeType::ToCustomEmoji = resize_type {
                     return Ok(self.clone());
@@ -272,6 +283,12 @@ impl Task {
                     (false, *format)
                 } else {
                     (true, ImageFormat::Preserve)
+                };
+
+                let (mut vibrato_hz, mut vibrato_depth) = if resize_type.is_seam_carve() {
+                    (7.0, 1.0)
+                } else {
+                    (7.0, 0.0)
                 };
 
                 let mut rot = *rotation;
@@ -350,6 +367,21 @@ impl Task {
                         );
                     } else {
                         parse_plain_param_optional!(param, resize_type, help);
+                    }
+
+                    if is_video {
+                        parse_keyval_param_with_parser!(
+                            param,
+                            vibrato_hz,
+                            sanitized_f64_parser(0.1, 20000.0),
+                            help
+                        );
+                        parse_keyval_param_with_parser!(
+                            param,
+                            vibrato_depth,
+                            sanitized_f64_parser(0.0, 1.0),
+                            help
+                        );
                     }
 
                     if let Token::KeyVal(k, v) = param {
@@ -481,6 +513,8 @@ impl Task {
                         rotation: rot,
                         percentage: new_dimensions.2,
                         resize_type,
+                        vibrato_hz,
+                        vibrato_depth,
                     })
                 } else {
                     Ok(Task::ImageResize {

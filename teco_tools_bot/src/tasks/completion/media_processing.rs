@@ -337,6 +337,8 @@ pub fn resize_video(
     mut height: isize,
     rotation: f64,
     resize_type: ResizeType,
+    vibrato_hz: f64,
+    vibrato_depth: f64,
 ) -> Result<Vec<u8>, String> {
     // We will be encoding into h264, which needs width and height divisible by 2.
     width += width % 2;
@@ -507,9 +509,8 @@ pub fn resize_video(
     drop(frame_sender);
 
     let encoder_thread = encoder_thread.join().map_err(|e| {
-        if let Ok(e) = e.downcast() {
-            let e: Box<&'static str> = e;
-            *e.as_ref()
+        if let Ok(e) = e.downcast::<Box<&'static str>>() {
+            **e
         } else {
             "Joining encoder thread failed!"
         }
@@ -522,7 +523,11 @@ pub fn resize_video(
         let _ = status_report.send("Writing audio...".to_string());
         // Now to transfer audio... This means we need a THIRD file to put the final result into.
         let muxfile = unfail!(NamedTempFile::new());
-        let distort = resize_type.is_seam_carve();
+        // Will exclude cases of 0.0, -0.0, and all the NaNs and infinities
+        let distort_audio = vibrato_hz.is_normal() && vibrato_depth.is_normal();
+
+        let vibrato_str_temp;
+
         let audiomuxer = Command::new("ffmpeg")
             .args([
                 OsStr::new("-y"),
@@ -538,9 +543,14 @@ pub fn resize_video(
                 OsStr::new("1:v:0"),
                 OsStr::new("-map"),
                 OsStr::new("0:a:0"),
-                OsStr::new(if distort { "-af" } else { "-c:a" }),
-                OsStr::new(if distort {
-                    "vibrato=f=7:d=1,aformat=s16p"
+                OsStr::new(if distort_audio { "-af" } else { "-c:a" }),
+                OsStr::new(if distort_audio {
+                    vibrato_str_temp = format!(
+                        "vibrato=f={}:d={},aformat=s16p",
+                        vibrato_hz.max(0.1).min(20000.0),
+                        vibrato_depth.max(0.0).min(1.0)
+                    );
+                    vibrato_str_temp.as_str()
                 } else {
                     "copy"
                 }),
