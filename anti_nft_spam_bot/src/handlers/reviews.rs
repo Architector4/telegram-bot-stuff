@@ -249,17 +249,19 @@ pub async fn apply_review_unverified(
     db: &Database,
     response: &ReviewResponse,
 ) -> Result<(), RequestError> {
+    // See if it should be written into the log...
+    let should_be_logged = response
+        .conflicts_with_db(db)
+        .await
+        .expect("Database died!");
+
     // Ingest it into the database...
     db.read_review_response(response)
         .await
         .expect("Database died!");
 
     // Write it to the log...
-    if response
-        .conflicts_with_db(db)
-        .await
-        .expect("Database died!")
-    {
+    if should_be_logged    {
         // Something wasn't marked as spam, but now will be.
         // This warrants logging.
 

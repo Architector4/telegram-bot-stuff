@@ -82,6 +82,7 @@ impl Display for Domain {
     }
 }
 
+#[derive(Debug)]
 pub enum ReviewResponse {
     UrlSpam(Option<Domain>, Url),
     DomainSpam(Domain, Url),
