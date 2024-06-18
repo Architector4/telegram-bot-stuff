@@ -117,7 +117,6 @@ async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpamCheckResult, reqwest
     let header_powered_by = result.headers().get("x-powered-by").is_some();
     let header_cf_ray = result.headers().get("cf-ray").is_some();
     let header_cache = result.headers().get("cf-cache-status").is_some();
-    let header_content_length = result.headers().get("content-length").is_some();
     let status_code_forbidden = result.status() == reqwest::StatusCode::FORBIDDEN;
 
     let text = result.text().await?;
@@ -134,7 +133,6 @@ async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpamCheckResult, reqwest
             && !header_powered_by
             && !header_cache
             && header_cf_ray
-            && header_content_length
         {
             // Good enough lol
             return Ok(IsSpamCheckResult::Maybe);
