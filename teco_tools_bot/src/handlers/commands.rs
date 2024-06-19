@@ -77,7 +77,7 @@ impl<'a> TaskParams<'a> {
         // trim the "@" and everything after it.
         let callname = if let Some(username_start) = self.command.find('@') {
             // While we're here, also check if the username is actually ours.
-            if &self.command[username_start + '@'.len_utf8()..] != self.bot_me.username() {
+            if &self.command[username_start + '@'.len_utf8()..] != self.bot_me.username().to_lowercase().as_str() {
                 // This command is not for us. Ignore.
                 return None;
             }
