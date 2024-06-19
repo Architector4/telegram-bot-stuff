@@ -247,6 +247,26 @@ impl<T: Read> Iterator for SplitIntoBmps<T> {
     }
 }
 
+fn get_bmp_width_height(buffer: &[u8]) -> Option<(isize, isize)> {
+    // Based on data from:
+    // http://www.dragonwins.com/domains/getteched/bmp/bmpfileformat.htm#The%20Image%20Header
+
+    // Check if this has a BMP header.
+    if buffer[0..2] != [0x42, 0x4D] {
+        return None;
+    }
+
+    if buffer.len() < 22 + 4 {
+        return None;
+    }
+
+    let width = u32::from_le_bytes(buffer[18..18 + 4].try_into().unwrap());
+    let height = i32::from_le_bytes(buffer[22..22 + 4].try_into().unwrap());
+    let height = height.unsigned_abs();
+
+    Some((width as isize, height as isize))
+}
+
 pub fn count_video_frames_and_framerate_and_audio(
     path: &std::path::Path,
 ) -> Result<(u64, f64, bool), std::io::Error> {
@@ -394,14 +414,24 @@ pub fn resize_video(
             .par_bridge()
             .map(|(count, frame)| match frame {
                 Ok(frame) => {
-                    let resize_result = resize_image(
-                        &frame,
-                        width,
-                        height,
-                        rotation,
-                        resize_type,
-                        ImageFormat::Bmp,
-                    );
+                    // Check if this operation changes the image at all.
+                    // If the dimension and rotation are the same, it doesn't.
+                    let input_dimensions = get_bmp_width_height(&frame);
+                    let resize_result = if input_dimensions == Some((width, height))
+                        && (rotation == 0.0 || rotation == -0.0)
+                    {
+                        // It doesn't. Just return the same buffer directly.
+                        Ok(frame)
+                    } else {
+                        resize_image(
+                            &frame,
+                            width,
+                            height,
+                            rotation,
+                            resize_type,
+                            ImageFormat::Bmp,
+                        )
+                    };
 
                     match resize_result {
                         Ok(resize) => Ok((count, resize)),
