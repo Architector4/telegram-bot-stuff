@@ -15,9 +15,10 @@ use crate::tasks::{parsing::TaskError, taskman::Taskman, Task};
 pub async fn parse_command_into_task(
     taskman: &Taskman,
     bot: &Bot,
+    bot_me: &Me,
     message: &Message,
 ) -> Result<Result<Task, TaskError>, RequestError> {
-    let Some(task) = Task::parse_task(taskman, bot, message) else {
+    let Some(task) = Task::parse_task(taskman, bot, bot_me, message) else {
         return Ok(Err(TaskError::Error(String::new())));
     };
 
@@ -36,7 +37,7 @@ pub async fn handle_new_message(
         return Ok(());
     }
 
-    let task = match parse_command_into_task(&taskman, &bot, &message).await? {
+    let task = match parse_command_into_task(&taskman, &bot, &me, &message).await? {
         Ok(t) => t,
         Err(e) => {
             if !e.is_empty() {
@@ -125,6 +126,7 @@ pub async fn handle_new_message(
 
 pub async fn handle_edited_message(
     bot: Bot,
+    me: Me,
     message: Message,
     taskman: Arc<Taskman>,
 ) -> Result<(), RequestError> {
@@ -175,7 +177,7 @@ pub async fn handle_edited_message(
         return Ok(());
     }
 
-    let task = match parse_command_into_task(&taskman, &bot, &message).await? {
+    let task = match parse_command_into_task(&taskman, &bot, &me, &message).await? {
         Ok(t) => t,
         Err(e) => {
             let cancelling = e.is_cancel() || message.text_full().unwrap().starts_with("/cancel");

@@ -5,7 +5,7 @@ use html_escape::encode_text;
 
 use teloxide::{
     requests::Requester,
-    types::{BotCommand, InputFile, Message, UserId},
+    types::{BotCommand, InputFile, Me, Message, UserId},
     Bot, RequestError,
 };
 use tempfile::NamedTempFile;
@@ -42,6 +42,7 @@ pub type TaskFuture<'a> = Pin<Box<dyn Future<Output = Ret> + Send + 'a>>;
 pub struct TaskParams<'a> {
     taskman: &'a Taskman,
     bot: &'a Bot,
+    bot_me: &'a Me,
     message: &'a Message,
     command: String,
 }
@@ -50,6 +51,7 @@ impl<'a> TaskParams<'a> {
     pub fn new<'new>(
         taskman: &'new Taskman,
         bot: &'new Bot,
+        bot_me: &'new Me,
         message: &'new Message,
     ) -> Option<TaskParams<'new>> {
         let text = message.text_full()?;
@@ -63,6 +65,7 @@ impl<'a> TaskParams<'a> {
         Some(TaskParams {
             taskman,
             bot,
+            bot_me,
             message,
             command,
         })
@@ -73,6 +76,12 @@ impl<'a> TaskParams<'a> {
         // If the command is "/distort@Teco_Tools_Bot",
         // trim the "@" and everything after it.
         let callname = if let Some(username_start) = self.command.find('@') {
+            // While we're here, also check if the username is actually ours.
+            if &self.command[username_start + '@'.len_utf8()..] != self.bot_me.username() {
+                // This command is not for us. Ignore.
+                return None;
+            }
+
             &self.command[0..username_start]
         } else {
             &self.command

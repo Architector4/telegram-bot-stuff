@@ -5,7 +5,10 @@ pub mod taskman;
 use std::{fmt::Display, num::NonZeroI32, str::FromStr};
 
 use serde::{Deserialize, Serialize};
-use teloxide::{types::Message, Bot};
+use teloxide::{
+    types::{Me, Message},
+    Bot,
+};
 
 use crate::handlers::commands::{TaskFuture, TaskParams};
 
@@ -185,9 +188,10 @@ impl Task {
     pub fn parse_task<'a>(
         taskman: &'a Taskman,
         bot: &'a Bot,
+        bot_me: &'a Me,
         message: &'a Message,
     ) -> Option<TaskFuture<'a>> {
-        let task_params = TaskParams::new(taskman, bot, message)?;
+        let task_params = TaskParams::new(taskman, bot, bot_me, message)?;
         task_params.make_task()
     }
 
