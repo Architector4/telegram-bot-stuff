@@ -7,7 +7,7 @@ use std::{fmt::Display, num::NonZeroI32, str::FromStr};
 use serde::{Deserialize, Serialize};
 use teloxide::{types::Message, Bot};
 
-use crate::handlers::functions::{TaskFuture, TaskParams};
+use crate::handlers::commands::{TaskFuture, TaskParams};
 
 use taskman::Taskman;
 

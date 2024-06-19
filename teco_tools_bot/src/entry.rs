@@ -21,7 +21,7 @@ pub async fn entry() {
     let bot = Bot::new(key);
     let db = Arc::new(Database::new().await.expect("Could not init the database!"));
 
-    let commands = crate::handlers::functions::Command::generate_bot_commands();
+    let commands = crate::handlers::commands::Command::generate_bot_commands();
     bot.set_my_commands(commands)
         .await
         .expect("Failed to set bot commands!");

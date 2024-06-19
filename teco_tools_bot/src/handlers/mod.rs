@@ -1,4 +1,4 @@
-pub mod functions;
+pub mod commands;
 use arch_bot_commons::useful_methods::*;
 
 use std::sync::Arc;
