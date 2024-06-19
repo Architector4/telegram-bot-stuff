@@ -44,7 +44,8 @@ pub struct TaskParams<'a> {
     bot: &'a Bot,
     bot_me: &'a Me,
     message: &'a Message,
-    command: String,
+    message_text: &'a str,
+    command_len: usize,
 }
 
 impl<'a> TaskParams<'a> {
@@ -54,20 +55,29 @@ impl<'a> TaskParams<'a> {
         bot_me: &'new Me,
         message: &'new Message,
     ) -> Option<TaskParams<'new>> {
-        let text = message.text_full()?;
+        let message_text = message.text_full()?;
 
-        if !text.starts_with('/') {
+        if !message_text.starts_with('/') {
             return None;
         }
 
-        let command = text.split_whitespace().next()?.to_lowercase();
+        let command = message_text.split_whitespace().next()?;
+
+        if !command.is_ascii() {
+            // Telegram commands must be ASCII.
+            // See https://core.telegram.org/bots/api#botcommand
+            return None;
+        }
+
+        let command_len = command.len();
 
         Some(TaskParams {
             taskman,
             bot,
             bot_me,
             message,
-            command,
+            message_text,
+            command_len,
         })
     }
 
@@ -75,16 +85,19 @@ impl<'a> TaskParams<'a> {
         // Commands shouldn't have an "@" in their callnames.
         // If the command is "/distort@Teco_Tools_Bot",
         // trim the "@" and everything after it.
-        let callname = if let Some(username_start) = self.command.find('@') {
+        let callname = if let Some(username_start) = self.command().find('@') {
             // While we're here, also check if the username is actually ours.
-            if &self.command[username_start + '@'.len_utf8()..] != self.bot_me.username().to_lowercase().as_str() {
+            // Bot names are guaranteed ASCII, so ignore ASCII case specifically.
+            if !self.command()[username_start + '@'.len_utf8()..]
+                .eq_ignore_ascii_case(self.bot_me.username())
+            {
                 // This command is not for us. Ignore.
                 return None;
             }
 
-            &self.command[0..username_start]
+            &self.command()[0..username_start]
         } else {
-            &self.command
+            self.command()
         };
         for command in COMMANDS {
             if command.is_matching_callname(callname) {
@@ -95,17 +108,22 @@ impl<'a> TaskParams<'a> {
         None
     }
 
+    /// Get text command for this task.
+    ///
+    /// If the input command is `/Hewwo everypony bazinga`,
+    /// this will be the substring `/Hewwo`.
+    #[inline]
+    fn command(&self) -> &str {
+        &self.message_text[..self.command_len]
+    }
+
     /// Get text parameters for this task.
     ///
-    /// If the input command is `/hewwo everypony bazinga`,
+    /// If the input command is `/Hewwo everypony bazinga`,
     /// this will be the substring `everypony bazinga`.
+    #[inline]
     fn get_params(&self) -> &str {
-        // SAFETY: this type can only be constructed if the message
-        // has non-empty text in it.
-        let text = self.message.text_full().unwrap();
-        let command_full_len = self.command.len();
-
-        text[command_full_len..].trim_start()
+        self.message_text[self.command_len..].trim_start()
     }
 }
 
@@ -122,7 +140,7 @@ impl Command {
         self.callname
             .split_ascii_whitespace()
             .next()
-            .is_some_and(|x| x == command)
+            .is_some_and(|x| x.eq_ignore_ascii_case(command))
     }
 
     pub fn get_help(&self, mut output: impl std::fmt::Write) -> Result<(), std::fmt::Error> {
@@ -315,13 +333,13 @@ async fn reverse_text(tp: TaskParams<'_>) -> Ret {
 
     let request_text = tp.message.text_full().unwrap();
     // Exclude first word - the whole command invocation.
-    let request_text = request_text[tp.command.len()..].trim();
+    let request_text = request_text[tp.command_len..].trim();
     input.push_str(request_text);
 
     if input.is_empty() {
         // Nothing to reverse...
         // Include the command invocation then lol
-        input.push_str(&tp.command);
+        input.push_str(tp.command());
     }
 
     use unicode_segmentation::UnicodeSegmentation;
