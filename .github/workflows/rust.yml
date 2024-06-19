@@ -12,7 +12,8 @@ env:
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v3
@@ -20,11 +21,12 @@ jobs:
       run: |
           # Yoinking it from my dependency:
           # https://github.com/nlfiedler/magick-rust/blob/master/.github/workflows/docs.yaml#L24
-          curl https://imagemagick.org/archive/ImageMagick.tar.gz | tar xz
-          cd ImageMagick-7.1*
-          ./configure --with-magick-plus-plus=no --with-perl=no 
-          make -j
-          sudo make install
+          #curl https://imagemagick.org/archive/ImageMagick.tar.gz | tar xz
+          #cd ImageMagick-7.1*
+          #./configure --with-magick-plus-plus=no --with-perl=no 
+          #make -j
+          #sudo make install
+          sudo apt update && sudo apt install -y libmagickwand-dev
     - uses: Swatinem/rust-cache@v2
     - name: Build
       run: cargo build --verbose
