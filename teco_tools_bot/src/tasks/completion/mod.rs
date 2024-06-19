@@ -9,6 +9,8 @@ use teloxide::{
     Bot, RequestError,
 };
 
+use crate::tasks::VideoTypePreference;
+
 use super::{taskman::database::TaskDatabaseInfo, ImageFormat, Task};
 
 impl Task {
@@ -98,6 +100,7 @@ impl Task {
                 resize_type,
                 vibrato_hz: _,
                 vibrato_depth: _,
+                type_pref: _,
             } => {
                 let media = data.message.get_media_info();
                 let media = match media {
@@ -134,8 +137,6 @@ impl Task {
                     ImageFormat::Preserve
                 };
 
-                let should_be_sticker = !media.is_video && format.supports_alpha_transparency();
-
                 let mut media_data: Vec<u8> = Vec::new();
 
                 bot.download_file_to_vec(media.file, &mut media_data)
@@ -159,6 +160,17 @@ impl Task {
                     (7.0, 0.0)
                 };
 
+                let should_be_gif = if let Task::VideoResize { type_pref, .. } = self {
+                    match type_pref {
+                        VideoTypePreference::Preserve => media.is_gif || media.is_sticker,
+                        VideoTypePreference::Gif => true,
+                        VideoTypePreference::Video => false,
+                    }
+                } else {
+                    // Not a video lol
+                    false
+                };
+
                 let woot = tokio::task::spawn_blocking(move || {
                     if media.is_video {
                         media_processing::resize_video(
@@ -167,6 +179,7 @@ impl Task {
                             dimensions,
                             rotation,
                             resize_type,
+                            should_be_gif,
                             vibrato_hz,
                             vibrato_depth,
                         )
@@ -198,10 +211,12 @@ impl Task {
                     );
                 }
 
+                let should_be_sticker = !media.is_video && format.supports_alpha_transparency();
+
                 teloxide_retry!({
                     let send = media_data.clone();
                     let result = if media.is_video {
-                        if media.is_gif || media.is_sticker {
+                        if should_be_gif {
                             bot.send_animation(
                                 data.message.chat.id,
                                 InputFile::memory(send).file_name("amogus.mp4"),

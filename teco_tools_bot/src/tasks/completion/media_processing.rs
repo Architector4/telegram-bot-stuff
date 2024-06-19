@@ -340,6 +340,7 @@ pub fn resize_video(
     (mut width, mut height): (isize, isize),
     rotation: f64,
     resize_type: ResizeType,
+    strip_audio: bool,
     vibrato_hz: f64,
     vibrato_depth: f64,
 ) -> Result<Vec<u8>, String> {
@@ -522,7 +523,7 @@ pub fn resize_video(
     unfail!(decoder.wait());
     unfail!(encoder_thread);
 
-    let mut finalfile = if has_audio {
+    let mut finalfile = if has_audio && !strip_audio {
         let _ = status_report.send("Writing audio...".to_string());
         // Now to transfer audio... This means we need a THIRD file to put the final result into.
         let muxfile = unfail!(NamedTempFile::new());

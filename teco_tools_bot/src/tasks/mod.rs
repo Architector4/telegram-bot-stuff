@@ -114,6 +114,43 @@ impl FromStr for ImageFormat {
     }
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Default)]
+pub enum VideoTypePreference {
+    #[default]
+    Preserve,
+    Video,
+    Gif,
+    //VideoSticker // Maybe in the future lol
+}
+
+impl VideoTypePreference {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Preserve => "Preserve",
+            Self::Video => "Video",
+            Self::Gif => "GIF",
+        }
+    }
+}
+
+impl FromStr for VideoTypePreference {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "preserve" => Ok(Self::Preserve),
+            "video" => Ok(Self::Video),
+            "gif" => Ok(Self::Gif),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Display for VideoTypePreference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Task {
     Amogus {
@@ -137,6 +174,8 @@ pub enum Task {
         resize_type: ResizeType,
         vibrato_hz: f64,
         vibrato_depth: f64,
+        #[serde(default = "VideoTypePreference::default")]
+        type_pref: VideoTypePreference,
     },
     /// Optical Character Recognition, i.e. extracting text from an image
     Ocr,
@@ -194,6 +233,7 @@ impl Task {
                 resize_type,
                 vibrato_hz: _,
                 vibrato_depth: _,
+                type_pref: _,
             }
             | Task::ImageResize {
                 new_dimensions,
@@ -229,14 +269,16 @@ impl Task {
                 }
                 writeln!(output)?;
                 writeln!(output, "<b>Rotation</b>: {}°", rotation)?;
-                write_param!("Resize type", resize_type)?;
+                write_param!("Resize method", resize_type)?;
 
                 if let Task::VideoResize {
                     vibrato_hz,
                     vibrato_depth,
+                    type_pref,
                     ..
                 } = self
                 {
+                    write_param!("Media type", type_pref)?;
                     wp!(vibrato_hz)?;
                     wp!(vibrato_depth)?;
                 };
@@ -322,6 +364,7 @@ impl Task {
             } else {
                 0.0
             },
+            type_pref: VideoTypePreference::Preserve,
         }
     }
     pub fn default_ocr() -> Task {

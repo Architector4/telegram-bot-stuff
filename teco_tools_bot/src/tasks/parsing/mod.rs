@@ -121,7 +121,7 @@ macro_rules! parse_keyval_param_with_parser {
             }
         };
 
-        if key == stringify!($name).to_lowercase() {
+        if key == stringify!($name).to_lowercase().trim_start_matches("r#") {
             parse_plain_param_with_parser_mandatory!(Token::Plain(value), $name, $parser, $help);
             continue;
         }
@@ -173,7 +173,6 @@ impl Task {
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "Above parameters may be specified multiple times and will be applied cumulatively.\n",
                             "\n",
-                            "<code>format</code>: Format to save the image in: jpeg, webp or preserve\n",
                             "<code>rot</code>: Rotate the image by this much after distorting.\n",
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
                             "Can't be less than -4 or bigger than 4.\n",
@@ -273,6 +272,7 @@ impl Task {
                 mut resize_type,
                 vibrato_hz: _,
                 vibrato_depth: _,
+                type_pref: _,
             } => {
                 if let ResizeType::ToSticker | ResizeType::ToCustomEmoji = resize_type {
                     return Ok(self.clone());
@@ -280,11 +280,14 @@ impl Task {
 
                 let mut old_dimensions = (original_dimensions.0.get(), original_dimensions.1.get());
 
-                let (is_video, mut format) = if let Task::ImageResize { format, .. } = self {
-                    (false, *format)
-                } else {
-                    (true, ImageFormat::Preserve)
-                };
+                let (is_video, mut format, video_type_pref) =
+                    if let Task::ImageResize { format, .. } = self {
+                        (false, *format, VideoTypePreference::Preserve)
+                    } else if let Task::VideoResize { type_pref, .. } = self {
+                        (true, ImageFormat::Preserve, *type_pref)
+                    } else {
+                        unreachable!()
+                    };
 
                 let (mut vibrato_hz, mut vibrato_depth) = if resize_type.is_seam_carve() {
                     (7.0, 1.0)
@@ -317,6 +320,10 @@ impl Task {
                     }
                 };
 
+                // Rename this variable to a more human friendly name,
+                // because the variable name is used by the parsing macros.
+                let mut r#type = video_type_pref;
+
                 for param in params {
                     if let Some(new_dimensions) = new_dimensions {
                         // If new dimensions were set by anything here,
@@ -331,9 +338,12 @@ impl Task {
                             .ok_or(())
                     };
 
-                    if !is_video {
+                    if is_video {
+                        parse_plain_param_optional!(param, r#type, help);
+                    } else {
                         parse_plain_param_optional!(param, format, help);
                     }
+
                     parse_plain_param_with_parser_optional!(
                         param,
                         new_dimensions,
@@ -371,6 +381,7 @@ impl Task {
                     }
 
                     if is_video {
+                        parse_keyval_param!(param, r#type, help);
                         parse_keyval_param_with_parser!(
                             param,
                             vibrato_hz,
@@ -383,6 +394,8 @@ impl Task {
                             sanitized_f64_parser(0.0, 1.0),
                             help
                         );
+                    } else {
+                        parse_keyval_param!(param, format, help);
                     }
 
                     if let Token::KeyVal(k, v) = param {
@@ -392,10 +405,8 @@ impl Task {
                             new_dimensions = Some((parse.0, parse.1));
                             continue;
                         }
-                        // If it fails to parse, the format parser below will complain with all the
-                        // help lol
+                        // If it fails to parse, the parse_stop below will complain lol
                     }
-                    parse_keyval_param!(param, format, help);
                     parse_keyval_param_with_parser!(
                         param,
                         rot,
@@ -516,6 +527,7 @@ impl Task {
                         resize_type,
                         vibrato_hz,
                         vibrato_depth,
+                        type_pref: r#type,
                     })
                 } else {
                     Ok(Task::ImageResize {
