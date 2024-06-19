@@ -164,8 +164,7 @@ impl Task {
                         media_processing::resize_video(
                             status_report,
                             media_data,
-                            dimensions.0,
-                            dimensions.1,
+                            dimensions,
                             rotation,
                             resize_type,
                             vibrato_hz,

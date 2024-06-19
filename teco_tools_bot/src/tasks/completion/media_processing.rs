@@ -1,3 +1,5 @@
+#![allow(clippy::manual_clamp)] // It's better here since it also gets rid of NaN
+
 use std::{
     ffi::OsStr,
     io::{BufReader, Read, Write},
@@ -335,8 +337,7 @@ pub fn count_video_frames_and_framerate_and_audio(
 pub fn resize_video(
     status_report: Sender<String>,
     data: Vec<u8>,
-    mut width: isize,
-    mut height: isize,
+    (mut width, mut height): (isize, isize),
     rotation: f64,
     resize_type: ResizeType,
     vibrato_hz: f64,
@@ -639,14 +640,17 @@ pub fn ocr_image(data: &[u8]) -> Result<String, MagickError> {
             let stripped = stripped.trim();
 
             // Count amount of empty lines and non-empty lines.
-            let (empty_lines, non_empty_lines) = stripped.split('\n').fold((0usize, 0usize), |(empty, non_empty), line| {
-                if line.len() < 4 {
-                    // Count lines with less than 4 bytes as empty.
-                    (empty+1, non_empty)
-                } else {
-                    (empty, non_empty+1)
-                }
-            });
+            let (empty_lines, non_empty_lines) =
+                stripped
+                    .split('\n')
+                    .fold((0usize, 0usize), |(empty, non_empty), line| {
+                        if line.len() < 4 {
+                            // Count lines with less than 4 bytes as empty.
+                            (empty + 1, non_empty)
+                        } else {
+                            (empty, non_empty + 1)
+                        }
+                    });
 
             // If there's more empty lines than non-empty, get rid of them.
             if empty_lines >= non_empty_lines {
