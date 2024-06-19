@@ -348,6 +348,7 @@ impl Task {
         width: NonZeroI32,
         height: NonZeroI32,
         resize_type: ResizeType,
+        type_pref: VideoTypePreference,
     ) -> Task {
         Task::VideoResize {
             new_dimensions: (width, height),
@@ -364,7 +365,7 @@ impl Task {
             } else {
                 0.0
             },
-            type_pref: VideoTypePreference::Preserve,
+            type_pref,
         }
     }
     pub fn default_ocr() -> Task {

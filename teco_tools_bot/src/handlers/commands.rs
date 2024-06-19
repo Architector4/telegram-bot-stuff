@@ -1,15 +1,20 @@
-use std::{future::Future, num::NonZeroI32, pin::Pin};
+use std::{future::Future, io::Write, num::NonZeroI32, pin::Pin};
 
 use arch_bot_commons::useful_methods::*;
 use html_escape::encode_text;
 
 use teloxide::{
-    types::{BotCommand, Message, UserId},
+    requests::Requester,
+    types::{BotCommand, InputFile, Message, UserId},
     Bot, RequestError,
 };
+use tempfile::NamedTempFile;
 
 use crate::{
-    tasks::{parsing::TaskError, taskman::Taskman, ImageFormat, ResizeType, Task},
+    tasks::{
+        completion::media_processing::count_video_frames_and_framerate_and_audio,
+        parsing::TaskError, taskman::Taskman, ImageFormat, ResizeType, Task, VideoTypePreference,
+    },
     OWNER_ID,
 };
 
@@ -18,11 +23,13 @@ pub const COMMANDS: &[Command] = &[
     HELP,
     AMOGUS,
     DISTORT,
-    RESIZE,
     OCR,
+    RESIZE,
     REVERSE_TEXT,
-    TO_STICKER,
     TO_CUSTOM_EMOJI,
+    TO_STICKER,
+    TO_VIDEO,
+    TO_GIF,
     ____SEPARATOR,
     PREMIUM,
     UNPREMIUM,
@@ -357,7 +364,13 @@ async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
                 .parse_params(tp.get_params())
         )
     } else {
-        unfail!(Task::default_video_resize(width, height, resize_type).parse_params(tp.get_params()))
+        unfail!(Task::default_video_resize(
+            width,
+            height,
+            resize_type,
+            VideoTypePreference::Preserve
+        )
+        .parse_params(tp.get_params()))
     };
 
     Ok(Ok(task))
@@ -389,6 +402,7 @@ async fn to_sticker(tp: TaskParams<'_>) -> Ret {
 
     Ok(Ok(Task::default_to_sticker()))
 }
+
 pub const TO_CUSTOM_EMOJI: Command = Command {
     callname: "/to_custom_emoji &lt;image&gt;",
     description: "Converts the image into a 100x100 WEBP suitable for usage as a custom emoji.",
@@ -482,6 +496,127 @@ async fn ocr(tp: TaskParams<'_>) -> Ret {
     };
 
     Ok(Ok(Task::default_ocr()))
+}
+
+async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
+    let video = tp.message.get_media_info();
+    let video = match video {
+        Some(video) => {
+            if !video.is_raster() {
+                goodbye_cancel!("can't work with animated stickers.");
+            }
+            if video.is_image() {
+                goodbye_cancel!("can't work with non-video images.");
+            }
+            if video.file.size > 20 * 1000 * 1000 {
+                goodbye_cancel!("video is too large.");
+            }
+            video
+        }
+        None => goodbye_cancel!(concat!(
+            "can't find a video. ",
+            "This command needs to be used as either a reply or caption to one."
+        )),
+    };
+
+    // First try to send it over directly.
+    // Video stickers are excluded from this because they are VP9 WEBM, while
+    // video files should preferably be H.264 MP4.
+    if !video.is_sticker {
+        let mut buf = Vec::new();
+        tp.bot.download_file_to_vec(video.file, &mut buf).await?;
+        let should_send_directly = if to_gif {
+            // If we need to send it as a gif, we need to ensure the input has
+            // no sound. If it does, then Telegram will make it a video instead.
+
+            // Define the check as a closure.
+            // This makes error handling here easier with the "?" operator.
+            let has_audio_closure = || {
+                let mut tempfile = NamedTempFile::new()?;
+                tempfile.write_all(&buf)?;
+                tempfile.flush()?;
+                let has_audio = count_video_frames_and_framerate_and_audio(tempfile.path())?.2;
+                Ok::<_, std::io::Error>(has_audio)
+            };
+
+            // If failed, assume it has audio, just in case.
+            let has_audio = has_audio_closure().unwrap_or(true);
+
+            !has_audio
+        } else {
+            // We're sending as video, so audio doesn't matter.
+            true
+        };
+
+        if should_send_directly {
+            let send_direct_result = if to_gif {
+                // Sending as an "animation" requires that the file has a filename, else
+                // it somehow ends up being a file document instead.
+                tp.bot
+                    .send_animation(
+                        tp.message.chat.id,
+                        InputFile::memory(buf).file_name("amogus.mp4"),
+                    )
+                    .await
+            } else {
+                tp.bot
+                    .send_video(tp.message.chat.id, InputFile::memory(buf))
+                    .await
+            };
+
+            match send_direct_result {
+                Ok(_) => return Ok(Err(TaskError::Descriptory(String::new()))),
+                Err(e) => {
+                    let _ = tp
+                        .bot
+                        .archsendmsg(
+                            OWNER_ID,
+                            format!("Failed directly uploading a video: {:#?}", e).as_str(),
+                            None,
+                        )
+                        .await;
+                }
+            }
+        }
+    }
+
+    // Failed to send it directly. Let's do it the funny way around then.
+    let (Some(width), Some(height)) = (
+        NonZeroI32::new(video.width as i32),
+        NonZeroI32::new(video.height as i32),
+    ) else {
+        goodbye_cancel!("video is too small.");
+    };
+
+    Ok(Ok(Task::default_video_resize(
+        width,
+        height,
+        ResizeType::ToSticker,
+        if to_gif {
+            VideoTypePreference::Gif
+        } else {
+            VideoTypePreference::Video
+        },
+    )))
+}
+pub const TO_VIDEO: Command = Command {
+    callname: "/to_video",
+    description: "Turn a GIF or a video sticker into a video.",
+    function: wrap!(to_video),
+    hidden: false,
+};
+fn to_video(tp: TaskParams<'_>) -> impl Future<Output = Ret> + '_ {
+    to_video_or_gif_inner(tp, false)
+}
+
+pub const TO_GIF: Command = Command {
+    callname: "/to_gif",
+    description: "Turn a video into a GIF.",
+    function: wrap!(to_gif),
+    hidden: false,
+};
+fn to_gif(tp: TaskParams<'_>) -> impl Future<Output = Ret> + '_ {
+    to_video_or_gif_inner(tp, true)
 }
 
 async fn premium_inner(tp: TaskParams<'_>, premium: bool) -> Ret {

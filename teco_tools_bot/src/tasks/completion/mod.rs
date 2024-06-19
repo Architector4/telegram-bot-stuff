@@ -1,4 +1,4 @@
-mod media_processing;
+pub mod media_processing;
 use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use crossbeam_channel::Sender;
 use html_escape::encode_text;
@@ -217,6 +217,8 @@ impl Task {
                     let send = media_data.clone();
                     let result = if media.is_video {
                         if should_be_gif {
+                            // Sending as an "animation" requires that the file has a filename, else
+                            // it somehow ends up being a file document instead.
                             bot.send_animation(
                                 data.message.chat.id,
                                 InputFile::memory(send).file_name("amogus.mp4"),
