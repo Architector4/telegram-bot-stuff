@@ -129,11 +129,7 @@ async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpamCheckResult, reqwest
         // Cloudflare captcha.
 
         // Check validity of it being a *real* cloudflare captcha.
-        if status_code_forbidden
-            && !header_powered_by
-            && !header_cache
-            && header_cf_ray
-        {
+        if status_code_forbidden && !header_powered_by && !header_cache && header_cf_ray {
             // Good enough lol
             return Ok(IsSpamCheckResult::Maybe);
         }
@@ -152,6 +148,22 @@ async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpamCheckResult, reqwest
         return Ok(IsSpamCheckResult::YesUrl);
     }
 
+    // It may also be American Groundhog's Telegram spam link directly. Check while we're here.
+    if is_telegram_url(url) && american_groundhog_spam::check_spam_telegram_html(&text) {
+        return Ok(IsSpamCheckResult::YesUrl);
+    }
+
     // guess not.
     Ok(IsSpamCheckResult::No)
+}
+
+/// Returns true if this URL's domain is Telegram.
+pub fn is_telegram_url(url: &Url) -> bool {
+    let Some(domain) = url.domain() else {
+        return false;
+    };
+
+    domain.eq_ignore_ascii_case("t.me")
+        || domain.eq_ignore_ascii_case("telegram.me")
+        || domain.eq_ignore_ascii_case("telegram.dog")
 }

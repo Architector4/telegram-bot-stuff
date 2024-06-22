@@ -10,15 +10,9 @@ pub fn is_spam_html(text: &str) -> bool {
 
 /// Returns `None` if it's not a telegram URL.
 pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
-    let domain = url.domain()?;
-
-    // Check if it's a telegram domain...
-    if !matches!(
-        domain.to_lowercase().as_str(),
-        "t.me" | "telegram.me" | "telegram.dog"
-    ) {
+    if !super::is_telegram_url(url) {
         return None;
-    };
+    }
 
     // Ripping out Url::path_segments() body here lol
     let Some(path) = url.path().strip_prefix('/') else {

@@ -37,20 +37,8 @@ pub async fn check_spam_html(
 
         let text = result.text().await?;
 
-        if text.contains("<span dir=\"auto\">American groundhog 🇺🇸</span>") {
+        if check_spam_telegram_html(&text) {
             // buh-bye!
-            return Ok(true);
-        }
-
-        if text.contains("<span dir=\"auto\">WikiLeaks</span>")
-            && text.contains("We are here to bring you the truth")
-        {
-            return Ok(true);
-        }
-
-        if text.contains("<span dir=\"auto\">Memento</span>")
-            && text.contains("Uncover hidden truths, decode mysteries")
-        {
             return Ok(true);
         }
 
@@ -60,6 +48,33 @@ pub async fn check_spam_html(
 
     // Nothing sus found. Oh well lol
     Ok(false)
+}
+
+/// Returns true if the provided HTML is from a spam Telegram invite link URL
+/// spread by American Groundhog spammers, or false if it's not known.
+///
+/// This function does not check if the passed HTML is actually from Telegram,
+/// so don't use it for pages that aren't.
+pub fn check_spam_telegram_html(html: &str) -> bool {
+    if html.contains("<span dir=\"auto\">American groundhog 🇺🇸</span>") {
+        // buh-bye!
+        return true;
+    }
+
+    if html.contains("<span dir=\"auto\">WikiLeaks</span>")
+        && html.contains("We are here to bring you the truth")
+    {
+        return true;
+    }
+
+    if html.contains("<span dir=\"auto\">Memento</span>")
+        && html.contains("Uncover hidden truths, decode mysteries")
+    {
+        return true;
+    }
+
+    // Can't see anything of note.
+    false
 }
 
 #[cfg(test)]

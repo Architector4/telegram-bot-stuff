@@ -261,7 +261,7 @@ pub async fn apply_review_unverified(
         .expect("Database died!");
 
     // Write it to the log...
-    if should_be_logged    {
+    if should_be_logged {
         // Something wasn't marked as spam, but now will be.
         // This warrants logging.
 
