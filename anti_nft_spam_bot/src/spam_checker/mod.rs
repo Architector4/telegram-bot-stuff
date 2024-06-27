@@ -39,18 +39,48 @@ impl From<IsSpamCheckResult> for IsSpam {
 /// Returns [`None`] if both checking methods failed.
 pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Option<IsSpam> {
     // Check the database...
-    if let Some(is_spam) = database
+    let db_result = database
         .is_spam(url, Some(domain), false)
         .await
-        .expect("Database died!")
-    {
-        log::debug!("Checked {} with database and got: {:?}", url, is_spam);
+        .expect("Database died!");
 
-        Some(is_spam)
+    log::debug!("Checked {} with database and got: {:?}", url, db_result);
+
+    if db_result == Some(IsSpam::Yes) {
+        // Confirmed spam. Just return.
+        Some(IsSpam::Yes)
     } else {
-        log::debug!("URL is not in database...");
+        if let Some(db_result) = db_result {
+            // It's marked as not spam or maybe spam.
+            // Is this specifically for this URL, or just the general domain result?
+            if let Some(db_result_for_url) = database
+                .is_url_spam(url, false)
+                .await
+                .expect("Database died!")
+            {
+                log::debug!(
+                    "Checked {} URL specifically with database and got: {:?}",
+                    url,
+                    db_result_for_url
+                );
+                return Some(db_result_for_url);
+            }
 
-        // Not in the database. Check for real...
+            // No result for the URL specifically, but we are in this branch.
+            // This means `db_result` contains the result for the domain.
+
+            // Assumption: if a domain is marked as not spam or maybe spam,
+            // and a URL is just the domain without a path, then the domain's
+            // result is accurate for that specific URL too.
+
+            // URL crate's "empty path" seems to be just the slash,
+            // but also check for emptystring in case this isn't always true.
+            if url.path() == "/" || url.path().is_empty() {
+                return Some(db_result);
+            }
+        }
+
+        // All stuff above did not answer anything. Check for real...
 
         if let Some(is_telegram_spam) = nft_spam::is_spam_telegram_url(url) {
             // Add it to the database.
