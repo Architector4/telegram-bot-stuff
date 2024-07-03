@@ -110,18 +110,18 @@ impl MessageStuff for Message {
 
         if let Some(video_note) = self.video_note() {
             if let Some(thumb) = &video_note.thumb {
-            return Some(MessageMediaInfo {
-                width: thumb.width,
-                height: thumb.height,
-                is_sticker: false,
-                is_video: true,
-                is_gif: false,
-                is_image: false,
-                is_sound: false,
-                is_voice_or_video_note: true,
-                is_vector_sticker: false,
-                file: &video_note.file,
-            });
+                return Some(MessageMediaInfo {
+                    width: thumb.width,
+                    height: thumb.height,
+                    is_sticker: false,
+                    is_video: true,
+                    is_gif: false,
+                    is_image: false,
+                    is_sound: false,
+                    is_voice_or_video_note: true,
+                    is_vector_sticker: false,
+                    file: &video_note.file,
+                });
             }
         }
 
@@ -139,7 +139,6 @@ impl MessageStuff for Message {
                 file: &voice.file,
             });
         }
-        
 
         if let Some(reply_to) = self.reply_to_message() {
             return reply_to.get_media_info();

@@ -53,17 +53,10 @@ impl std::fmt::Display for TaskError {
     }
 }
 
-const PARAM_HELP: &str = concat!(
-    "\nPlease provide parameters in the format of\n",
-    "<code>  setting: value, setting: value    </code>\n",
-    "and separated by commas or newlines.\n\n",
-    "<b>Possible parameters for this function:</b>\n"
-);
-
 /// Returns true if this isn't a plain parameter,
 /// false if it is but failed to parse, or continues if it succeeds.
 macro_rules! parse_plain_param_with_parser_optional {
-    ($input: expr, $name: expr, $parser: expr, $help: expr) => {{
+    ($input: expr, $name: expr, $parser: expr) => {{
         #[allow(clippy::redundant_closure_call)]
         if let Token::Plain(value) = $input {
             if let Ok(value) = $parser(value) {
@@ -79,7 +72,7 @@ macro_rules! parse_plain_param_with_parser_optional {
 }
 macro_rules! parse_plain_param_optional {
     ($input: expr, $name: expr, $help: expr) => {
-        parse_plain_param_with_parser_optional!($input, $name, std::str::FromStr::from_str, $help)
+        parse_plain_param_with_parser_optional!($input, $name, std::str::FromStr::from_str)
     };
 }
 
@@ -89,10 +82,9 @@ macro_rules! parse_plain_param_with_parser_mandatory {
         if let Token::Plain(value) = $input {
             let Ok(value) = $parser(value) else {
                 return Err(TaskError::Error(format!(
-                    "the value <code>{}</code> is incorrect for parameter <code>{}</code>.{}{}",
+                    "the value <code>{}</code> is incorrect for parameter <code>{}</code>.\n{}",
                     encode_text(value),
                     encode_text(stringify!($name)),
-                    PARAM_HELP,
                     $help
                 )));
             };
@@ -113,9 +105,8 @@ macro_rules! parse_keyval_param_with_parser {
             Token::KeyVal(key, value) => (key, value),
             Token::Plain(plain) => {
                 return Err(TaskError::Error(format!(
-                    "can't parse <code>{}</code> as a parameter.{}{}",
+                    "can't parse <code>{}</code> as a parameter.\n{}",
                     encode_text(plain),
-                    PARAM_HELP,
                     $help
                 )));
             }
@@ -137,16 +128,14 @@ macro_rules! parse_stop {
     ($input: expr, $help: expr) => {
         let response = match $input {
             Token::KeyVal(key, val) => format!(
-                "unexpected parameter <code>{}</code> with value <code>{}</code>{}{}",
+                "unexpected parameter <code>{}</code> with value <code>{}</code>\n{}",
                 encode_text(key),
                 encode_text(val),
-                PARAM_HELP,
                 $help
             ),
             Token::Plain(plain) => format!(
-                "unexpected parameter <code>{}</code>{}{}",
+                "unexpected parameter <code>{}</code>\n{}",
                 encode_text(plain),
-                PARAM_HELP,
                 $help
             ),
         };
@@ -159,89 +148,111 @@ impl Task {
     pub fn param_help(&self) -> &'static str {
         match self {
             Task::Amogus { .. } => {
-                "<code>amogus</code>: How much amogus. Negative numbers are allowed."
+                concat!(
+                    "<b>Possible parameters for this command:</b>\n",
+                    "<code>amogus</code>: How much amogus, in integer numbers. Negative numbers are allowed.",
+                    "\n\n",
+                    "<b>Examples:</b>\n",
+                    "• <code>/amogus</code> (same as <code>/amogus 1</code>)\n",
+                    "• <code>/amogus 3</code>\n",
+                    "• <code>/amogus -5</code>\n",
+                )
             }
-            Task::ImageResize { resize_type, ..} => {
+            Task::ImageResize { resize_type, ..} | Task::VideoResize { resize_type, ..}=> {
                 match resize_type {
                     ResizeType::ToSticker | ResizeType::ToCustomEmoji => "",
                     ResizeType::SeamCarve { .. } =>
                         concat!(
-                            "Size specification (values can be negative for mirroring):\n",
-                            "<code>WxH</code>: Width and height of the output image, in pixels or percentages; ",
+                            "<b>Possible parameters for this command:</b>\n",
+                            "Size specification (values can be negative for mirroring, default is 50%x50%):\n",
+                            "<code>WxH</code>: Width and height of the output media, in pixels or percentages; ",
                             "can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "Above parameters may be specified multiple times and will be applied cumulatively.\n",
                             "\n",
-                            "<code>rot</code>: Rotate the image by this much after distorting.\n",
+                            "<code>rot</code>: Rotate the media by this much after distorting.\n",
                             "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
                             "Can't be less than -1024 or bigger than 1024.\n",
-                            "<code>format</code>: Output image format. Can be \"webp\" or \"jpg\"."
+                            "\n",
+                            "Only for images:\n",
+                            "<code>format</code>: Output image format. Can be \"webp\" or \"jpg\".\n",
+                            "\n",
+                            "Only for videos:\n",
+                            "<code>vibrato_hz</code>: Frequency of vibrato applied to audio. ",
+                            "Can only be between 0.1 or 20000.0. Default is 7.\n",
+                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 1.0. Default is 1.",
+                            "\n\n",
+                            "<b>Examples:</b>\n",
+                            "• <code>/distort</code> (same as <code>/distort 50%</code> or <code>/distort 50%x50%</code>)\n",
+                            "• <code>/distort 512x512</code>\n",
+                            "• <code>/distort 1:1 50% delta_x:4 rigidity:-50</code>\n",
+                            "• <code>/distort 200%x50% rot:45deg vibrato_hz:220</code> (videos only)\n",
+                            "• <code>/distort 30%x-512 45deg webp</code> (images only)\n",
                             ),
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop =>
                         concat!(
-                            "Size specification (values can be negative for mirroring):\n",
-                            "<code>WxH</code>: Width and height of the output image, in pixels or percentages; ",
+                            "<b>Possible parameters for this command:</b>\n",
+                            "Size specification (values can be negative for mirroring, default is 50%x50%):\n",
+                            "<code>WxH</code>: Width and height of the output media, in pixels or percentages; ",
                             "can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
                             "Above parameters may be specified multiple times and will be applied cumulatively.\n",
                             "\n",
-                            "<code>rot</code>: Rotate the image by this much after resizing.\n",
-                            "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
-                            "<code>format</code>: Output image format. Can be \"webp\" or \"jpg\"."
+                            "<code>rot</code>: Rotate the media by this much after resizing.\n",
+                            "<code>method</code>: Resize method. Can only be \"fit\" (default), \"stretch\" or \"crop\".\n",
+                            "\n",
+                            "Only for images:\n",
+                            "<code>format</code>: Output image format. Can be \"webp\" or \"jpg\".\n",
+                            "\n",
+                            "Only for videos:\n",
+                            "<code>vibrato_hz</code>: Frequency of vibrato applied to audio. ",
+                            "Can only be between 0.1 or 20000.0. Default is 7.\n",
+                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 1.0. Default is 0.",
+                            "\n\n",
+                            "<b>Examples:</b>\n",
+                            "• <code>/resize</code> (same as <code>/resize 50%</code> or <code>/resize 50%x50%</code>)\n",
+                            "• <code>/resize 512x512</code>\n",
+                            "• <code>/resize 16:9 crop</code>\n",
+                            "• <code>/resize 200%x100% stretch</code>\n",
+                            "• <code>/resize 30%x-512 45deg webp</code> (images only)\n",
                             ),
                 }
             },
-            Task::VideoResize { resize_type, .. } => {
-                match resize_type {
-                    ResizeType::ToSticker| ResizeType::ToCustomEmoji  => "",
-                    ResizeType::SeamCarve { ..} => concat!(
-                            "Size specification (values can be negative for mirroring):\n",
-                            "<code>WxH</code>: Width and height of the output video, in pixels or percentages; ",
-                            "can't be 0 or bigger than 2048x2048; OR\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
-                            "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
-                            "Above parameters may be specified multiple times and will be applied cumulatively.\n",
-                            "\n",
-                            "<code>rot</code>: Rotate the video by this much after distorting.\n",
-                            "<code>delta_x</code>: Maximum seam transversal step. 0 means straight seams. Default is 2. ",
-                            "Can't be less than -4 or bigger than 4.\n",
-                            "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
-                            "Can't be less than -1024 or bigger than 1024.\n",
-                            "\n",
-                            "<code>vibrato_hz</code>: Frequency of vibrato applied to audio. ",
-                            "Can only be between 0.1 or 20000.0. Default is 7.\n",
-                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 1.0. Default is 1."
-
-                        ),
-                    ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop => concat!(
-                            "Size specification (values can be negative for mirroring):\n",
-                            "<code>WxH</code>: Width and height of the output video, in pixels or percentages; ",
-                            "can't be 0 or bigger than 2048x2048; OR\n",
-                            "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
-                            "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
-                            "Above parameters may be specified multiple times and will be applied cumulatively.\n",
-                            "\n",
-                            "<code>rot</code>: Rotate the video by this much after resizing.\n",
-                            "<code>method</code>: Resize method. Can only be \"fit\", \"stretch\" or \"crop\".\n",
-                            "\n",
-                            "<code>vibrato_hz</code>: Frequency of vibrato applied to audio. ",
-                            "Can only be between 0.1 or 20000.0. Default is 7.",
-                            "<code>vibrato_depth</code> also needs to be set for this to apply.\n",
-                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 1.0. Default is 0."
-                        ),
-                }
-            }
         Task::Ocr => ""
         }
     }
 
-    pub fn parse_params(&self, params: &str) -> Result<Task, TaskError> {
+    pub fn parse_params(&self, params: &TaskParams<'_>) -> Result<Task, TaskError> {
+        self.parse_params_inner(
+            params.command(),
+            params.get_params(),
+            params.message.chat.is_private(),
+        )
+    }
+
+    fn parse_params_inner(
+        &self,
+        command: &str,
+        params: &str,
+        show_full_help: bool,
+    ) -> Result<Task, TaskError> {
+        let help_inner;
+        let help = if show_full_help {
+            self.param_help()
+        } else {
+            help_inner = format!(
+                "Send <code>{} help</code> for a full list of parameters for this command.",
+                encode_text(command)
+            );
+            help_inner.as_str()
+        };
+
         let params = Tokenizer::new(params);
-        let help = self.param_help();
+
         match self {
             Task::Amogus { amogus } => {
                 let mut amogus = *amogus;
@@ -347,21 +358,15 @@ impl Task {
                     parse_plain_param_with_parser_optional!(
                         param,
                         new_dimensions,
-                        dimensions_parser_err,
-                        help
+                        dimensions_parser_err
                     );
-                    parse_plain_param_with_parser_optional!(
-                        param,
-                        rot,
-                        |x| {
-                            if let Some((rotation, true)) = rotation_parser(x) {
-                                Ok(rotation)
-                            } else {
-                                Err(())
-                            }
-                        },
-                        help
-                    );
+                    parse_plain_param_with_parser_optional!(param, rot, |x| {
+                        if let Some((rotation, true)) = rotation_parser(x) {
+                            Ok(rotation)
+                        } else {
+                            Err(())
+                        }
+                    });
 
                     if let ResizeType::SeamCarve { .. } = &mut resize_type {
                         parse_keyval_param_with_parser!(
@@ -550,14 +555,14 @@ fn image_resize_parse_test() -> Result<(), TaskError> {
     let y = NonZeroI32::new(256).unwrap();
     let default = Task::default_image_resize(x, y, ResizeType::Fit, ImageFormat::Preserve);
 
-    let result = default.parse_params("")?;
+    let result = default.parse_params_inner("/resize", "", false)?;
     let Task::ImageResize { new_dimensions, .. } = result else {
         unreachable!()
     };
     assert_eq!(new_dimensions.0.get(), 256);
     assert_eq!(new_dimensions.1.get(), 128);
 
-    let result = default.parse_params("150%x-100% 86deg webp")?;
+    let result = default.parse_params_inner("/resize", "150%x-100% 86deg webp", false)?;
     let Task::ImageResize {
         new_dimensions,
         rotation,

@@ -40,12 +40,12 @@ pub type TaskFuture<'a> = Pin<Box<dyn Future<Output = Ret> + Send + 'a>>;
 
 #[allow(dead_code)]
 pub struct TaskParams<'a> {
-    taskman: &'a Taskman,
-    bot: &'a Bot,
-    bot_me: &'a Me,
-    message: &'a Message,
-    message_text: &'a str,
-    command_len: usize,
+    pub taskman: &'a Taskman,
+    pub bot: &'a Bot,
+    pub bot_me: &'a Me,
+    pub message: &'a Message,
+    pub message_text: &'a str,
+    pub command_len: usize,
 }
 
 impl<'a> TaskParams<'a> {
@@ -113,7 +113,7 @@ impl<'a> TaskParams<'a> {
     /// If the input command is `/Hewwo everypony bazinga`,
     /// this will be the substring `/Hewwo`.
     #[inline]
-    fn command(&self) -> &str {
+    pub fn command(&self) -> &str {
         &self.message_text[..self.command_len]
     }
 
@@ -122,7 +122,7 @@ impl<'a> TaskParams<'a> {
     /// If the input command is `/Hewwo everypony bazinga`,
     /// this will be the substring `everypony bazinga`.
     #[inline]
-    fn get_params(&self) -> &str {
+    pub fn get_params(&self) -> &str {
         self.message_text[self.command_len..].trim_start()
     }
 }
@@ -160,7 +160,8 @@ impl Command {
 
     pub fn generate_help() -> String {
         // there's probably a more elegant way to do this but i'm not braining rn lol
-        let mut response = String::from("HELP:\n\n");
+        let mut response = String::from(concat!("HELP:\n\n",
+        "Send <code>/command help</code> for detailed help with all parameters on <code>/command</code>.\n\n"));
         for command in COMMANDS {
             if command.hidden {
                 continue;
@@ -199,6 +200,11 @@ impl Command {
 
         output
     }
+}
+
+/// Returns true if this string is "help" or a variation of.
+pub fn request_for_help(text: &str) -> bool {
+    matches!(text.trim(), "help" | "-help" | "--help" | "-h" | "--h")
 }
 
 ///////////////////////////////////////
@@ -267,6 +273,21 @@ macro_rules! unfail {
 macro_rules! error {
     ($text:literal) => {
         goodbye!(concat!("Error: ", $text));
+    };
+}
+
+/// Check if the input parameters is someone asking for help, and if so,
+/// print it for this type of task.
+macro_rules! print_help {
+    ($stuff: expr, $task: expr) => {
+        if request_for_help($stuff.get_params()) {
+            let mut help = $task.param_help();
+            // Some tasks have empty help.
+            if help.is_empty() {
+                help = "This command has no parameters.";
+            }
+            goodbye_desc!(help);
+        }
     };
 }
 
@@ -357,11 +378,23 @@ pub const AMOGUS: Command = Command {
     hidden: false,
 };
 async fn amogus(tp: TaskParams<'_>) -> Ret {
-    let task = unfail!(Task::default_amogus().parse_params(tp.get_params()));
+    let task = Task::default_amogus();
+    print_help!(tp, task);
+    let task = unfail!(task.parse_params(&tp));
+
     Ok(Ok(task))
 }
 
 async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
+    // Image and video resize should have the same help.
+    let temp_task = Task::default_image_resize(
+        NonZeroI32::new(1).unwrap(),
+        NonZeroI32::new(1).unwrap(),
+        resize_type,
+        ImageFormat::Preserve,
+    );
+    print_help!(tp, temp_task);
+
     let media = tp.message.get_media_info();
     let media = match media {
         Some(media) => {
@@ -388,7 +421,7 @@ async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
     let task = if media.is_image() {
         unfail!(
             Task::default_image_resize(width, height, resize_type, ImageFormat::Preserve)
-                .parse_params(tp.get_params())
+                .parse_params(&tp)
         )
     } else {
         unfail!(Task::default_video_resize(
@@ -397,7 +430,7 @@ async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
             resize_type,
             VideoTypePreference::Preserve
         )
-        .parse_params(tp.get_params()))
+        .parse_params(&tp))
     };
 
     Ok(Ok(task))
@@ -410,6 +443,8 @@ pub const TO_STICKER: Command = Command {
     hidden: false,
 };
 async fn to_sticker(tp: TaskParams<'_>) -> Ret {
+    let task = Task::default_to_sticker();
+    print_help!(tp, task);
     let photo = tp.message.get_media_info();
     let _photo = match photo {
         Some(photo) => {
@@ -427,7 +462,7 @@ async fn to_sticker(tp: TaskParams<'_>) -> Ret {
         )),
     };
 
-    Ok(Ok(Task::default_to_sticker()))
+    Ok(Ok(task))
 }
 
 pub const TO_CUSTOM_EMOJI: Command = Command {
@@ -437,6 +472,8 @@ pub const TO_CUSTOM_EMOJI: Command = Command {
     hidden: false,
 };
 async fn to_custom_emoji(tp: TaskParams<'_>) -> Ret {
+    let task = Task::default_to_custom_emoji();
+    print_help!(tp, task);
     let photo = tp.message.get_media_info();
     let _photo = match photo {
         Some(photo) => {
@@ -454,7 +491,7 @@ async fn to_custom_emoji(tp: TaskParams<'_>) -> Ret {
         )),
     };
 
-    Ok(Ok(Task::default_to_custom_emoji()))
+    Ok(Ok(task))
 }
 
 pub const RESIZE: Command = Command {
@@ -505,6 +542,8 @@ pub const OCR: Command = Command {
     hidden: false,
 };
 async fn ocr(tp: TaskParams<'_>) -> Ret {
+    let task = Task::default_ocr();
+    print_help!(tp, task);
     let photo = tp.message.get_media_info();
     let _photo = match photo {
         Some(photo) => {
@@ -522,10 +561,21 @@ async fn ocr(tp: TaskParams<'_>) -> Ret {
         )),
     };
 
-    Ok(Ok(Task::default_ocr()))
+    Ok(Ok(task))
 }
 
 async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
+    let temp_task = Task::default_video_resize(
+        NonZeroI32::new(1).unwrap(),
+        NonZeroI32::new(1).unwrap(),
+        ResizeType::ToSticker,
+        if to_gif {
+            VideoTypePreference::Gif
+        } else {
+            VideoTypePreference::Video
+        },
+    );
+    print_help!(tp, temp_task);
     let video = tp.message.get_media_info();
     let video = match video {
         Some(video) => {
