@@ -111,7 +111,7 @@ impl Task {
                             );
                         }
                         if media.file.size > 20 * 1000 * 1000 {
-                            goodbye!("Error: media is too large.");
+                            goodbye!("Error: media is too large. Telegram bots can only download files 20MB or less in size.");
                         }
                         media
                     }
@@ -264,7 +264,7 @@ impl Task {
                             );
                         }
                         if photo.file.size > 20 * 1000 * 1000 {
-                            goodbye!("Error: image is too large.");
+                            goodbye!("Error: image is too large. Telegram bots can only download files 20MB or less in size.");
                         }
                         photo
                     }
