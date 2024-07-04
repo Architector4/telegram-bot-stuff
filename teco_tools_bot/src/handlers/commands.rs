@@ -1,6 +1,6 @@
 use std::{future::Future, io::Write, num::NonZeroI32, pin::Pin};
 
-use arch_bot_commons::useful_methods::*;
+use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use html_escape::encode_text;
 
 use teloxide::{
@@ -601,7 +601,7 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
     // video files should preferably be H.264 MP4.
     if !video.is_sticker {
         let mut buf = Vec::new();
-        tp.bot.download_file_to_vec(video.file, &mut buf).await?;
+        teloxide_retry!(tp.bot.download_file_to_vec(video.file, &mut buf).await)?;
         let should_send_directly = if to_gif {
             // If we need to send it as a gif, we need to ensure the input has
             // no sound. If it does, then Telegram will make it a video instead.
@@ -626,19 +626,18 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
         };
 
         if should_send_directly {
+            let file = InputFile::memory(buf);
             let send_direct_result = if to_gif {
+                let file = file.file_name("amogus.mp4");
                 // Sending as an "animation" requires that the file has a filename, else
                 // it somehow ends up being a file document instead.
-                tp.bot
-                    .send_animation(
-                        tp.message.chat.id,
-                        InputFile::memory(buf).file_name("amogus.mp4"),
-                    )
-                    .await
+                teloxide_retry!(
+                    tp.bot
+                        .send_animation(tp.message.chat.id, file.clone(),)
+                        .await
+                )
             } else {
-                tp.bot
-                    .send_video(tp.message.chat.id, InputFile::memory(buf))
-                    .await
+                teloxide_retry!(tp.bot.send_video(tp.message.chat.id, file.clone()).await)
             };
 
             match send_direct_result {
