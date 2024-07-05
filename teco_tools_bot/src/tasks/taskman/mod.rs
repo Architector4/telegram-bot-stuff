@@ -5,6 +5,7 @@ use std::{
 
 pub mod database;
 use arch_bot_commons::{teloxide_retry, useful_methods::BotArchSendMsg};
+use chrono::{DateTime, Utc};
 use crossbeam_channel::TryRecvError;
 use database::Database;
 use html_escape::encode_text;
@@ -14,7 +15,10 @@ use teloxide::{
     types::{Message, UserId},
     ApiError, Bot, RequestError,
 };
-use tokio::{sync::Notify, time::sleep};
+use tokio::{
+    sync::Notify,
+    time::{sleep, timeout},
+};
 use tokio_stream::StreamExt;
 
 use super::Task;
@@ -56,16 +60,24 @@ impl Taskman {
         taskman
     }
 
+    /// Returns the new task's position in queue, and if it's delayed.
     pub async fn add_task(
         &self,
         user: Option<UserId>,
         task: Task,
         request_message: &Message,
         queue_response_message: &Message,
+        delay_processing_until: Option<DateTime<Utc>>,
     ) -> Result<u32, database::Error> {
         let response = self
             .db
-            .add_task(user, task, request_message, queue_response_message)
+            .add_task(
+                user,
+                task,
+                request_message,
+                queue_response_message,
+                delay_processing_until,
+            )
             .await;
 
         self.notify.notify_waiters();
@@ -97,8 +109,20 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
         let notified = notify.notified();
 
         let Some(task_data) = taskman.db.grab_task(premium).await.expect("Database died!") else {
+            // No tasks to immediately grab. Check if there's any delayed tasks to wait for,
+            // then wait for a notify or such a task.
+            let sleep_for = taskman
+                .db
+                .time_until_earliest_delayed_task(premium)
+                .await
+                .expect("Database died!");
             drop(taskman);
-            notified.await;
+
+            if let Some(sleep_for) = sleep_for {
+                let _ = timeout(sleep_for, notified).await;
+            } else {
+                notified.await;
+            }
             continue;
         };
 
@@ -106,7 +130,7 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
         macro_rules! produce_queue_message {
             ($task: expr, $taskman:expr, $progress: expr) => {
                 // Inform the user that we're doing the task.
-                let response = $task.produce_queue_message(0, $progress);
+                let response = $task.produce_queue_message(Some(0), $progress);
                 let _ = $taskman
                     .bot
                     .edit_message_text(
@@ -259,22 +283,34 @@ pub async fn queue_counter_spinjob(taskman: Weak<Taskman>) {
                 continue;
             };
 
-            let Some(queue_size) = taskman
-                .db
-                .get_queue_size_for_task(taskid)
-                .await
-                .expect("Database died!")
-            else {
-                continue;
+            // If the task is delayed...
+            let queue_size_if_not_delayed = if taskdata
+                .delay_processing_until
+                .map(|x| x > Utc::now())
+                .unwrap_or(false)
+            {
+                None
+            } else {
+                let Some(queue_size) = taskman
+                    .db
+                    .get_queue_size_for_task(taskid)
+                    .await
+                    .expect("Database died!")
+                else {
+                    continue;
+                };
+
+                if queue_size == 0 {
+                    // It's being worked on. Don't touch it.
+                    continue;
+                }
+
+                Some(queue_size)
             };
 
-            if queue_size == 0 {
-                // It's being worked on. Don't touch it.
-                continue;
-            }
-
-            let response = taskdata.task.produce_queue_message(queue_size, None);
-            //let now = sqlx::types::chrono::Utc::now().to_string();
+            let response = taskdata
+                .task
+                .produce_queue_message(queue_size_if_not_delayed, None);
 
             if taskman
                 .bot

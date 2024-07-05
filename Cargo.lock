@@ -2275,6 +2275,7 @@ name = "teco_tools_bot"
 version = "0.1.0"
 dependencies = [
  "arch_bot_commons",
+ "chrono",
  "crossbeam-channel",
  "html-escape",
  "log",

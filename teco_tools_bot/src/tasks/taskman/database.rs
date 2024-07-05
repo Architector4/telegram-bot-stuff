@@ -1,5 +1,6 @@
 use std::{pin::Pin, str::FromStr, sync::atomic::AtomicBool};
 
+use chrono::{DateTime, Utc};
 use sqlx::sqlite::SqliteRow;
 pub use sqlx::Error;
 use sqlx::{
@@ -30,10 +31,10 @@ pub struct TaskDatabaseInfo {
     pub edit_response_message_id: Option<MessageId>,
     pub in_progress: u8,
     pub premium: bool,
+    pub delay_processing_until: Option<DateTime<Utc>>,
 }
 
 impl TaskDatabaseInfo {
-    #[allow(clippy::needless_pass_by_value)]
     fn from_sqlite_row(row: SqliteRow) -> TaskDatabaseInfo {
         TaskDatabaseInfo {
             taskid: row.get(0),
@@ -46,6 +47,7 @@ impl TaskDatabaseInfo {
             edit_response_message_id: row.get::<Option<i32>, _>(7).map(MessageId),
             in_progress: row.get(8),
             premium: row.get(9),
+            delay_processing_until: row.get(10),
         }
     }
 }
@@ -90,6 +92,7 @@ impl Database {
         // edit_response_message_id (i32 (because telegram bot api is just like that), may be NULL),
         // in_progress (0 for no, 1 for yes)
         // premium (0 for no, 1 for yes),
+        // delay_processing_until (date+time in UTC in RFC3339 format)
         pool.execute(sqlx::query(
             "CREATE TABLE IF NOT EXISTS tasks (
                 taskid INTEGER PRIMARY KEY NOT NULL,
@@ -103,7 +106,8 @@ impl Database {
                 edit_response_chat_id INTEGER NULL,
                 edit_response_message_id INTEGER NULL,
                 in_progress INTEGER NOT NULL,
-                premium INTEGER NOT NULL
+                premium INTEGER NOT NULL,
+                delay_processing_until TEXT NULL
             ) STRICT;",
         ))
         .await?;
@@ -132,6 +136,15 @@ impl Database {
         ))
         .execute(&pool)
         .await;
+
+        // Transparent database migration lololol
+        // Will fail harmlessly if the column already exists.
+        let _ = pool
+            .execute(sqlx::query(
+                "ALTER TABLE tasks
+                ADD COLUMN delay_processing_until TEXT NULL;",
+            ))
+            .await;
 
         // We're just starting, so nothing could be in progress.
         pool.execute(sqlx::query("UPDATE tasks SET in_progress=0;"))
@@ -166,6 +179,7 @@ impl Database {
         task: Task,
         request_message: &Message,
         queue_message: &Message,
+        delay_processing_until: Option<DateTime<Utc>>,
     ) -> Result<u32, Error> {
         let task_ser = serde_json::to_string(&task).unwrap();
 
@@ -211,8 +225,9 @@ impl Database {
                 queue_message_chat_id,
                 queue_message_id,
                 in_progress,
-                premium
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?);",
+                premium,
+                delay_processing_until
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?);",
         )
         .bind(user.map(|x| x.0 as i64))
         .bind(task_ser)
@@ -222,6 +237,7 @@ impl Database {
         .bind(queue_message_chat_id)
         .bind(queue_message_id)
         .bind(premium)
+        .bind(delay_processing_until)
         .execute(&self.pool)
         .await?;
 
@@ -291,7 +307,8 @@ impl Database {
                 edit_response_chat_id,
                 edit_response_message_id,
                 in_progress,
-                premium
+                premium,
+                delay_processing_until
             FROM tasks WHERE taskid=?",
         )
         .bind(taskid)
@@ -317,7 +334,8 @@ impl Database {
                 edit_response_chat_id,
                 edit_response_message_id,
                 in_progress,
-                premium
+                premium,
+                delay_processing_until
             FROM tasks WHERE request_message_chat_id=? AND request_message_id=?",
         )
         .bind(request_message_chat_id)
@@ -386,11 +404,18 @@ impl Database {
         // Will be dropped by the end of this function
         let _mutex = self.grabbing_task_mutex.lock().await;
 
+        let now = Utc::now();
         // Select a task
         let Some(taskid): Option<i64> = sqlx::query(
-            "SELECT taskid FROM tasks WHERE in_progress=0 AND premium=? ORDER BY taskid",
+            "SELECT taskid FROM tasks
+            WHERE
+                in_progress=0 AND
+                premium=? AND
+                COALESCE(delay_processing_until <= ?, 1)
+            ORDER BY taskid",
         )
         .bind(premium)
+        .bind(now)
         .map(|row: SqliteRow| row.get(0))
         .fetch_optional(&self.pool)
         .await?
@@ -428,5 +453,32 @@ impl Database {
         }
 
         Ok(())
+    }
+
+    /// Returns how long is left until at least one delayed task's delay expires.
+    ///
+    /// Returns `None` if there are no delayed tasks,
+    /// or [`Duration::ZERO`] if any delayed task's delay has already expired.
+    pub async fn time_until_earliest_delayed_task(
+        &self,
+        premium: bool,
+    ) -> Result<Option<std::time::Duration>, Error> {
+        let Some(Some(earliest_delayed_task_time)) =
+            sqlx::query("SELECT MIN(delay_processing_until) FROM tasks WHERE premium=?;")
+                .bind(premium)
+                .map(|row: SqliteRow| row.get::<Option<DateTime<Utc>>, _>(0))
+                .fetch_optional(&self.pool)
+                .await?
+        else {
+            return Ok(None);
+        };
+
+        let now = Utc::now();
+
+        let time_until = earliest_delayed_task_time - now;
+
+        Ok(Some(
+            time_until.to_std().unwrap_or(std::time::Duration::ZERO),
+        ))
     }
 }

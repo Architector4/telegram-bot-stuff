@@ -292,17 +292,36 @@ impl Task {
         }
     }
 
-    pub fn produce_queue_message(&self, queue_size: u32, progress_info: Option<&str>) -> String {
-        let mut response = if queue_size == 0 {
-            if let Some(progress) = progress_info {
-                format!("Working on your task now... {}\n", progress)
-            } else {
-                String::from("Working on your task now...\n")
+    /// Specifying `queue_size` as `None` produces a message about
+    /// the task being delayed instead.
+    pub fn produce_queue_message(
+        &self,
+        queue_size: Option<u32>,
+        progress_info: Option<&str>,
+    ) -> String {
+        //let mut response = if queue_size == 0 {
+        //    if let Some(progress) = progress_info {
+        //        format!("Working on your task now... {}\n", progress)
+        //    } else {
+        //        String::from("Working on your task now...\n")
+        //    }
+        //} else {
+        //    format!("Task accepted. Position in queue: {}\n", queue_size)
+        //};
+
+        let mut response = match queue_size {
+            Some(0) => {
+                if let Some(progress) = progress_info {
+                    format!("Working on your task now... {}\n", progress)
+                } else {
+                    String::from("Working on your task now...\n")
+                }
             }
-        } else {
-            format!("Task accepted. Position in queue: {}\n", queue_size)
+            Some(s) => format!("Task accepted. Position in queue: {}\n", s),
+            None => "Task accepted. Waiting for this chat's slow mode...\n".to_string(),
         };
-        self.write_params(&mut response, true, queue_size != 0)
+
+        self.write_params(&mut response, true, queue_size != Some(0))
             .unwrap();
         response
     }

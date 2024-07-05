@@ -1,5 +1,6 @@
 pub mod commands;
 use arch_bot_commons::useful_methods::*;
+use chrono::Utc;
 
 use std::sync::Arc;
 
@@ -89,13 +90,36 @@ pub async fn handle_new_message(
         return Ok(());
     }
 
+    // Check if this chat has a slow mode.
+    // If we're here, we've JUST sent the queue response message,
+    // This means that the next message we can send will only be after
+    // the slow mode delay.
+
+    // Get full chat info, if we can and if it isn't a private chat.
+    // (private chats don't have slow mode lol)
+    let chat_real = if message.chat.is_private() {
+        None
+    } else {
+        bot.get_chat(message.chat.id).await.ok()
+    };
+
+    // If we got it, get its slow mode delay.
+    let slow_mode_delay = chat_real.and_then(|x| x.slow_mode_delay());
+    // Convert it into a duration, and add 3 extra seconds.
+    // The additional seconds should end up with the bot prioritizing new task request messages
+    // over completing tasks.
+    let slow_mode_delay = slow_mode_delay.map(|x| chrono::Duration::seconds(x.saturating_add(3).into()));
+    // Convert that into a datetime when that duration expires.
+    let delay_processing_until = slow_mode_delay.map(|x| chrono::Utc::now() + x);
+
     let queue_size = taskman
         .db
         .get_queue_size(premium)
         .await
         .expect("Database died!");
 
-    let response = task.produce_queue_message(queue_size, None);
+    let response =
+        task.produce_queue_message(delay_processing_until.is_none().then_some(queue_size), None);
 
     let queue_response_message = bot
         .send_message(message.chat.id, response)
@@ -117,7 +141,13 @@ pub async fn handle_new_message(
     }
 
     taskman
-        .add_task(sender_id, task, &message, &queue_response_message)
+        .add_task(
+            sender_id,
+            task,
+            &message,
+            &queue_response_message,
+            delay_processing_until,
+        )
         .await
         .expect("Database died!");
 
@@ -240,7 +270,12 @@ pub async fn handle_edited_message(
         .expect("Database died!")
         .unwrap();
 
-    let response = task.produce_queue_message(queue_size, None);
+    let is_delayed = taskdata
+        .delay_processing_until
+        .map(|x| x > Utc::now())
+        .unwrap_or(false);
+
+    let response = task.produce_queue_message(is_delayed.then_some(queue_size), None);
 
     let _ = bot
         .edit_message_text(
