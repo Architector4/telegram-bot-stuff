@@ -4,6 +4,7 @@ use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use html_escape::encode_text;
 
 use teloxide::{
+    payloads::{SendAnimationSetters, SendVideoSetters},
     requests::Requester,
     types::{BotCommand, InputFile, Me, Message, UserId},
     Bot, RequestError,
@@ -634,10 +635,16 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
                 teloxide_retry!(
                     tp.bot
                         .send_animation(tp.message.chat.id, file.clone(),)
+                        .reply_to_message_id(tp.message.id)
                         .await
                 )
             } else {
-                teloxide_retry!(tp.bot.send_video(tp.message.chat.id, file.clone()).await)
+                teloxide_retry!(
+                    tp.bot
+                        .send_video(tp.message.chat.id, file.clone())
+                        .reply_to_message_id(tp.message.id)
+                        .await
+                )
             };
 
             match send_direct_result {
