@@ -1,5 +1,5 @@
 pub mod commands;
-use arch_bot_commons::useful_methods::*;
+use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use chrono::Utc;
 
 use std::sync::Arc;
@@ -108,7 +108,8 @@ pub async fn handle_new_message(
     // Convert it into a duration, and add 3 extra seconds.
     // The additional seconds should end up with the bot prioritizing new task request messages
     // over completing tasks.
-    let slow_mode_delay = slow_mode_delay.map(|x| chrono::Duration::seconds(x.saturating_add(3).into()));
+    let slow_mode_delay =
+        slow_mode_delay.map(|x| chrono::Duration::seconds(x.saturating_add(3).into()));
     // Convert that into a datetime when that duration expires.
     let delay_processing_until = slow_mode_delay.map(|x| chrono::Utc::now() + x);
 
@@ -121,11 +122,12 @@ pub async fn handle_new_message(
     let response =
         task.produce_queue_message(delay_processing_until.is_none().then_some(queue_size), None);
 
-    let queue_response_message = bot
-        .send_message(message.chat.id, response)
-        .reply_to_message_id(message.id)
-        .parse_mode(teloxide::types::ParseMode::Html)
-        .await?;
+    let queue_response_message = teloxide_retry!(
+        bot.send_message(message.chat.id, &response)
+            .reply_to_message_id(message.id)
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .await
+    )?;
 
     if message.media_group_id().is_some() {
         bot.send_message(
