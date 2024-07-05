@@ -577,6 +577,9 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
         },
     );
     print_help!(tp, temp_task);
+
+    let _ = tp.bot.typing(tp.message.chat.id).await;
+
     let video = tp.message.get_media_info();
     let video = match video {
         Some(video) => {
