@@ -73,6 +73,10 @@ pub fn check_spam_telegram_html(html: &str) -> bool {
         return true;
     }
 
+    if html.contains("<span dir=\"auto\">X Leaks</span>") {
+        return true;
+    }
+
     // Can't see anything of note.
     false
 }
