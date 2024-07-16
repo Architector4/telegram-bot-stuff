@@ -29,7 +29,7 @@ pub struct TaskDatabaseInfo {
     pub queue_message_id: MessageId,
     pub edit_response_chat_id: Option<ChatId>,
     pub edit_response_message_id: Option<MessageId>,
-    pub in_progress: u8,
+    pub in_progress: bool,
     pub premium: bool,
     pub delay_processing_until: Option<DateTime<Utc>>,
 }

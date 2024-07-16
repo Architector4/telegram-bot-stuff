@@ -311,7 +311,7 @@ pub async fn queue_counter_spinjob(taskman: Weak<Taskman>) {
                     continue;
                 };
 
-                if queue_size == 0 {
+                if taskdata.in_progress {
                     // It's being worked on. Don't touch it.
                     continue;
                 }
