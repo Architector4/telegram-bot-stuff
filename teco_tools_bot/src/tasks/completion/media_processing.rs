@@ -278,9 +278,10 @@ pub fn count_video_frames_and_framerate_and_audio(
     let counter = Command::new("ffprobe")
         .args([
             OsStr::new("-loglevel"),
-            OsStr::new("quiet"),
+            OsStr::new("error"),
+            OsStr::new("-count_frames"),
             OsStr::new("-show_entries"),
-            OsStr::new("stream=nb_frames,avg_frame_rate,codec_type"),
+            OsStr::new("stream=nb_read_frames,avg_frame_rate,codec_type"),
             OsStr::new("-of"),
             OsStr::new("default=noprint_wrappers=1"),
             path.as_ref(),
@@ -296,21 +297,20 @@ pub fn count_video_frames_and_framerate_and_audio(
     // output may be in a format like
     // codec_type=video
     // avg_frame_rate=30/1
-    // nb_frames=69
+    // nb_read_frames=69
     // Or
     // codec_type=audio
     // avg_frame_rate=0/0
     // codec_type=video
-    // nb_frames=80
+    // nb_read_frames=80
     // avg_frame_rate=3200000/53387
-    // nb_frames=N/A
 
     let mut count = 0;
     let mut framerate: f64 = 30.0;
     let mut observing_video_codecs = false;
     let mut has_audio = false;
 
-    for line in output.split('\n') {
+    for line in output.lines() {
         if line == "codec_type=audio" {
             observing_video_codecs = false;
             has_audio = true;
@@ -323,7 +323,7 @@ pub fn count_video_frames_and_framerate_and_audio(
         if !observing_video_codecs {
             continue;
         }
-        if let Some(line) = line.strip_prefix("nb_frames=") {
+        if let Some(line) = line.strip_prefix("nb_read_frames=") {
             if line == "N/A" {
                 continue;
             }

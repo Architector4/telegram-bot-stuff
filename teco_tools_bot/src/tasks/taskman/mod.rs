@@ -111,7 +111,11 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
         let mut task_data = taskman.db.grab_task(premium).await.expect("Database died!");
         if task_data.is_none() {
             // No task. Try to grab a task from the other queue then.
-            task_data = taskman.db.grab_task(!premium).await.expect("Database died!");
+            task_data = taskman
+                .db
+                .grab_task(!premium)
+                .await
+                .expect("Database died!");
         }
 
         let Some(task_data) = task_data else {
