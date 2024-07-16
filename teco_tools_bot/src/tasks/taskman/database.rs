@@ -189,31 +189,13 @@ impl Database {
         let queue_message_chat_id = queue_message.chat.id.0;
         let queue_message_id = queue_message.id.0;
 
-        let mut premium = if let Some(user) = request_message.from() {
+        let premium = if let Some(user) = request_message.from() {
             self.is_user_premium(user.id).await?
         } else {
             false
         };
 
-        let queue_size_non_premium = self.get_queue_size_raw(false).await?;
-        let queue_size_premium = self.get_queue_size_raw(true).await?;
-
-        let queue_size = if premium {
-            if queue_size_premium <= queue_size_non_premium {
-                queue_size_premium
-            } else {
-                // Non-premium queue is shorter. Downgrade.
-                premium = false;
-                queue_size_non_premium
-            }
-        } else {
-            // User is not premium. Still, if premium queue is empty, use it.
-            if queue_size_premium < 1 {
-                queue_size_premium
-            } else {
-                queue_size_non_premium
-            }
-        };
+        let queue_size = self.get_queue_size_raw(premium).await?;
 
         sqlx::query(
             "INSERT INTO tasks (

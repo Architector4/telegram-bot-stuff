@@ -108,7 +108,13 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
         let notify = taskman.notify.clone();
         let notified = notify.notified();
 
-        let Some(task_data) = taskman.db.grab_task(premium).await.expect("Database died!") else {
+        let mut task_data = taskman.db.grab_task(premium).await.expect("Database died!");
+        if task_data.is_none() {
+            // No task. Try to grab a task from the other queue then.
+            task_data = taskman.db.grab_task(!premium).await.expect("Database died!");
+        }
+
+        let Some(task_data) = task_data else {
             // No tasks to immediately grab. Check if there's any delayed tasks to wait for,
             // then wait for a notify or such a task.
             let sleep_for = taskman
