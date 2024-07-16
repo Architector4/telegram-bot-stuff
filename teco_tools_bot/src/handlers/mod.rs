@@ -125,6 +125,7 @@ pub async fn handle_new_message(
     let queue_response_message = teloxide_retry!(
         bot.send_message(message.chat.id, &response)
             .reply_to_message_id(message.id)
+            .disable_web_page_preview(true)
             .parse_mode(teloxide::types::ParseMode::Html)
             .await
     )?;
@@ -285,6 +286,7 @@ pub async fn handle_edited_message(
             taskdata.queue_message_id,
             response,
         )
+        .disable_web_page_preview(true)
         .parse_mode(teloxide::types::ParseMode::Html)
         .await;
 

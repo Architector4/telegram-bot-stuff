@@ -323,6 +323,8 @@ impl Task {
 
         self.write_params(&mut response, true, queue_size != Some(0))
             .unwrap();
+
+        response += "\n<a href=\"https://boosty.to/architector_4\">(Consider supporting? 👉👈)</a>";
         response
     }
 }

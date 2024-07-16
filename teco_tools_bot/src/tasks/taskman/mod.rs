@@ -148,6 +148,7 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
                         task_data.queue_message_id,
                         response,
                     )
+                    .disable_web_page_preview(true)
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .await;
             };
@@ -329,6 +330,7 @@ pub async fn queue_counter_spinjob(taskman: Weak<Taskman>) {
                     taskdata.queue_message_id,
                     response,
                 )
+                .disable_web_page_preview(true)
                 .parse_mode(teloxide::types::ParseMode::Html)
                 .await
                 .is_err()
