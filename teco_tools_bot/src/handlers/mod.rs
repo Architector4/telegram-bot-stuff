@@ -43,6 +43,7 @@ pub async fn handle_new_message(
         Err(e) => {
             if !e.is_empty() {
                 bot.send_message(message.chat.id, e.cancel_to_error().to_string())
+                    .disable_web_page_preview(true)
                     .reply_to_message_id(message.id)
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .await?;

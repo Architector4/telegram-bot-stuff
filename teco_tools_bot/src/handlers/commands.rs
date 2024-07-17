@@ -308,7 +308,10 @@ This is a multitool tool telegram bot designed to do things because i wanted to 
 
 For a full list of commands, send /help
 
-For complaints or questions poke @Architector_4";
+For complaints or questions poke @Architector_4
+
+<a href=\"https://boosty.to/architector_4\">(Consider supporting? 👉👈)</a>
+";
 
     goodbye_desc!(response);
 }
