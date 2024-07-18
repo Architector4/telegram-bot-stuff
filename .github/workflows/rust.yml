@@ -19,6 +19,14 @@ jobs:
     - uses: actions/checkout@v3
     - name: Install ImageMagick
       run: |
+          git clone https://github.com/ImageMagick/ImageMagick.git
+          cd ImageMagick*
+          # Jump to latest stable ImageMagick 7 version.
+          # This might break someday, but then someone can just fix it :D
+          git checkout $(git tag --sort=creatordate | grep "^7" | tail -n1)
+          ./configure --with-magick-plus-plus=no --with-perl=no 
+          make -j
+          sudo make install
           sudo apt update && sudo apt install -y libmagickwand-dev
     - uses: Swatinem/rust-cache@v2
     - name: Build
