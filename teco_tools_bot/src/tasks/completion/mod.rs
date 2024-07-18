@@ -9,7 +9,7 @@ use teloxide::{
     Bot, RequestError,
 };
 
-use crate::tasks::VideoTypePreference;
+use crate::tasks::{ResizeCurve, VideoTypePreference};
 
 use super::{taskman::database::TaskDatabaseInfo, ImageFormat, Task};
 
@@ -100,6 +100,7 @@ impl Task {
                 resize_type,
                 vibrato_hz: _,
                 vibrato_depth: _,
+                resize_curve: _,
                 type_pref: _,
             } => {
                 let media = data.message.get_media_info();
@@ -142,6 +143,8 @@ impl Task {
                 bot.download_file_to_vec(media.file, &mut media_data)
                     .await?;
 
+                let input_dimensions = (media.width, media.height);
+
                 let dimensions = (
                     new_dimensions.0.get() as isize,
                     new_dimensions.1.get() as isize,
@@ -149,15 +152,16 @@ impl Task {
                 let resize_type = *resize_type;
                 let rotation = *rotation;
 
-                let (vibrato_hz, vibrato_depth) = if let Task::VideoResize {
+                let (vibrato_hz, vibrato_depth, resize_curve) = if let Task::VideoResize {
                     vibrato_hz,
                     vibrato_depth,
+                    resize_curve,
                     ..
                 } = self
                 {
-                    (*vibrato_hz, *vibrato_depth)
+                    (*vibrato_hz, *vibrato_depth, *resize_curve)
                 } else {
-                    (7.0, 0.0)
+                    (7.0, 0.0, ResizeCurve::default())
                 };
 
                 let should_be_gif = if let Task::VideoResize { type_pref, .. } = self {
@@ -182,6 +186,8 @@ impl Task {
                             should_be_gif,
                             vibrato_hz,
                             vibrato_depth,
+                            input_dimensions,
+                            resize_curve,
                         )
                     } else {
                         media_processing::resize_image(
@@ -191,6 +197,9 @@ impl Task {
                             rotation,
                             resize_type,
                             format,
+                            dimensions.0.unsigned_abs(),
+                            dimensions.1.unsigned_abs(),
+                            false,
                         )
                         .map_err(|e| e.to_string())
                     }

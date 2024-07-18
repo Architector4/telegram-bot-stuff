@@ -14,7 +14,7 @@ use magick_rust::{MagickError, MagickWand, PixelWand};
 use regex::Regex;
 use tempfile::NamedTempFile;
 
-use crate::tasks::{ImageFormat, ResizeType};
+use crate::tasks::{ImageFormat, ResizeCurve, ResizeType};
 
 /// Will error if [`ImageFormat::Preserve`] is sent.
 pub fn resize_image(
@@ -24,6 +24,9 @@ pub fn resize_image(
     rotation: f64,
     mut resize_type: ResizeType,
     format: ImageFormat,
+    output_width: usize,
+    output_height: usize,
+    crop_rotation: bool,
 ) -> Result<Vec<u8>, MagickError> {
     if format == ImageFormat::Preserve {
         // yeah this isn't a MagickError, but we'd get one in the last line
@@ -38,9 +41,12 @@ pub fn resize_image(
     // Record and sanitize signs...
     let width_is_negative = width.is_negative();
     let height_is_negative = height.is_negative();
+    // Avoid resizing to zero.
+    let width = width.unsigned_abs().max(1);
+    let height = height.unsigned_abs().max(1);
 
-    let width = width.unsigned_abs();
-    let height = height.unsigned_abs();
+    let iwidth = wand.get_image_width();
+    let iheight = wand.get_image_height();
 
     // The second and third arguments are "delta_x" and "rigidity"
     // This library doesn't document them, but another bindings
@@ -54,9 +60,6 @@ pub fn resize_image(
     // Also delta_x less than 0 segfaults. Other code prevents that from getting
     // here, but might as well lol
     // And both values in extremely high amounts segfault too, it seems lol
-
-    let iwidth = wand.get_image_width();
-    let iheight = wand.get_image_height();
 
     if (iwidth <= 1 || iheight <= 1) && resize_type.is_seam_carve() {
         // ImageMagick is likely to abort/segfault in this situation.
@@ -148,6 +151,13 @@ pub fn resize_image(
         wand.flip_image()?;
     }
 
+    // Apply output size.
+    wand.resize_image(
+        output_width,
+        output_height,
+        magick_rust::bindings::FilterType_LagrangeFilter,
+    );
+
     if rotation.signum() % 360.0 != 0.0 {
         if format.supports_alpha_transparency()
             && rotation.signum() % 90.0 != 0.0
@@ -161,6 +171,11 @@ pub fn resize_image(
         let mut pixelwand = PixelWand::new();
         pixelwand.set_alpha(0.0);
         wand.rotate_image(&pixelwand, rotation)?;
+
+        if crop_rotation {
+            // If we want cropping after rotation, do the cropping.
+            wand.crop_image(output_width, output_height, 0, 0)?;
+        }
     }
 
     wand.write_image_blob(format.as_str())
@@ -363,6 +378,8 @@ pub fn resize_video(
     strip_audio: bool,
     vibrato_hz: f64,
     vibrato_depth: f64,
+    input_dimensions: (u32, u32),
+    resize_curve: ResizeCurve,
 ) -> Result<Vec<u8>, String> {
     // We will be encoding into h264, which needs width and height divisible by 2.
     width += width % 2;
@@ -414,10 +431,39 @@ pub fn resize_video(
             .par_bridge()
             .map(|(count, frame)| match frame {
                 Ok(frame) => {
+                    let curved_width = resize_curve.apply_resize_for(
+                        count,
+                        input_frame_count,
+                        input_dimensions.0 as f64,
+                        width as f64,
+                    );
+                    let curved_height = resize_curve.apply_resize_for(
+                        count,
+                        input_frame_count,
+                        input_dimensions.1 as f64,
+                        height as f64,
+                    );
+                    let curved_rotation =
+                        resize_curve.apply_resize_for(count, input_frame_count, 0.0, rotation);
+
+                    // If the resize curves around, we want to scale every frame
+                    // back to original size, so that the video would be
+                    // of constant actual size that will preserve the biggest frame.
+                    let is_curved = resize_curve != ResizeCurve::Constant;
+                    let output_dimensions = if is_curved {
+                        (
+                            (input_dimensions.0 as usize).max(width.unsigned_abs()),
+                            (input_dimensions.1 as usize).max(height.unsigned_abs()),
+                        )
+                    } else {
+                        (width.unsigned_abs(), height.unsigned_abs())
+                    };
+
                     // Check if this operation changes the image at all.
                     // If the dimension and rotation are the same, it doesn't.
                     let input_dimensions = get_bmp_width_height(&frame);
-                    let resize_result = if input_dimensions == Some((width, height))
+                    let resize_result = if input_dimensions
+                        == Some((curved_width as isize, curved_height as isize))
                         && (rotation == 0.0 || rotation == -0.0)
                     {
                         // It doesn't. Just return the same buffer directly.
@@ -425,11 +471,14 @@ pub fn resize_video(
                     } else {
                         resize_image(
                             &frame,
-                            width,
-                            height,
-                            rotation,
+                            curved_width as isize,
+                            curved_height as isize,
+                            curved_rotation,
                             resize_type,
                             ImageFormat::Bmp,
+                            output_dimensions.0,
+                            output_dimensions.1,
+                            is_curved, // Prevent bounds bouncing.
                         )
                     };
 

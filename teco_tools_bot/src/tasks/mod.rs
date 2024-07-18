@@ -2,7 +2,7 @@ pub mod completion;
 pub mod parsing;
 pub mod taskman;
 
-use std::{fmt::Display, num::NonZeroI32, str::FromStr};
+use std::{f64::consts::TAU, fmt::Display, num::NonZeroI32, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use teloxide::{
@@ -13,6 +13,75 @@ use teloxide::{
 use crate::handlers::commands::{TaskFuture, TaskParams};
 
 use taskman::Taskman;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+pub enum ResizeCurve {
+    #[default]
+    Constant,
+    Rising,
+    Falling,
+    Loop,
+    LoopB,
+}
+
+impl ResizeCurve {
+    pub fn apply_resize_for(
+        self,
+        current_frame: usize,
+        total_frames: u64,
+        start: f64,
+        end: f64,
+    ) -> f64 {
+        let progress = current_frame as f64 / total_frames as f64;
+
+        let factor = match self {
+            Self::Constant => 1.0,
+            Self::Rising => progress,
+            Self::Falling => 1.0 - progress,
+            Self::Loop => f64::sin((progress - 0.25) * TAU) * 0.5 + 0.5,
+            Self::LoopB => f64::sin((progress - 0.75) * TAU) * 0.5 + 0.5,
+        };
+
+        start + (end - start) * factor
+    }
+}
+
+impl FromStr for ResizeCurve {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("constant") {
+            Ok(Self::Constant)
+        } else if s.eq_ignore_ascii_case("rising") {
+            Ok(Self::Rising)
+        } else if s.eq_ignore_ascii_case("falling") {
+            Ok(Self::Falling)
+        } else if s.eq_ignore_ascii_case("loop") {
+            Ok(Self::Loop)
+        } else if s.eq_ignore_ascii_case("loopb") {
+            Ok(Self::LoopB)
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl ResizeCurve {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Constant => "Constant",
+            Self::Rising => "Rising",
+            Self::Falling => "Falling",
+            Self::Loop => "Loop",
+            Self::LoopB => "LoopB",
+        }
+    }
+}
+
+impl Display for ResizeCurve {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum ResizeType {
@@ -186,6 +255,8 @@ pub enum Task {
         resize_type: ResizeType,
         vibrato_hz: f64,
         vibrato_depth: f64,
+        #[serde(default = "ResizeCurve::default")]
+        resize_curve: ResizeCurve,
         #[serde(default = "VideoTypePreference::default")]
         type_pref: VideoTypePreference,
     },
@@ -246,6 +317,7 @@ impl Task {
                 resize_type,
                 vibrato_hz: _,
                 vibrato_depth: _,
+                resize_curve: _,
                 type_pref: _,
             }
             | Task::ImageResize {
@@ -287,6 +359,7 @@ impl Task {
                 if let Task::VideoResize {
                     vibrato_hz,
                     vibrato_depth,
+                    resize_curve,
                     type_pref,
                     ..
                 } = self
@@ -294,6 +367,7 @@ impl Task {
                     write_param!("Media type", type_pref)?;
                     wp!(vibrato_hz)?;
                     wp!(vibrato_depth)?;
+                    write_param!("Resize curve", resize_curve)?;
                 };
                 Ok(())
             }
@@ -399,6 +473,7 @@ impl Task {
             } else {
                 0.0
             },
+            resize_curve: ResizeCurve::default(),
             type_pref,
         }
     }

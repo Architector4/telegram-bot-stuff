@@ -183,13 +183,16 @@ impl Task {
                             "Only for videos:\n",
                             "<code>vibrato_hz</code>: Frequency of vibrato applied to audio. ",
                             "Can only be between 0.1 or 20000.0. Default is 7.\n",
-                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 1.0. Default is 1.",
+                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 1.0. Default is 1.\n",
+                            "<code>curve</code>: Curve that defines the blend between original and distorted size and rotation. ",
+                            "Can be \"constant\" (default), \"rising\", \"falling\", \"loop\" or \"loopb\".\n",
                             "\n\n",
                             "<b>Examples:</b>\n",
                             "• <code>/distort</code> (same as <code>/distort 50%</code> or <code>/distort 50%x50%</code>)\n",
                             "• <code>/distort 512x512</code>\n",
                             "• <code>/distort 1:1 50% delta_x:4 rigidity:-50</code>\n",
                             "• <code>/distort 200%x50% rot:45deg vibrato_hz:220</code> (videos only)\n",
+                            "• <code>/distort 10% rising</code> (videos only)\n",
                             "• <code>/distort 30%x-512 45deg webp</code> (images only)\n",
                             ),
                     ResizeType::Stretch | ResizeType::Fit | ResizeType::Crop =>
@@ -211,13 +214,16 @@ impl Task {
                             "Only for videos:\n",
                             "<code>vibrato_hz</code>: Frequency of vibrato applied to audio. ",
                             "Can only be between 0.1 or 20000.0. Default is 7.\n",
-                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 1.0. Default is 0.",
+                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 1.0. Default is 0.\n",
+                            "<code>curve</code>: Curve that defines the blend between original and distorted size and rotation. ",
+                            "Can be \"constant\" (default), \"rising\", \"falling\", \"loop\" or \"loopb\".\n",
                             "\n\n",
                             "<b>Examples:</b>\n",
                             "• <code>/resize</code> (same as <code>/resize 50%</code> or <code>/resize 50%x50%</code>)\n",
                             "• <code>/resize 512x512</code>\n",
                             "• <code>/resize 16:9 crop</code>\n",
                             "• <code>/resize 200%x100% stretch</code>\n",
+                            "• <code>/resize 100% 360deg rising</code> (videos only)\n",
                             "• <code>/resize 30%x-512 45deg webp</code> (images only)\n",
                             ),
                 }
@@ -283,6 +289,7 @@ impl Task {
                 mut resize_type,
                 vibrato_hz: _,
                 vibrato_depth: _,
+                resize_curve: _,
                 type_pref: _,
             } => {
                 if let ResizeType::ToSticker | ResizeType::ToCustomEmoji = resize_type {
@@ -291,11 +298,21 @@ impl Task {
 
                 let mut old_dimensions = (original_dimensions.0.get(), original_dimensions.1.get());
 
-                let (is_video, mut format, video_type_pref) =
+                let (is_video, mut format, video_type_pref, mut curve) =
                     if let Task::ImageResize { format, .. } = self {
-                        (false, *format, VideoTypePreference::Preserve)
-                    } else if let Task::VideoResize { type_pref, .. } = self {
-                        (true, ImageFormat::Preserve, *type_pref)
+                        (
+                            false,
+                            *format,
+                            VideoTypePreference::Preserve,
+                            ResizeCurve::default(),
+                        )
+                    } else if let Task::VideoResize {
+                        type_pref,
+                        resize_curve,
+                        ..
+                    } = self
+                    {
+                        (true, ImageFormat::Preserve, *type_pref, *resize_curve)
                     } else {
                         unreachable!()
                     };
@@ -351,6 +368,7 @@ impl Task {
 
                     if is_video {
                         parse_plain_param_optional!(param, r#type, help);
+                        parse_plain_param_optional!(param, curve, help);
                     } else {
                         parse_plain_param_optional!(param, format, help);
                     }
@@ -399,6 +417,7 @@ impl Task {
                             sanitized_f64_parser(0.0, 1.0),
                             help
                         );
+                        parse_keyval_param!(param, curve, help);
                     } else {
                         parse_keyval_param!(param, format, help);
                     }
@@ -533,6 +552,7 @@ impl Task {
                         vibrato_hz,
                         vibrato_depth,
                         type_pref: r#type,
+                        resize_curve: curve,
                     })
                 } else {
                     Ok(Task::ImageResize {
@@ -662,7 +682,11 @@ fn rotation_parser(data: &str) -> Option<(f64, bool)> {
         rotation = rotation.to_degrees();
     }
 
-    Some((rotation, matched_anything))
+    // I want to limit rotation to be no bigger than 360.0,
+    // but allow exactly 360.0 through, hence epsilon.
+    // It may introduce a bit of inaccuracy in case someone
+    // types a large number, but meh.
+    Some((rotation % (360.0 + f64::EPSILON * 360.0), matched_anything))
 }
 
 #[test]
