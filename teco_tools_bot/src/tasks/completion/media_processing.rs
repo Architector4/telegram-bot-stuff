@@ -301,7 +301,9 @@ pub fn count_video_frames_and_framerate_and_audio(
             OsStr::new("error"),
             OsStr::new("-count_frames"),
             OsStr::new("-show_entries"),
-            OsStr::new("stream=nb_read_frames,avg_frame_rate,codec_type"),
+            OsStr::new("stream=nb_read_frames,codec_type"),
+            OsStr::new("-show_entries"),
+            OsStr::new("format=duration"),
             OsStr::new("-of"),
             OsStr::new("default=noprint_wrappers=1"),
             path.as_ref(),
@@ -316,21 +318,29 @@ pub fn count_video_frames_and_framerate_and_audio(
 
     // output may be in a format like
     // codec_type=video
-    // avg_frame_rate=30/1
     // nb_read_frames=69
+    // duration=69.420
     // Or
     // codec_type=audio
     // avg_frame_rate=0/0
     // codec_type=video
     // nb_read_frames=80
-    // avg_frame_rate=3200000/53387
+    // duration=1312.1312
 
     let mut count = 0;
-    let mut framerate: f64 = 30.0;
     let mut observing_video_codecs = false;
     let mut has_audio = false;
+    // Random ass default value lol
+    let mut duration = 10.0;
 
     for line in output.lines() {
+        if let Some(line) = line.strip_prefix("duration=") {
+            let Ok(d) = line.parse::<f64>() else {
+                goodbye!("Duration couldn't be parsed");
+            };
+            duration = d;
+        }
+
         if line == "codec_type=audio" {
             observing_video_codecs = false;
             has_audio = true;
@@ -343,6 +353,7 @@ pub fn count_video_frames_and_framerate_and_audio(
         if !observing_video_codecs {
             continue;
         }
+
         if let Some(line) = line.strip_prefix("nb_read_frames=") {
             if line == "N/A" {
                 continue;
@@ -351,25 +362,10 @@ pub fn count_video_frames_and_framerate_and_audio(
                 goodbye!("Counter returned a non-integer");
             };
             count = this_count;
-        } else if let Some(line) = line.strip_prefix("avg_frame_rate=") {
-            framerate = if let Some(slash) = line.find('/') {
-                let (a, b) = line.split_at(slash);
-                let Ok(a) = a.parse::<f64>() else {
-                    goodbye!("Framerate value a couldn't be parsed");
-                };
-                let Ok(b) = b[1..].parse::<f64>() else {
-                    goodbye!("Framerate value b couldn't be parsed");
-                };
-                a / b
-            } else {
-                let Ok(this_framerate) = line.parse::<f64>() else {
-                    goodbye!("Framerate value is without slash and unparsable");
-                };
-
-                this_framerate
-            }
         }
     }
+
+    let framerate = count as f64 / duration;
 
     Ok((count, framerate, has_audio))
 }
@@ -420,6 +416,8 @@ pub fn resize_video(
             inputfile.path().as_ref(),
             OsStr::new("-c:v"),
             OsStr::new("bmp"),
+            OsStr::new("-vsync"),
+            OsStr::new("passthrough"),
             OsStr::new("-f"),
             OsStr::new("image2pipe"),
             OsStr::new("-"),
