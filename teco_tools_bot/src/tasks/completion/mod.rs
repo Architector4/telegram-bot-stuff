@@ -197,8 +197,7 @@ impl Task {
                             rotation,
                             resize_type,
                             format,
-                            dimensions.0.unsigned_abs(),
-                            dimensions.1.unsigned_abs(),
+                            None,
                             false,
                         )
                         .map_err(|e| e.to_string())

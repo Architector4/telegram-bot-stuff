@@ -24,8 +24,7 @@ pub fn resize_image(
     rotation: f64,
     mut resize_type: ResizeType,
     format: ImageFormat,
-    output_width: usize,
-    output_height: usize,
+    output_size: Option<(usize, usize)>,
     crop_rotation: bool,
 ) -> Result<Vec<u8>, MagickError> {
     if format == ImageFormat::Preserve {
@@ -151,12 +150,14 @@ pub fn resize_image(
         wand.flip_image()?;
     }
 
-    // Apply output size.
-    wand.resize_image(
-        output_width,
-        output_height,
-        magick_rust::bindings::FilterType_LagrangeFilter,
-    );
+    if let Some(output_size) = output_size {
+        // Apply output size.
+        wand.resize_image(
+            output_size.0,
+            output_size.1,
+            magick_rust::bindings::FilterType_LagrangeFilter,
+        );
+    }
 
     if rotation.signum() % 360.0 != 0.0 {
         if format.supports_alpha_transparency()
@@ -174,7 +175,9 @@ pub fn resize_image(
 
         if crop_rotation {
             // If we want cropping after rotation, do the cropping.
-            wand.crop_image(output_width, output_height, 0, 0)?;
+            let pre_rotation_width = wand.get_image_width();
+            let pre_rotation_height = wand.get_image_height();
+            wand.crop_image(pre_rotation_width, pre_rotation_height, 0, 0)?;
         }
     }
 
@@ -476,8 +479,7 @@ pub fn resize_video(
                             curved_rotation,
                             resize_type,
                             ImageFormat::Bmp,
-                            output_dimensions.0,
-                            output_dimensions.1,
+                            Some(output_dimensions),
                             is_curved, // Prevent bounds bouncing.
                         )
                     };
