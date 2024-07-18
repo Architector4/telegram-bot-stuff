@@ -171,12 +171,14 @@ pub fn resize_image(
         }
         let mut pixelwand = PixelWand::new();
         pixelwand.set_alpha(0.0);
+
+        let pre_rotation_width = wand.get_image_width();
+        let pre_rotation_height = wand.get_image_height();
+
         wand.rotate_image(&pixelwand, rotation)?;
 
         if crop_rotation {
             // If we want cropping after rotation, do the cropping.
-            let pre_rotation_width = wand.get_image_width();
-            let pre_rotation_height = wand.get_image_height();
             wand.crop_image(pre_rotation_width, pre_rotation_height, 0, 0)?;
         }
     }
