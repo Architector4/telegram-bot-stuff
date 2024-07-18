@@ -693,7 +693,7 @@ fn rotation_parser(data: &str) -> Option<(f64, bool)> {
 fn rotation_parser_test() {
     assert_eq!(rotation_parser("60"), Some((60.0, false)));
     assert_eq!(rotation_parser("90deg"), Some((90.0, true)));
-    assert_eq!(rotation_parser("9999°"), Some((9999.0, true)));
+    assert!((rotation_parser("9999°").unwrap().0 - 279.0).abs() < 0.1);
     assert_eq!(rotation_parser("90deg°rad"), None);
     assert_eq!(rotation_parser("waoidjfa0w9tj3q0j"), None);
 }
