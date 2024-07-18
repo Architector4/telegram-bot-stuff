@@ -39,11 +39,14 @@ impl ResizeType {
 impl FromStr for ResizeType {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "fit" => Ok(Self::Fit),
-            "stretch" => Ok(Self::Stretch),
-            "crop" => Ok(Self::Crop),
-            _ => Err(()),
+        if s.eq_ignore_ascii_case("fit") {
+            Ok(Self::Fit)
+        } else if s.eq_ignore_ascii_case("stretch") {
+            Ok(Self::Stretch)
+        } else if s.eq_ignore_ascii_case("crop") {
+            Ok(Self::Crop)
+        } else {
+            Err(())
         }
     }
 }
@@ -107,12 +110,15 @@ impl Display for ImageFormat {
 impl FromStr for ImageFormat {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "preserve" => Ok(Self::Preserve),
-            "webp" => Ok(Self::Webp),
-            "jpg" | "jpeg" => Ok(Self::Jpeg),
+        if s.eq_ignore_ascii_case("preserve") {
+            Ok(Self::Preserve)
+        } else if s.eq_ignore_ascii_case("webp") {
+            Ok(Self::Webp)
+        } else if s.eq_ignore_ascii_case("jpeg") || s.eq_ignore_ascii_case("jpg") {
+            Ok(Self::Jpeg)
+        } else {
             // BMP and PNG are intentionally ignored as they're for internal purposes only
-            _ => Err(()),
+            Err(())
         }
     }
 }
@@ -139,11 +145,14 @@ impl VideoTypePreference {
 impl FromStr for VideoTypePreference {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "preserve" => Ok(Self::Preserve),
-            "video" => Ok(Self::Video),
-            "gif" => Ok(Self::Gif),
-            _ => Err(()),
+        if s.eq_ignore_ascii_case("preserve") {
+            Ok(Self::Preserve)
+        } else if s.eq_ignore_ascii_case("video") {
+            Ok(Self::Video)
+        } else if s.eq_ignore_ascii_case("gif") {
+            Ok(Self::Gif)
+        } else {
+            Err(())
         }
     }
 }
