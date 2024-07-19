@@ -528,6 +528,8 @@ pub fn resize_video(
             .expect("Spawning encoder failed!");
         let mut encoder_stdin = encoder.stdin.take().unwrap();
 
+        let _ = status_report_for_encoder.send("Waiting for the thread pool...".to_string());
+
         std::thread::spawn(move || {
             let mut frame_number: usize = 0;
             let mut frames_received: usize = 0;
