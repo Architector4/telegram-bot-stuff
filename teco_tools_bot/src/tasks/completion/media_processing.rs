@@ -38,6 +38,10 @@ pub fn resize_image(
 
     wand.read_image_blob(data)?;
 
+    let mut transparent = PixelWand::new();
+    transparent.set_alpha(0.0);
+    wand.set_image_background_color(&transparent)?;
+
     // Record and sanitize signs...
     let width_is_negative = width.is_negative();
     let height_is_negative = height.is_negative();
@@ -153,11 +157,16 @@ pub fn resize_image(
 
     if let Some(output_size) = output_size {
         // Apply output size.
-        wand.resize_image(
+        wand.fit(output_size.0, output_size.1);
+
+        let pre_extend_width = wand.get_image_width();
+        let pre_extend_height = wand.get_image_height();
+        wand.extend_image(
             output_size.0,
             output_size.1,
-            magick_rust::bindings::FilterType_LagrangeFilter,
-        );
+            (pre_extend_width as isize - output_size.0 as isize) / 2,
+            (pre_extend_height as isize - output_size.1 as isize) / 2,
+        )?;
     }
 
     if rotation.signum() % 360.0 != 0.0 {
@@ -170,13 +179,11 @@ pub fn resize_image(
             // Add alpha channel.
             wand.set_image_alpha_channel(magick_rust::bindings::AlphaChannelOption_OnAlphaChannel)?;
         }
-        let mut pixelwand = PixelWand::new();
-        pixelwand.set_alpha(0.0);
 
         let pre_rotation_width = wand.get_image_width();
         let pre_rotation_height = wand.get_image_height();
 
-        wand.rotate_image(&pixelwand, rotation)?;
+        wand.rotate_image(&transparent, rotation)?;
 
         if crop_rotation {
             // If we want cropping after rotation, do the cropping.
