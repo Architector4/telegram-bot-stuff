@@ -17,6 +17,7 @@ use tempfile::NamedTempFile;
 use crate::tasks::{ImageFormat, ResizeCurve, ResizeType};
 
 /// Will error if [`ImageFormat::Preserve`] is sent.
+#[allow(clippy::too_many_arguments)]
 pub fn resize_image(
     data: &[u8],
     width: isize,
@@ -370,6 +371,7 @@ pub fn count_video_frames_and_framerate_and_audio(
     Ok((count, framerate, has_audio))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn resize_video(
     status_report: Sender<String>,
     data: Vec<u8>,
