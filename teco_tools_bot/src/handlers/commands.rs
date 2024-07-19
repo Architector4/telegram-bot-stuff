@@ -1,4 +1,4 @@
-use std::{future::Future, io::Write, num::NonZeroI32, pin::Pin};
+use std::{future::Future, io::Write, pin::Pin};
 
 use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use html_escape::encode_text;
@@ -391,12 +391,7 @@ async fn amogus(tp: TaskParams<'_>) -> Ret {
 
 async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
     // Image and video resize should have the same help.
-    let temp_task = Task::default_image_resize(
-        NonZeroI32::new(1).unwrap(),
-        NonZeroI32::new(1).unwrap(),
-        resize_type,
-        ImageFormat::Preserve,
-    );
+    let temp_task = Task::default_image_resize(1, 1, resize_type, ImageFormat::Preserve);
     print_help!(tp, temp_task);
 
     let media = tp.message.get_media_info();
@@ -415,22 +410,23 @@ async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
             "This command needs to be used as either a reply or caption to one."
         )),
     };
-    let (Some(width), Some(height)) = (
-        NonZeroI32::new(media.width as i32),
-        NonZeroI32::new(media.height as i32),
-    ) else {
+
+    if media.width < 1 || media.height < 1 {
         goodbye_cancel!("media is too small.");
-    };
+    }
 
     let task = if media.is_image() {
-        unfail!(
-            Task::default_image_resize(width, height, resize_type, ImageFormat::Preserve)
-                .parse_params(&tp)
+        unfail!(Task::default_image_resize(
+            media.width as i32,
+            media.height as i32,
+            resize_type,
+            ImageFormat::Preserve
         )
+        .parse_params(&tp))
     } else {
         unfail!(Task::default_video_resize(
-            width,
-            height,
+            media.width as i32,
+            media.height as i32,
             resize_type,
             VideoTypePreference::Preserve
         )
@@ -570,8 +566,8 @@ async fn ocr(tp: TaskParams<'_>) -> Ret {
 
 async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
     let temp_task = Task::default_video_resize(
-        NonZeroI32::new(1).unwrap(),
-        NonZeroI32::new(1).unwrap(),
+        1,
+        1,
         ResizeType::ToSticker,
         if to_gif {
             VideoTypePreference::Gif
@@ -670,16 +666,13 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
     }
 
     // Failed to send it directly. Let's do it the funny way around then.
-    let (Some(width), Some(height)) = (
-        NonZeroI32::new(video.width as i32),
-        NonZeroI32::new(video.height as i32),
-    ) else {
+    if video.width < 1 || video.height < 1 {
         goodbye_cancel!("video is too small.");
-    };
+    }
 
     Ok(Ok(Task::default_video_resize(
-        width,
-        height,
+        video.width as i32,
+        video.height as i32,
         ResizeType::ToSticker,
         if to_gif {
             VideoTypePreference::Gif

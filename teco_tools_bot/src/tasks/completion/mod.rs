@@ -145,10 +145,7 @@ impl Task {
 
                 let input_dimensions = (media.width, media.height);
 
-                let dimensions = (
-                    new_dimensions.0.get() as isize,
-                    new_dimensions.1.get() as isize,
-                );
+                let dimensions = (new_dimensions.0 as isize, new_dimensions.1 as isize);
                 let resize_type = *resize_type;
                 let rotation = *rotation;
 

@@ -2,7 +2,7 @@ pub mod completion;
 pub mod parsing;
 pub mod taskman;
 
-use std::{f64::consts::TAU, fmt::Display, num::NonZeroI32, str::FromStr};
+use std::{f64::consts::TAU, fmt::Display, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use teloxide::{
@@ -240,7 +240,7 @@ pub enum Task {
     ImageResize {
         /// Signed integer to allow specifying negative resolutions
         /// as a way to signify mirroring the image.
-        new_dimensions: (NonZeroI32, NonZeroI32),
+        new_dimensions: (i32, i32),
         rotation: f64,
         percentage: Option<f32>,
         format: ImageFormat,
@@ -249,7 +249,7 @@ pub enum Task {
     VideoResize {
         /// Signed integer to allow specifying negative resolutions
         /// as a way to signify mirroring the image.
-        new_dimensions: (NonZeroI32, NonZeroI32),
+        new_dimensions: (i32, i32),
         rotation: f64,
         percentage: Option<f32>,
         resize_type: ResizeType,
@@ -419,7 +419,7 @@ impl Task {
 impl Task {
     pub fn default_to_sticker() -> Task {
         Task::ImageResize {
-            new_dimensions: (NonZeroI32::new(512).unwrap(), NonZeroI32::new(512).unwrap()),
+            new_dimensions: (512, 512),
             rotation: 0.0,
             percentage: None,
             format: ImageFormat::Webp,
@@ -428,7 +428,7 @@ impl Task {
     }
     pub fn default_to_custom_emoji() -> Task {
         Task::ImageResize {
-            new_dimensions: (NonZeroI32::new(100).unwrap(), NonZeroI32::new(100).unwrap()),
+            new_dimensions: (100, 100),
             rotation: 0.0,
             percentage: None,
             format: ImageFormat::Webp,
@@ -439,8 +439,8 @@ impl Task {
         Task::Amogus { amogus: 1 }
     }
     pub fn default_image_resize(
-        width: NonZeroI32,
-        height: NonZeroI32,
+        width: i32,
+        height: i32,
         resize_type: ResizeType,
         format: ImageFormat,
     ) -> Task {
@@ -453,8 +453,8 @@ impl Task {
         }
     }
     pub fn default_video_resize(
-        width: NonZeroI32,
-        height: NonZeroI32,
+        width: i32,
+        height: i32,
         resize_type: ResizeType,
         type_pref: VideoTypePreference,
     ) -> Task {

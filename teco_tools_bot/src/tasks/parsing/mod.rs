@@ -296,7 +296,7 @@ impl Task {
                     return Ok(self.clone());
                 }
 
-                let mut old_dimensions = (original_dimensions.0.get(), original_dimensions.1.get());
+                let mut old_dimensions = (original_dimensions.0, original_dimensions.1);
 
                 let (is_video, mut format, video_type_pref, mut curve) =
                     if let Task::ImageResize { format, .. } = self {
@@ -468,8 +468,8 @@ impl Task {
                     };
 
                     // Calculate percentages.
-                    let p_x = 100.0 * new_dimensions.0 as f32 / original_dimensions.0.get() as f32;
-                    let p_y = 100.0 * new_dimensions.1 as f32 / original_dimensions.1.get() as f32;
+                    let p_x = 100.0 * new_dimensions.0 as f32 / original_dimensions.0 as f32;
+                    let p_y = 100.0 * new_dimensions.1 as f32 / original_dimensions.1 as f32;
 
                     // Only true if the X and Y percentages are close enough.
                     let percentage = if (p_x - p_y).abs() < 1.5 {
@@ -531,21 +531,9 @@ impl Task {
                     *rg = rigidity;
                 }
 
-                // Ensure none of the sizes are zero.
-
-                let (Some(new_x), Some(new_y)) = (
-                    NonZeroI32::new(new_dimensions.0),
-                    NonZeroI32::new(new_dimensions.1),
-                ) else {
-                    return Err(TaskError::Error(format!(
-                        concat!("output size {}x{} has an empty dimension in it. ",),
-                        new_dimensions.0, new_dimensions.1,
-                    )));
-                };
-
                 if is_video {
                     Ok(Task::VideoResize {
-                        new_dimensions: (new_x, new_y),
+                        new_dimensions: (new_dimensions.0, new_dimensions.1),
                         rotation: rot,
                         percentage: new_dimensions.2,
                         resize_type,
@@ -556,7 +544,7 @@ impl Task {
                     })
                 } else {
                     Ok(Task::ImageResize {
-                        new_dimensions: (new_x, new_y),
+                        new_dimensions: (new_dimensions.0, new_dimensions.1),
                         rotation: rot,
                         percentage: new_dimensions.2,
                         resize_type,
@@ -571,16 +559,16 @@ impl Task {
 
 #[test]
 fn image_resize_parse_test() -> Result<(), TaskError> {
-    let x = NonZeroI32::new(512).unwrap();
-    let y = NonZeroI32::new(256).unwrap();
+    let x = 512;
+    let y = 256;
     let default = Task::default_image_resize(x, y, ResizeType::Fit, ImageFormat::Preserve);
 
     let result = default.parse_params_inner("/resize", "", false)?;
     let Task::ImageResize { new_dimensions, .. } = result else {
         unreachable!()
     };
-    assert_eq!(new_dimensions.0.get(), 256);
-    assert_eq!(new_dimensions.1.get(), 128);
+    assert_eq!(new_dimensions.0, 256);
+    assert_eq!(new_dimensions.1, 128);
 
     let result = default.parse_params_inner("/resize", "150%x-100% 86deg webp", false)?;
     let Task::ImageResize {
@@ -592,8 +580,8 @@ fn image_resize_parse_test() -> Result<(), TaskError> {
     else {
         unreachable!()
     };
-    assert_eq!(new_dimensions.0.get(), 768);
-    assert_eq!(new_dimensions.1.get(), -256);
+    assert_eq!(new_dimensions.0, 768);
+    assert_eq!(new_dimensions.1, -256);
     assert_eq!(rotation, 86.0);
     assert_eq!(format, ImageFormat::Webp);
 
