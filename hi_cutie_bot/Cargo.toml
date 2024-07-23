@@ -8,6 +8,9 @@ edition = "2021"
 [dependencies]
 arch_bot_commons = { version = "0.6.5", path = "../arch_bot_commons" }
 log = "0.4.17"
+# This seems to depend on OpenSSL 3.3.0, but Fedora Server 40 only has 3.2.1.
+# Use "vendored" feature to work around that lmao
+native-tls = { version = "0.2.12", features = ["vendored"] }
 once_cell = "1.16.0"
 rand = "0.8.5"
 regex = "1.7.0"
