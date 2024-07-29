@@ -130,12 +130,10 @@ async fn handle_message_inner(
     // Check if it has any links we want to ban.
 
     // Get message "entities".
-    let Some(entities) = message
+    let entities = message
         .parse_entities()
         .or_else(|| message.parse_caption_entities())
-    else {
-        return Ok(());
-    };
+        .unwrap_or_default();
 
     let mut bad_links_present = false;
 
@@ -153,6 +151,20 @@ async fn handle_message_inner(
         if is_spam == IsSpam::Yes {
             bad_links_present = true;
             break;
+        }
+    }
+
+    // NFT spammers are now using @PostBot to send links as clickable buttons on messages
+    // that Telegram bots can't observe, as far as I can tell.
+    //
+    // I don't see this bot being used much outside of spam, so it's likely a safe idea to
+    // consider any usage of it spam directly.
+
+    if let Some(via_bot) = &message.via_bot {
+        if let Some(via_bot_username) = &via_bot.username {
+            if via_bot_username.eq_ignore_ascii_case("PostBot") {
+                bad_links_present = true;
+            }
         }
     }
 
