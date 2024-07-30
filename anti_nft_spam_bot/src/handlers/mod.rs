@@ -154,16 +154,39 @@ async fn handle_message_inner(
         }
     }
 
-    // NFT spammers are now using @PostBot to send links as clickable buttons on messages
-    // that Telegram bots can't observe, as far as I can tell.
-    //
-    // I don't see this bot being used much outside of spam, so it's likely a safe idea to
-    // consider any usage of it spam directly.
+    // Check all the buttons on the message for links.
+    if let Some(markup) = message.reply_markup() {
+        for row in &markup.inline_keyboard {
+            for button in row {
+                use teloxide::types::InlineKeyboardButtonKind as Kind;
+                use teloxide::types::{LoginUrl, WebAppInfo};
+                match &button.kind {
+                    Kind::Url(url)
+                    | Kind::LoginUrl(LoginUrl { url, .. })
+                    | Kind::WebApp(WebAppInfo { url }) => {
+                        let Some(domain) = Domain::from_url(url) else {
+                            continue;
+                        };
 
-    if let Some(via_bot) = &message.via_bot {
-        if let Some(via_bot_username) = &via_bot.username {
-            if via_bot_username.eq_ignore_ascii_case("PostBot") {
-                bad_links_present = true;
+                        log::debug!("Spotted button URL with domain {}", domain);
+
+                        let Some(is_spam) =
+                            crate::spam_checker::check(database, &domain, url).await
+                        else {
+                            continue;
+                        };
+
+                        if is_spam == IsSpam::Yes {
+                            bad_links_present = true;
+                            break;
+                        }
+                    }
+                    Kind::CallbackData(..)
+                    | Kind::SwitchInlineQuery(..)
+                    | Kind::Pay(..)
+                    | Kind::SwitchInlineQueryCurrentChat(..)
+                    | Kind::CallbackGame(..) => {}
+                }
             }
         }
     }
