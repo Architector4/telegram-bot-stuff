@@ -42,6 +42,10 @@ pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
         return Some(IsSpam::Yes);
     }
 
+    if username.ends_with("drft_party_bot") {
+        return Some(IsSpam::Yes);
+    }
+
     if username.ends_with("drop_bot") {
         // No way in hell a "...drop_bot" is anything other than spam, right?
         return Some(IsSpam::Yes);
