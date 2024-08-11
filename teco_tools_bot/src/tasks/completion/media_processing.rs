@@ -25,7 +25,9 @@ pub fn resize_image(
     rotation: f64,
     mut resize_type: ResizeType,
     format: ImageFormat,
-    output_size: Option<(usize, usize)>,
+    // Width, height, and if the resulting image should be stretched to
+    // output size instead of fitting.
+    output_size: Option<(usize, usize, bool)>,
     crop_rotation: bool,
 ) -> Result<Vec<u8>, MagickError> {
     if format == ImageFormat::Preserve {
@@ -157,16 +159,24 @@ pub fn resize_image(
 
     if let Some(output_size) = output_size {
         // Apply output size.
-        wand.fit(output_size.0, output_size.1);
+        if output_size.2 {
+            wand.resize_image(
+                output_size.0,
+                output_size.1,
+                magick_rust::bindings::FilterType_LagrangeFilter,
+            );
+        } else {
+            wand.fit(output_size.0, output_size.1);
 
-        let pre_extend_width = wand.get_image_width();
-        let pre_extend_height = wand.get_image_height();
-        wand.extend_image(
-            output_size.0,
-            output_size.1,
-            (pre_extend_width as isize - output_size.0 as isize) / 2,
-            (pre_extend_height as isize - output_size.1 as isize) / 2,
-        )?;
+            let pre_extend_width = wand.get_image_width();
+            let pre_extend_height = wand.get_image_height();
+            wand.extend_image(
+                output_size.0,
+                output_size.1,
+                (pre_extend_width as isize - output_size.0 as isize) / 2,
+                (pre_extend_height as isize - output_size.1 as isize) / 2,
+            )?;
+        }
     }
 
     if rotation.signum() % 360.0 != 0.0 {
@@ -382,7 +392,7 @@ pub fn count_video_frames_and_framerate_and_audio(
 pub fn resize_video(
     status_report: Sender<String>,
     data: Vec<u8>,
-    (mut width, mut height): (isize, isize),
+    (width, height): (isize, isize),
     rotation: f64,
     resize_type: ResizeType,
     strip_audio: bool,
@@ -391,10 +401,6 @@ pub fn resize_video(
     input_dimensions: (u32, u32),
     resize_curve: ResizeCurve,
 ) -> Result<Vec<u8>, String> {
-    // We will be encoding into h264, which needs width and height divisible by 2.
-    width += width % 2;
-    height += height % 2;
-
     macro_rules! unfail {
         ($thing: expr) => {
             match $thing {
@@ -403,6 +409,65 @@ pub fn resize_video(
             }
         };
     }
+
+    // First, compute some stuff that will be in use during resizing.
+
+    // If we resize every frame to a different size, we want to scale them
+    // back to original size, so that the video would be
+    // of constant actual size that will preserve the biggest frame.
+    let is_curved = resize_curve != ResizeCurve::Constant;
+    let (mut output_width, mut output_height) = if is_curved {
+        (
+            (input_dimensions.0 as usize).max(width.unsigned_abs()),
+            (input_dimensions.1 as usize).max(height.unsigned_abs()),
+        )
+    } else {
+        (width.unsigned_abs(), height.unsigned_abs())
+    };
+
+    // h264 needs output dimensions divisible by 2; make absolutely sure we do that.
+    output_width += output_width % 2;
+    output_height += output_height % 2;
+
+    // Now, if the size is dynamic, we want to know if we want to
+    // stretch every frame to the output dimensions, or just fit them.
+    // This is needed because neither are universally appropriate.
+    //
+    // Stretching each frame is not expected behavior when input
+    // and output sizes have vastly different aspect ratios.
+    //
+    // Fitting each frame brings an issue when the input and output
+    // sizes are intended to have the same aspect ratio, but don't
+    // due to having to be defined by integer numbers. In these
+    // cases, the very slight mismatch causes black bars on edges
+    // of the image to pop in and out.
+    let stretch_to_output_size = if is_curved {
+        let input_width = input_dimensions.0 as f64;
+        let input_height = input_dimensions.1 as f64;
+        let input_aspect_ratio = input_width / input_height;
+
+        // "max" to avoid inf/NaN values
+        let end_width = f64::abs(width as f64).max(1.0);
+        let end_height = f64::abs(height as f64).max(1.0);
+        let end_aspect_ratio = end_width / end_height;
+
+        // Now, compute the stretch we'd have on the smallest width and height
+        // of the two if we were to correct from one aspect ratio to another.
+        let smallest_width = input_width.min(end_width);
+        let smallest_width_corrected = smallest_width * input_aspect_ratio / end_aspect_ratio;
+        let smallest_height = input_height.min(end_height);
+        let smallest_height_corrected = smallest_height * input_aspect_ratio / end_aspect_ratio;
+
+        // If both of them don't change significantly, then we can just stretch.
+
+        let width_diff_is_insignificant = f64::abs(smallest_width_corrected - smallest_width) < 1.5;
+        let height_diff_is_insignificant =
+            f64::abs(smallest_height_corrected - smallest_height) < 1.5;
+
+        width_diff_is_insignificant && height_diff_is_insignificant
+    } else {
+        false
+    };
 
     let _ = status_report.send("Creating temp files...".to_string());
 
@@ -458,23 +523,6 @@ pub fn resize_video(
                     let curved_rotation =
                         resize_curve.apply_resize_for(count, input_frame_count, 0.0, rotation);
 
-                    // If the resize curves around, we want to scale every frame
-                    // back to original size, so that the video would be
-                    // of constant actual size that will preserve the biggest frame.
-                    let is_curved = resize_curve != ResizeCurve::Constant;
-                    let mut output_dimensions = if is_curved {
-                        (
-                            (input_dimensions.0 as usize).max(width.unsigned_abs()),
-                            (input_dimensions.1 as usize).max(height.unsigned_abs()),
-                        )
-                    } else {
-                        (width.unsigned_abs(), height.unsigned_abs())
-                    };
-
-                    // h264 needs dimensions divisible by 2; make absolutely sure we do that.
-                    output_dimensions.0 += output_dimensions.0 % 2;
-                    output_dimensions.1 += output_dimensions.1 % 2;
-
                     // Check if this operation changes the image at all.
                     // If the dimension and rotation are the same, it doesn't.
                     let input_dimensions = get_bmp_width_height(&frame);
@@ -492,7 +540,7 @@ pub fn resize_video(
                             curved_rotation,
                             resize_type,
                             ImageFormat::Bmp,
-                            Some(output_dimensions),
+                            Some((output_width, output_height, stretch_to_output_size)),
                             is_curved, // Prevent bounds bouncing.
                         )
                     };
