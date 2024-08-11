@@ -6,7 +6,7 @@ use teloxide::{
     payloads::{SendAnimationSetters, SendPhotoSetters, SendStickerSetters, SendVideoSetters},
     requests::Requester,
     types::InputFile,
-    Bot, RequestError,
+    ApiError, Bot, RequestError,
 };
 
 use crate::tasks::{ResizeCurve, VideoTypePreference};
@@ -140,8 +140,19 @@ impl Task {
 
                 let mut media_data: Vec<u8> = Vec::new();
 
-                bot.download_file_to_vec(media.file, &mut media_data)
-                    .await?;
+                let download_result = bot.download_file_to_vec(media.file, &mut media_data).await;
+
+                if let Err(RequestError::Api(ApiError::Unknown(text))) = &download_result {
+                    if text.contains("file is temporarily unavailable") {
+                        goodbye!(concat!(
+                            "Error: the media file is unavailable for the bot. ",
+                            "This is likely a Telegram server issue. ",
+                            "Try reuploading and performing the command again."
+                        ));
+                    }
+                };
+
+                download_result?;
 
                 let input_dimensions = (media.width, media.height);
 
