@@ -462,7 +462,7 @@ pub fn resize_video(
                     // back to original size, so that the video would be
                     // of constant actual size that will preserve the biggest frame.
                     let is_curved = resize_curve != ResizeCurve::Constant;
-                    let output_dimensions = if is_curved {
+                    let mut output_dimensions = if is_curved {
                         (
                             (input_dimensions.0 as usize).max(width.unsigned_abs()),
                             (input_dimensions.1 as usize).max(height.unsigned_abs()),
@@ -470,6 +470,10 @@ pub fn resize_video(
                     } else {
                         (width.unsigned_abs(), height.unsigned_abs())
                     };
+
+                    // h264 needs dimensions divisible by 2; make absolutely sure we do that.
+                    output_dimensions.0 += output_dimensions.0 % 2;
+                    output_dimensions.1 += output_dimensions.1 % 2;
 
                     // Check if this operation changes the image at all.
                     // If the dimension and rotation are the same, it doesn't.
