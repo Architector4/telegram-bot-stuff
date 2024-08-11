@@ -704,6 +704,8 @@ pub fn resize_video(
                 }),
                 OsStr::new("-f"),
                 OsStr::new("mp4"),
+                OsStr::new("-preset"),
+                OsStr::new("slow"),
                 muxfile.path().as_ref(),
             ])
             .spawn();
