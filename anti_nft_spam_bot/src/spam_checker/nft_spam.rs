@@ -52,17 +52,29 @@ pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
     };
 
     let Some(params) = segments.next() else {
-        // It's a bot, but no params. The spam ones use params.
+        // It's a bot, but no params. Probably fine.
         return Some(IsSpam::No);
     };
 
-    if ["claim", "drop"].iter().any(|x| params.contains(x)) {
+    // It has parameters... That's somewhat sus.
+
+    if params.contains("claim") || params.contains("drop") {
         // Who else would post a bot with params of "claim" than spammers anyway?
         return Some(IsSpam::Yes);
     }
 
-    if params.contains("startapp=kentId") {
+    let Some(query) = url.query() else {
+        // Checks below check for the query parameters specifically
+        return Some(IsSpam::Maybe);
+    };
+
+    if query.contains("startapp=kentId") {
         // Weird specificity of a bunch of "nft game telegram bot" spam links
+        return Some(IsSpam::Yes);
+    }
+
+    if params.contains("game") && query.contains("ref=") {
+        // Some spam "nft game telegram bot" links use this type of params instead
         return Some(IsSpam::Yes);
     }
 
@@ -109,6 +121,9 @@ mod tests {
 
         let spam_url =
             Url::parse("https://t.me/hAmster_kombat_bot/start?startapp=kentId677635570").unwrap();
+        assert!(matches!(is_spam_telegram_url(&spam_url), Some(IsSpam::Yes)));
+
+        let spam_url = Url::parse("http://t.me/trumpton_bot/game?ref=129383dHJJS").unwrap();
         assert!(matches!(is_spam_telegram_url(&spam_url), Some(IsSpam::Yes)));
     }
 }
