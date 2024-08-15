@@ -176,7 +176,7 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
                                     produce_queue_message!(task, taskman, Some(last_received));
                                 }
                             }
-                            sleep(Duration::from_secs(1)).await;
+                            sleep(Duration::from_secs(2)).await;
                         }
                         Err(TryRecvError::Disconnected) => {
                             break;
@@ -226,7 +226,7 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
                         task_data.message.id,
                     )
                     .await;
-                sleep(Duration::from_secs(1)).await;
+                sleep(Duration::from_secs(2)).await;
                 if let Err(e) = taskman
                     .bot
                     .archsendmsg(
@@ -264,13 +264,13 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
             .await
             .expect("Database died!");
 
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_secs(2)).await;
     }
 }
 
 pub async fn queue_counter_spinjob(taskman: Weak<Taskman>) {
     loop {
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_secs(2)).await;
         let Some(taskman) = taskman.upgrade() else {
             return;
         };
