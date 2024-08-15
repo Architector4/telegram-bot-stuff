@@ -6,7 +6,6 @@ use std::{
 pub mod database;
 use arch_bot_commons::{teloxide_retry, useful_methods::BotArchSendMsg};
 use chrono::{DateTime, Utc};
-use crossbeam_channel::TryRecvError;
 use database::Database;
 use html_escape::encode_text;
 use teloxide::{
@@ -16,7 +15,7 @@ use teloxide::{
     ApiError, Bot, RequestError,
 };
 use tokio::{
-    sync::Notify,
+    sync::{watch, Notify},
     time::{sleep, timeout},
 };
 use tokio_stream::StreamExt;
@@ -155,32 +154,22 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
         }
         produce_queue_message!(task_data.task, taskman, None);
 
-        let (sender, receiver) = crossbeam_channel::unbounded();
+        let (sender, mut receiver) = watch::channel(String::new());
 
         let status_updater = {
             let taskman = taskman.clone();
             let task = task_data.task.clone();
             tokio::spawn(async move {
-                let mut updated_to_last_received = true;
-                let mut last_received: Option<String> = None;
+                let mut last_received = String::new();
+                receiver.borrow_and_update();
                 loop {
-                    match receiver.try_recv() {
-                        Ok(item) => {
-                            last_received = Some(item);
-                            updated_to_last_received = false;
-                        }
-                        Err(TryRecvError::Empty) => {
-                            if !updated_to_last_received {
-                                updated_to_last_received = true;
-                                if let Some(last_received) = &last_received {
-                                    produce_queue_message!(task, taskman, Some(last_received));
-                                }
-                            }
-                            sleep(Duration::from_secs(2)).await;
-                        }
-                        Err(TryRecvError::Disconnected) => {
-                            break;
-                        }
+                    receiver.borrow_and_update().clone_into(&mut last_received);
+                    if !last_received.is_empty() {
+                        produce_queue_message!(task, taskman, Some(&last_received));
+                        sleep(Duration::from_secs(2)).await;
+                    }
+                    if receiver.changed().await.is_err() {
+                        break;
                     }
                 }
             })

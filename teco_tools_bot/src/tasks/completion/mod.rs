@@ -1,6 +1,5 @@
 pub mod media_processing;
 use arch_bot_commons::{teloxide_retry, useful_methods::*};
-use crossbeam_channel::Sender;
 use html_escape::encode_text;
 use teloxide::{
     payloads::{SendAnimationSetters, SendPhotoSetters, SendStickerSetters, SendVideoSetters},
@@ -8,6 +7,7 @@ use teloxide::{
     types::InputFile,
     ApiError, Bot, RequestError,
 };
+use tokio::sync::watch::Sender;
 
 use crate::tasks::{ResizeCurve, VideoTypePreference};
 

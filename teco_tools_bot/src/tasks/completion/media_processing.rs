@@ -7,8 +7,8 @@ use std::{
     sync::OnceLock,
 };
 
-use crossbeam_channel::Sender;
 use rayon::prelude::*;
+use tokio::sync::watch::Sender;
 
 use magick_rust::{MagickError, MagickWand, PixelWand};
 use regex::Regex;
