@@ -28,11 +28,11 @@ pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
         return Some(IsSpam::No);
     };
 
-    if username.eq_ignore_ascii_case("blum") {
-        // Annoying crypto thing that's a telegram bot but doesn't have "bot" in the username
+    if username == "blum" || username == "blumcryptobot" {
+        // Annoying crypto spam that's a telegram bot but
+        // also has a username without "bot" at the end.
         return Some(IsSpam::Yes);
     };
-
 
     if !username.ends_with("bot") {
         // Not a telegram bot (usually).
