@@ -63,6 +63,30 @@ fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
     Some((url, domain))
 }
 
+/// Get a domain and a URL from this button, if available.
+fn get_button_url_domain(button: &teloxide::types::InlineKeyboardButton) -> Option<(&Url, Domain)> {
+    use teloxide::types::InlineKeyboardButtonKind as Kind;
+    use teloxide::types::{LoginUrl, WebAppInfo};
+    let url = match &button.kind {
+        Kind::Url(url)
+        | Kind::LoginUrl(LoginUrl { url, .. })
+        | Kind::WebApp(WebAppInfo { url }) => url,
+        Kind::CallbackData(..)
+        | Kind::SwitchInlineQuery(..)
+        | Kind::Pay(..)
+        | Kind::SwitchInlineQueryCurrentChat(..)
+        | Kind::CallbackGame(..) => return None,
+    };
+
+    let Some(domain) = Domain::from_url(url) else {
+        // Does not have a domain. An IP address link?
+        log::warn!("Received a URL in a button without a domain: {}", url);
+        return None;
+    };
+
+    Some((url, domain))
+}
+
 /// Returns `true` if this chat is private.
 async fn is_sender_admin(bot: &Bot, message: &Message) -> Result<bool, RequestError> {
     if message.chat.is_private() {
@@ -137,55 +161,44 @@ async fn handle_message_inner(
 
     let mut bad_links_present = false;
 
+    // Two loops below iterate over links, but need to do the same thing.
+    // Rather than duplicate the code inside the loops, I'm defining a macro
+    // that would do this for me.
+    //
+    // Ideally I'd just make an iterator over all entities and then inline keyboard
+    // buttons that would do this for me, but ehhhhhhhhhhhhhhhhhh
+    macro_rules! check_url {
+        ($url: expr, $domain: expr, $loop_to_break: tt) => {
+            log::debug!("Spotted URL with domain {}", $domain);
+
+            let Some(is_spam) = crate::spam_checker::check(database, $domain, $url).await else {
+                continue;
+            };
+
+            if is_spam == IsSpam::Yes {
+                bad_links_present = true;
+                break $loop_to_break;
+            }
+        };
+    }
+
     // Scan all URLs in a message...
-    for entity in &entities {
+    'thaloop: for entity in &entities {
         let Some((url, domain)) = get_entity_url_domain(entity) else {
             continue;
         };
-        log::debug!("Spotted URL with domain {}", domain);
-
-        let Some(is_spam) = crate::spam_checker::check(database, &domain, &url).await else {
-            continue;
-        };
-
-        if is_spam == IsSpam::Yes {
-            bad_links_present = true;
-            break;
-        }
+        check_url!(&url, &domain, 'thaloop);
     }
 
-    // Check all the buttons on the message for links.
-    if let Some(markup) = message.reply_markup() {
-        for row in &markup.inline_keyboard {
-            for button in row {
-                use teloxide::types::InlineKeyboardButtonKind as Kind;
-                use teloxide::types::{LoginUrl, WebAppInfo};
-                match &button.kind {
-                    Kind::Url(url)
-                    | Kind::LoginUrl(LoginUrl { url, .. })
-                    | Kind::WebApp(WebAppInfo { url }) => {
-                        let Some(domain) = Domain::from_url(url) else {
-                            continue;
-                        };
-
-                        log::debug!("Spotted button URL with domain {}", domain);
-
-                        let Some(is_spam) =
-                            crate::spam_checker::check(database, &domain, url).await
-                        else {
-                            continue;
-                        };
-
-                        if is_spam == IsSpam::Yes {
-                            bad_links_present = true;
-                            break;
-                        }
-                    }
-                    Kind::CallbackData(..)
-                    | Kind::SwitchInlineQuery(..)
-                    | Kind::Pay(..)
-                    | Kind::SwitchInlineQueryCurrentChat(..)
-                    | Kind::CallbackGame(..) => {}
+    // If didn't find anything, also check all the buttons on the message for links.
+    if !bad_links_present {
+        if let Some(markup) = message.reply_markup() {
+            'outer: for row in &markup.inline_keyboard {
+                for button in row {
+                    let Some((url, domain)) = get_button_url_domain(button) else {
+                        continue;
+                    };
+                    check_url!(&url, &domain, 'outer);
                 }
             }
         }
@@ -346,28 +359,47 @@ async fn gather_suspicion(
         let mut already_marked_spam_count = 0u32;
         let mut manually_reviewed_not_spam_count = 0u32;
 
+        macro_rules! marksus {
+            ($url: expr, $domain: expr) => {
+                log::debug!("Marking {} and its domain as sus...", $url);
+
+                had_links = true;
+
+                let result = database
+                    .mark_sus($url, Some($domain))
+                    .await
+                    .expect("Database died!");
+
+                {
+                    use crate::types::MarkSusResult::*;
+
+                    match result {
+                        Marked => marked_count += 1,
+                        AlreadyMarkedSus => already_marked_sus_count += 1,
+                        AlreadyMarkedSpam => already_marked_spam_count += 1,
+                        ManuallyReviewedNotSpam => manually_reviewed_not_spam_count += 1,
+                    }
+                }
+            };
+        }
+
         for entity in &entities {
             let Some((url, domain)) = get_entity_url_domain(entity) else {
+                log::warn!("Received a URL without a domain: {}", entity.text());
                 continue;
             };
 
-            log::debug!("Marking {} and its domain as sus...", url);
+            marksus!(&url, &domain);
+        }
 
-            had_links = true;
-
-            let result = database
-                .mark_sus(&url, Some(&domain))
-                .await
-                .expect("Database died!");
-
-            {
-                use crate::types::MarkSusResult::*;
-
-                match result {
-                    Marked => marked_count += 1,
-                    AlreadyMarkedSus => already_marked_sus_count += 1,
-                    AlreadyMarkedSpam => already_marked_spam_count += 1,
-                    ManuallyReviewedNotSpam => manually_reviewed_not_spam_count += 1,
+        // Check all the buttons on the message for links.
+        if let Some(markup) = message.reply_markup() {
+            for row in &markup.inline_keyboard {
+                for button in row {
+                    let Some((url, domain)) = get_button_url_domain(button) else {
+                        continue;
+                    };
+                    marksus!(url, &domain);
                 }
             }
         }
