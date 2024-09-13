@@ -565,11 +565,12 @@ pub fn resize_video(
                         resize_curve.apply_resize_for(count, input_frame_count, 0.0, rotation);
 
                     // Check if this operation changes the image at all.
-                    // If the dimension and rotation are the same, it doesn't.
+                    // If the dimensions (both target and output) and rotation
+                    // are the same, it doesn't.
                     let input_dimensions = get_bmp_width_height(&frame);
-                    let resize_result = if input_dimensions
-                        == Some((output_width as isize, output_height as isize))
-                        && (rotation == 0.0 || rotation == -0.0)
+                    let resize_result = if rotation.abs() == 0.0
+                        && input_dimensions == Some((output_width as isize, output_height as isize))
+                        && input_dimensions == Some((curved_width as isize, curved_height as isize))
                     {
                         // It doesn't. Just return the same buffer directly.
                         Ok(frame)
