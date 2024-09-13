@@ -568,7 +568,7 @@ pub fn resize_video(
                     // If the dimension and rotation are the same, it doesn't.
                     let input_dimensions = get_bmp_width_height(&frame);
                     let resize_result = if input_dimensions
-                        == Some((curved_width as isize, curved_height as isize))
+                        == Some((output_width as isize, output_height as isize))
                         && (rotation == 0.0 || rotation == -0.0)
                     {
                         // It doesn't. Just return the same buffer directly.
