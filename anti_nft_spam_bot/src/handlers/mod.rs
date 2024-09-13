@@ -92,12 +92,16 @@ async fn is_sender_admin(bot: &Bot, message: &Message) -> Result<bool, RequestEr
     if message.chat.is_private() {
         return Ok(true);
     }
-    let is_admin = if let Some(user) = message.from() {
-        let ChatMember { kind, .. } = bot.get_chat_member(message.chat.id, user.id).await?;
-        kind.is_privileged()
-    } else if let Some(chat) = message.sender_chat() {
-        // If it's posted by the chat itself, it's probably an admin.
+
+    // First check if a chat sent this, i.e. an anonymous admin.
+    // In such a case, "from()" returns @GroupAnonymousBot for backwards compatibility.
+    let is_admin = if let Some(chat) = message.sender_chat() {
+        // If it's posted by the chat itself, it's probably an anonymous admin.
         chat.id == message.chat.id
+    } else if let Some(user) = message.from() {
+        let ChatMember { kind, .. } = bot.get_chat_member(message.chat.id, user.id).await?;
+        dbg!(&kind, user);
+        kind.is_privileged()
     } else {
         false
     };
