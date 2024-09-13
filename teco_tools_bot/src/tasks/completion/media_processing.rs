@@ -23,7 +23,7 @@ pub fn resize_image(
     width: isize,
     height: isize,
     rotation: f64,
-    mut resize_type: ResizeType,
+    resize_type: ResizeType,
     format: ImageFormat,
     // Width, height, and if the resulting image should be stretched to
     // output size instead of fitting.
@@ -67,20 +67,48 @@ pub fn resize_image(
     // here, but might as well lol
     // And both values in extremely high amounts segfault too, it seems lol
 
-    if (iwidth <= 1 || iheight <= 1) && resize_type.is_seam_carve() {
-        // ImageMagick is likely to abort/segfault in this situation.
-        // Switch up resize type.
-        resize_type = ResizeType::Stretch;
-    }
-
     match resize_type {
         ResizeType::SeamCarve { delta_x, rigidity } => {
-            wand.liquid_rescale_image(
-                width,
-                height,
-                delta_x.abs().min(4.0),
-                rigidity.max(-4.0).min(4.0),
-            )?;
+            // The point of seam carving in this bot is to be a "distortion"
+            // effect, with the intent of looking funny.
+            //
+            // However, in ImageMagick's seam carving algorithm used below,
+            // if you apply integer scaling to the image
+            // (i.e. resize it to 200% x 200% of the original resolution),
+            // it seems to pretty much result in a boring, normal resize.
+            //
+            // However, non-integer scaling, like 150% x 150%,
+            // gives the most extreme distortion effects.
+            //
+            // The loop below repeatedly checks the size and upscales at most
+            // by 150% x 150% of the original size every time, compounding
+            // the distortion up until the target is reached.
+
+            loop {
+                let current_width = wand.get_image_width();
+                let current_height = wand.get_image_height();
+
+                if current_width <= 1 || current_height <= 1 {
+                    // ImageMagick is likely to abort/segfault in this situation.
+                    // Switch up resize type.
+                    wand.resize_image(
+                        width,
+                        height,
+                        magick_rust::bindings::FilterType_LagrangeFilter,
+                    );
+                    break;
+                }
+                wand.liquid_rescale_image(
+                    width.min(current_width + current_width / 2),
+                    height.min(current_height + current_height / 2),
+                    delta_x.abs().min(4.0),
+                    rigidity.max(-4.0).min(4.0),
+                )?;
+
+                if wand.get_image_width() == width && wand.get_image_height() == height {
+                    break;
+                }
+            }
         }
         ResizeType::Stretch => {
             wand.resize_image(
