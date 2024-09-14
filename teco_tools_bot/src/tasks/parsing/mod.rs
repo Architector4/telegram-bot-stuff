@@ -169,6 +169,8 @@ impl Task {
                             "can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
+                            "<code>max</code>: Shorthand for 2048x2048.\n",
+                            "<code>maxfit</code>: Maximum scale of the current resolution without stretching, up to 2048x2048.\n",
                             "Above parameters may be specified multiple times and will be applied cumulatively.\n",
                             "\n",
                             "<code>rot</code>: Rotate the media by this much after distorting.\n",
@@ -203,6 +205,8 @@ impl Task {
                             "can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>size%</code>: Percentage of the original size, can't be 0 or bigger than 2048x2048; OR\n",
                             "<code>W:H</code>: Aspect ratio cropping the original size, or expanding it if + is appended.\n",
+                            "<code>max</code>: Shorthand for 2048x2048.\n",
+                            "<code>maxfit</code>: Maximum scale of the current resolution without stretching, up to 2048x2048.\n",
                             "Above parameters may be specified multiple times and will be applied cumulatively.\n",
                             "\n",
                             "<code>rot</code>: Rotate the media by this much after resizing.\n",
@@ -366,6 +370,33 @@ impl Task {
                             .ok_or(())
                     };
 
+                    let max_parser = |data: &str| {
+                        data.eq_ignore_ascii_case("max")
+                            .then_some(Some((
+                                MAX_OUTPUT_MEDIA_DIMENSION_SIZE as i32,
+                                MAX_OUTPUT_MEDIA_DIMENSION_SIZE as i32,
+                            )))
+                            .ok_or(())
+                    };
+
+                    let max_fit_parser = |data: &str| {
+                        (data.eq_ignore_ascii_case("maxfit")
+                            || data.eq_ignore_ascii_case("max_fit"))
+                        .then(|| {
+                            let scale_to_fit_for_x =
+                                MAX_OUTPUT_MEDIA_DIMENSION_SIZE as f64 / old_dimensions.0 as f64;
+                            let scale_to_fit_for_y =
+                                MAX_OUTPUT_MEDIA_DIMENSION_SIZE as f64 / old_dimensions.1 as f64;
+                            let scale = f64::min(scale_to_fit_for_x, scale_to_fit_for_y);
+
+                            let x = old_dimensions.0 as f64 * scale;
+                            let y = old_dimensions.1 as f64 * scale;
+
+                            Some((x as i32, y as i32))
+                        })
+                        .ok_or(())
+                    };
+
                     if is_video {
                         parse_plain_param_optional!(param, r#type, help);
                         parse_plain_param_optional!(param, curve, help);
@@ -378,6 +409,10 @@ impl Task {
                         new_dimensions,
                         dimensions_parser_err
                     );
+
+                    parse_plain_param_with_parser_optional!(param, new_dimensions, max_parser);
+                    parse_plain_param_with_parser_optional!(param, new_dimensions, max_fit_parser);
+
                     parse_plain_param_with_parser_optional!(param, rot, |x| {
                         if let Some((rotation, true)) = rotation_parser(x) {
                             Ok(rotation)
