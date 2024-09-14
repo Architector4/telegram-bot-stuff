@@ -95,12 +95,19 @@ async fn is_sender_admin(bot: &Bot, message: &Message) -> Result<bool, RequestEr
 
     // First check if a chat sent this, i.e. an anonymous admin.
     // In such a case, "from()" returns @GroupAnonymousBot for backwards compatibility.
-    let is_admin = if let Some(chat) = message.sender_chat() {
-        // If it's posted by the chat itself, it's probably an anonymous admin.
-        chat.id == message.chat.id
+    let is_admin = if let Some(sender_chat) = message.sender_chat() {
+        if sender_chat.id == message.chat.id {
+            // If it's posted by the chat itself, it's probably an anonymous admin.
+            true
+        } else {
+            // It may have been sent by the channel linked to this chat, then.
+            // Check for that.
+            let chat_full = bot.get_chat(message.chat.id).await?;
+
+            chat_full.linked_chat_id() == Some(sender_chat.id.0)
+        }
     } else if let Some(user) = message.from() {
         let ChatMember { kind, .. } = bot.get_chat_member(message.chat.id, user.id).await?;
-        dbg!(&kind, user);
         kind.is_privileged()
     } else {
         false
