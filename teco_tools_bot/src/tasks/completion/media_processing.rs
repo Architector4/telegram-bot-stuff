@@ -2,7 +2,7 @@
 
 use std::{
     ffi::OsStr,
-    io::{BufReader, Read, Write},
+    io::{Read, Write},
     process::{ChildStdout, Command, Stdio},
     sync::OnceLock,
 };
@@ -246,18 +246,17 @@ pub fn resize_image(
 }
 
 struct SplitIntoBmps<T: Read> {
-    item: BufReader<T>,
+    item: T,
     buffer: Vec<u8>,
-    /// Positive if we don't have a full BMP in yet,
-    until_next_bmp: usize,
 }
 
 impl<T: Read> SplitIntoBmps<T> {
     pub fn new<N: Read>(item: N) -> SplitIntoBmps<N> {
         SplitIntoBmps {
-            item: BufReader::new(item),
-            buffer: Vec::with_capacity(1024 * 1024),
-            until_next_bmp: 0,
+            item,
+            // Somewhere about enough to fit a 2048x204832-bits-per-pixel image
+            // plus 4MB of other whiff.
+            buffer: Vec::with_capacity(2048 * 2048 * 5),
         }
     }
 }
@@ -265,64 +264,44 @@ impl<T: Read> SplitIntoBmps<T> {
 impl<T: Read> Iterator for SplitIntoBmps<T> {
     type Item = Result<Vec<u8>, std::io::Error>;
     fn next(&mut self) -> Option<Self::Item> {
-        macro_rules! unfail {
+        macro_rules! unfail_read_exact {
             ($thing: expr) => {
                 match $thing {
                     Ok(o) => o,
+                    Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return None,
                     Err(e) => return Some(Err(e)),
                 }
             };
         }
 
-        if self.buffer.is_empty() {
-            // We are at a boundary between BMPs.
-            assert_eq!(self.until_next_bmp, 0);
-            // Read a bit to know the length of the next one.
-            for byte in self.item.by_ref().bytes() {
-                let byte = unfail!(byte);
-                self.buffer.push(byte);
-                if self.buffer.len() > 6 {
-                    break;
-                }
-            }
-            if self.buffer.len() < 6 {
-                // Not enough bytes? Bye.
-                return None;
-            }
+        // We are at a boundary between BMPs.
+        // Next byte read will be the first one of a BMP image.
+        // First two bytes will be the "BM" marker,
+        // then 4 bytes would be the file size in little endian.
 
-            // Assert that this is a BMP header.
-            assert_eq!(self.buffer[0..2], [0x42, 0x4D]);
-
-            // This means that bytes [2..6] have the file length.
-            let new_bmp_length = u32::from_le_bytes(
-                self.buffer[2..6]
-                    .try_into()
-                    .expect("Incorrect slice length... somehow."),
-            );
-
-            self.until_next_bmp = new_bmp_length as usize - self.buffer.len();
-        }
-
-        if self.until_next_bmp > 0 {
-            for byte in self.item.by_ref().bytes() {
-                let byte = unfail!(byte);
-                self.buffer.push(byte);
-                self.until_next_bmp -= 1;
-                if self.until_next_bmp == 0 {
-                    break;
-                }
-            }
-        }
-
-        if self.until_next_bmp != 0 {
-            // Not enough bytes? Seeya.
-            return None;
-        }
-
-        // Then we have accumulated a BMP. Send it.
-        let response = self.buffer.clone();
         self.buffer.clear();
-        Some(Ok(response))
+        self.buffer.resize(6, 0u8);
+
+        unfail_read_exact!(self.item.read_exact(&mut self.buffer[0..6]));
+
+        let bmp_length = u32::from_le_bytes(
+            self.buffer[2..6]
+                .try_into()
+                .expect("Incorrect slice length... somehow."),
+        ) as usize;
+
+        if self.buffer[0..2] != [0x42, 0x4D] || bmp_length <= 6 {
+            return Some(Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid BMP header",
+            )));
+        }
+
+        // Read exactly the rest of the file.
+        self.buffer.resize(bmp_length, 0u8);
+        unfail_read_exact!(self.item.read_exact(&mut self.buffer[6..bmp_length]));
+
+        Some(Ok(self.buffer.clone()))
     }
 }
 
