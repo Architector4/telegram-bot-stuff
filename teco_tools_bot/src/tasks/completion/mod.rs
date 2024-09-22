@@ -9,7 +9,10 @@ use teloxide::{
 };
 use tokio::sync::watch::Sender;
 
-use crate::tasks::{ResizeCurve, VideoTypePreference};
+use crate::{
+    tasks::{ResizeCurve, VideoTypePreference},
+    MAX_DOWNLOAD_SIZE_MEGABYTES, MAX_UPLOAD_SIZE_MEGABYTES,
+};
 
 use super::{taskman::database::TaskDatabaseInfo, ImageFormat, Task};
 
@@ -232,6 +235,15 @@ impl Task {
                     );
                 }
 
+                if media_data.len() > MAX_UPLOAD_SIZE_MEGABYTES as usize * 1000 * 1000 {
+                    goodbye!(format!(
+                        "Error: the resulting media is too big ({:.3}MB, max is {}MB). Sorry!",
+                        media_data.len() as f64 / 1000.0 / 100.00,
+                        MAX_UPLOAD_SIZE_MEGABYTES
+                    )
+                    .as_str());
+                }
+
                 let should_be_sticker = !media.is_video && format.supports_alpha_transparency();
 
                 let _ = status_report.send("Uploading result...".to_string());
@@ -267,8 +279,9 @@ impl Task {
                         result
                     {
                         goodbye!(format!(
-                            "Error: the resulting media is too big ({}MB, max is 2000MB). Sorry!",
-                            media_data.len() / 1000 / 1000
+                            "Error: the resulting media is too big ({:.3}MB, max is {}MB). Sorry!",
+                            media_data.len() as f64 / 1000.0 / 100.00,
+                            MAX_UPLOAD_SIZE_MEGABYTES
                         )
                         .as_str());
                     } else {
@@ -286,8 +299,12 @@ impl Task {
                                 "Error: can't work with video nor animated nor video stickers."
                             );
                         }
-                        if photo.file.size > 150 * 1000 * 1000 {
-                            goodbye!("Error: image is too large. The limit is 150MB.");
+                        if photo.file.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
+                            goodbye!(format!(
+                                "Error: image is too large. The limit is {}MB.",
+                                MAX_DOWNLOAD_SIZE_MEGABYTES
+                            )
+                            .as_str());
                         }
                         photo
                     }

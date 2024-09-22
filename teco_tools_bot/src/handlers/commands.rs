@@ -16,7 +16,7 @@ use crate::{
         completion::media_processing::count_video_frames_and_framerate_and_audio,
         parsing::TaskError, taskman::Taskman, ImageFormat, ResizeType, Task, VideoTypePreference,
     },
-    OWNER_ID,
+    MAX_DOWNLOAD_SIZE_MEGABYTES, OWNER_ID,
 };
 
 pub const COMMANDS: &[Command] = &[
@@ -252,10 +252,21 @@ macro_rules! goodbye_desc {
     };
 }
 
-#[allow(unused_macros)]
 macro_rules! goodbye_cancel {
     ($err:expr) => {{
         goodbye!(TaskError::Cancel($err.to_string()));
+    }};
+}
+
+macro_rules! check_too_large {
+    ($media:expr) => {{
+        if $media.file.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
+            goodbye_cancel!(format!(
+                "media is too large. The limit is {}MB.",
+                MAX_DOWNLOAD_SIZE_MEGABYTES
+            )
+            .as_str());
+        }
     }};
 }
 
@@ -400,9 +411,7 @@ async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
             if !media.is_raster() {
                 goodbye_cancel!("can't work with animated stickers nor voice messages.");
             }
-            if media.file.size > 150 * 1000 * 1000 {
-                goodbye_cancel!("media is too large. The limit is 150MB.");
-            }
+            check_too_large!(media);
             media
         }
         None => goodbye_cancel!(concat!(
@@ -451,9 +460,7 @@ async fn to_sticker(tp: TaskParams<'_>) -> Ret {
             if !photo.is_image() {
                 goodbye_cancel!("can't work with video nor animated nor video stickers.");
             }
-            if photo.file.size > 150 * 1000 * 1000 {
-                goodbye_cancel!("media is too large. The limit is 150MB.");
-            }
+            check_too_large!(photo);
             photo
         }
         None => goodbye_cancel!(concat!(
@@ -480,9 +487,7 @@ async fn to_custom_emoji(tp: TaskParams<'_>) -> Ret {
             if !photo.is_image() {
                 goodbye_cancel!("can't work with video nor animated nor video stickers.");
             }
-            if photo.file.size > 150 * 1000 * 1000 {
-                goodbye_cancel!("media is too large. The limit is 150MB.");
-            }
+            check_too_large!(photo);
             photo
         }
         None => goodbye_cancel!(concat!(
@@ -550,9 +555,7 @@ async fn ocr(tp: TaskParams<'_>) -> Ret {
             if !photo.is_image() {
                 goodbye_cancel!("can't work with video nor animated nor video stickers.");
             }
-            if photo.file.size > 150 * 1000 * 1000 {
-                goodbye_cancel!("media is too large. The limit is 150MB.");
-            }
+            check_too_large!(photo);
             photo
         }
         None => goodbye_cancel!(concat!(
@@ -588,9 +591,7 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
             if video.is_image() {
                 goodbye_cancel!("can't work with non-video images.");
             }
-            if video.file.size > 150 * 1000 * 1000 {
-                goodbye_cancel!("video is too large. The limit is 150MB.");
-            }
+            check_too_large!(video);
             video
         }
         None => goodbye_cancel!(concat!(

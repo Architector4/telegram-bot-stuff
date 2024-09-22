@@ -4,6 +4,7 @@ use teloxide::{dptree::deps, prelude::*, RequestError};
 use crate::{
     handlers,
     tasks::taskman::{database::Database, Taskman},
+    USE_LOCAL_API,
 };
 
 /// # Panics
@@ -18,7 +19,14 @@ pub async fn entry() {
     })
     .expect("Could not load bot key file!");
 
-    let bot = Bot::new(key).set_api_url(url::Url::parse("http://127.0.0.1:8081/tbas").unwrap());
+    let bot = Bot::new(key);
+
+    let bot = if USE_LOCAL_API {
+        bot.set_api_url(url::Url::parse("http://127.0.0.1:8081/tbas").unwrap())
+    } else {
+        bot
+    };
+
     let db = Arc::new(Database::new().await.expect("Could not init the database!"));
 
     let commands = crate::handlers::commands::Command::generate_bot_commands();
