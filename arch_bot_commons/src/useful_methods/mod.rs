@@ -173,11 +173,17 @@ impl BotStuff for Bot {
     ) -> Result<(), RequestError> {
         let file = self.get_file(&file.id).await?;
         to.reserve_exact(file.size as usize);
-        let mut stream = self.download_file_stream(&file.path);
+        if std::path::Path::new(&file.path).is_absolute() {
+            // From local bot API. Just read it as vec lmao
+            let mut file = std::fs::File::open(&file.path)?;
 
-        while let Some(bytes) = stream.try_next().await? {
-            for byte in bytes {
-                to.push(byte);
+            use std::io::Read;
+            file.read_to_end(to)?;
+        } else {
+            let mut stream = self.download_file_stream(&file.path);
+
+            while let Some(bytes) = stream.try_next().await? {
+                to.extend_from_slice(&bytes);
             }
         }
 
