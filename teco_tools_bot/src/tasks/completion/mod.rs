@@ -140,6 +140,8 @@ impl Task {
 
                 let mut media_data: Vec<u8> = Vec::new();
 
+                let _ = status_report.send("Downloading media...".to_string());
+
                 let download_result = bot.download_file_to_vec(media.file, &mut media_data).await;
 
                 if let Err(RequestError::Api(ApiError::Unknown(text))) = &download_result {
@@ -183,10 +185,12 @@ impl Task {
                     false
                 };
 
+                let status_report_for_processing = status_report.clone();
+
                 let woot = tokio::task::spawn_blocking(move || {
                     if media.is_video {
                         media_processing::resize_video(
-                            status_report,
+                            status_report_for_processing,
                             media_data,
                             dimensions,
                             rotation,
@@ -198,6 +202,7 @@ impl Task {
                             resize_curve,
                         )
                     } else {
+                        let _ = status_report_for_processing.send("Resizing...".to_string());
                         media_processing::resize_image(
                             &media_data,
                             dimensions.0,
@@ -228,6 +233,8 @@ impl Task {
                 }
 
                 let should_be_sticker = !media.is_video && format.supports_alpha_transparency();
+
+                let _ = status_report.send("Uploading result...".to_string());
 
                 teloxide_retry!({
                     let send = media_data.clone();
