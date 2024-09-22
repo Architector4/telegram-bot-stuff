@@ -111,8 +111,8 @@ impl Task {
                                 "Error: can't work with animated stickers nor voice messages."
                             );
                         }
-                        if media.file.size > 20 * 1000 * 1000 {
-                            goodbye!("Error: media is too large. Telegram bots can only download files 20MB or less in size.");
+                        if media.file.size > 150 * 1000 * 1000 {
+                            goodbye!("Error: media is too large. The limit is 150MB.");
                         }
                         media
                     }
@@ -260,8 +260,8 @@ impl Task {
                         result
                     {
                         goodbye!(format!(
-                            "Error: the resulting media is too big ({}MB, max is 50MB). Sorry!",
-                            media_data.len() / 1024 / 1024
+                            "Error: the resulting media is too big ({}MB, max is 2000MB). Sorry!",
+                            media_data.len() / 1000 / 1000
                         )
                         .as_str());
                     } else {
@@ -279,8 +279,8 @@ impl Task {
                                 "Error: can't work with video nor animated nor video stickers."
                             );
                         }
-                        if photo.file.size > 20 * 1000 * 1000 {
-                            goodbye!("Error: image is too large. Telegram bots can only download files 20MB or less in size.");
+                        if photo.file.size > 150 * 1000 * 1000 {
+                            goodbye!("Error: image is too large. The limit is 150MB.");
                         }
                         photo
                     }

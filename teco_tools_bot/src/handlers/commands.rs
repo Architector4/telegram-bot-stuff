@@ -400,8 +400,8 @@ async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
             if !media.is_raster() {
                 goodbye_cancel!("can't work with animated stickers nor voice messages.");
             }
-            if media.file.size > 20 * 1000 * 1000 {
-                goodbye_cancel!("media is too large. Telegram bots can only download files 20MB or less in size.");
+            if media.file.size > 150 * 1000 * 1000 {
+                goodbye_cancel!("media is too large. The limit is 150MB.");
             }
             media
         }
@@ -451,8 +451,8 @@ async fn to_sticker(tp: TaskParams<'_>) -> Ret {
             if !photo.is_image() {
                 goodbye_cancel!("can't work with video nor animated nor video stickers.");
             }
-            if photo.file.size > 20 * 1000 * 1000 {
-                goodbye_cancel!("media is too large. Telegram bots can only download files 20MB or less in size.");
+            if photo.file.size > 150 * 1000 * 1000 {
+                goodbye_cancel!("media is too large. The limit is 150MB.");
             }
             photo
         }
@@ -480,8 +480,8 @@ async fn to_custom_emoji(tp: TaskParams<'_>) -> Ret {
             if !photo.is_image() {
                 goodbye_cancel!("can't work with video nor animated nor video stickers.");
             }
-            if photo.file.size > 20 * 1000 * 1000 {
-                goodbye_cancel!("media is too large. Telegram bots can only download files 20MB or less in size.");
+            if photo.file.size > 150 * 1000 * 1000 {
+                goodbye_cancel!("media is too large. The limit is 150MB.");
             }
             photo
         }
@@ -550,8 +550,8 @@ async fn ocr(tp: TaskParams<'_>) -> Ret {
             if !photo.is_image() {
                 goodbye_cancel!("can't work with video nor animated nor video stickers.");
             }
-            if photo.file.size > 20 * 1000 * 1000 {
-                goodbye_cancel!("media is too large. Telegram bots can only download files 20MB or less in size.");
+            if photo.file.size > 150 * 1000 * 1000 {
+                goodbye_cancel!("media is too large. The limit is 150MB.");
             }
             photo
         }
@@ -588,8 +588,8 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
             if video.is_image() {
                 goodbye_cancel!("can't work with non-video images.");
             }
-            if video.file.size > 20 * 1000 * 1000 {
-                goodbye_cancel!("video is too large. Telegram bots can only download files 20MB or less in size.");
+            if video.file.size > 150 * 1000 * 1000 {
+                goodbye_cancel!("video is too large. The limit is 150MB.");
             }
             video
         }
