@@ -98,6 +98,7 @@ dependencies = [
  "log",
  "pretty_env_logger",
  "teloxide",
+ "tempfile",
  "tokio",
 ]
 

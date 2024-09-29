@@ -1,4 +1,6 @@
 mod split_msg;
+use std::path::PathBuf;
+
 pub use split_msg::*;
 
 use futures::{Future, TryStreamExt};
@@ -8,6 +10,7 @@ use teloxide::{
     types::{ChatId, FileMeta, Message, PhotoSize},
     Bot, RequestError,
 };
+use tempfile::NamedTempFile;
 
 pub struct MessageMediaInfo<'a> {
     pub width: u32,
@@ -155,12 +158,27 @@ impl MessageStuff for Message {
     }
 }
 
+pub trait FileStuff {
+    fn is_local(&self) -> bool;
+}
+
+impl FileStuff for teloxide::types::File {
+    fn is_local(&self) -> bool {
+        std::path::Path::new(&self.path).is_absolute()
+    }
+}
+
 pub trait BotStuff {
     fn download_file_to_vec(
         &self,
         file: &FileMeta,
         to: &mut Vec<u8>,
     ) -> impl Future<Output = Result<(), RequestError>> + Send;
+
+    fn download_file_to_temp_or_directly(
+        &self,
+        file: &FileMeta,
+    ) -> impl Future<Output = Result<(PathBuf, Option<NamedTempFile>), RequestError>> + Send;
 
     fn typing(&self, to_where: ChatId) -> impl Future<Output = Result<(), RequestError>> + Send;
 }
@@ -173,7 +191,7 @@ impl BotStuff for Bot {
     ) -> Result<(), RequestError> {
         let file = self.get_file(&file.id).await?;
         to.reserve_exact(file.size as usize);
-        if std::path::Path::new(&file.path).is_absolute() {
+        if file.is_local() {
             // From local bot API. Just read it as vec lmao
             let mut file = std::fs::File::open(&file.path)?;
 
@@ -189,6 +207,27 @@ impl BotStuff for Bot {
 
         Ok(())
     }
+
+    async fn download_file_to_temp_or_directly(
+        &self,
+        file: &FileMeta,
+    ) -> Result<(PathBuf, Option<NamedTempFile>), RequestError> {
+        let file = self.get_file(&file.id).await?;
+        if file.is_local() {
+            // If file is local, just return that.
+            Ok((std::path::PathBuf::from(file.path), None))
+        } else {
+            // If the file is remote, make a tempfile and use that.
+            let tempfile = tempfile::NamedTempFile::new()?;
+
+            let reopened = tempfile.reopen()?;
+            let mut tokio_file = tokio::fs::File::from_std(reopened);
+            self.download_file(&file.path, &mut tokio_file).await?;
+
+            Ok((tempfile.path().to_path_buf(), Some(tempfile)))
+        }
+    }
+
     async fn typing(&self, to_where: ChatId) -> Result<(), RequestError> {
         self.send_chat_action(to_where, teloxide::types::ChatAction::Typing)
             .await?;
