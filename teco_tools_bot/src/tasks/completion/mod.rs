@@ -143,22 +143,6 @@ impl Task {
 
                 let mut media_data: Vec<u8> = Vec::new();
 
-                let _ = status_report.send("Downloading media...".to_string());
-
-                let download_result = bot.download_file_to_vec(media.file, &mut media_data).await;
-
-                if let Err(RequestError::Api(ApiError::Unknown(text))) = &download_result {
-                    if text.contains("file is temporarily unavailable") {
-                        goodbye!(concat!(
-                            "Error: the media file is unavailable for the bot. ",
-                            "This is likely a Telegram server issue. ",
-                            "Try reuploading and performing the command again."
-                        ));
-                    }
-                };
-
-                download_result?;
-
                 let input_dimensions = (media.width, media.height);
 
                 let dimensions = (new_dimensions.0 as isize, new_dimensions.1 as isize);
@@ -190,11 +174,35 @@ impl Task {
 
                 let status_report_for_processing = status_report.clone();
 
-                let woot = tokio::task::spawn_blocking(move || {
-                    if media.is_video {
+                // Little handler for the downloading.
+                macro_rules! unerror_download {
+                    ($download: expr) => {{
+                        if let Err(RequestError::Api(ApiError::Unknown(text))) = &$download {
+                            if text.contains("file is temporarily unavailable") {
+                                goodbye!(concat!(
+                                    "Error: the media file is unavailable for the bot. ",
+                                    "This is likely a Telegram server issue. ",
+                                    "Try reuploading and performing the command again."
+                                ));
+                            }
+                        };
+                        $download?
+                    }};
+                }
+
+                // Variable just to hold the temporary file and drop it later.
+                let mut file = None;
+
+                let _ = status_report.send("Downloading media...".to_string());
+                let woot = if media.is_video {
+                    let download =
+                        unerror_download!(bot.download_file_to_temp_or_directly(media.file).await);
+                    let path = download.0;
+                    file = download.1;
+                    tokio::task::spawn_blocking(move || {
                         media_processing::resize_video(
                             status_report_for_processing,
-                            media_data,
+                            &path,
                             dimensions,
                             rotation,
                             resize_type,
@@ -204,8 +212,13 @@ impl Task {
                             input_dimensions,
                             resize_curve,
                         )
-                    } else {
-                        let _ = status_report_for_processing.send("Resizing...".to_string());
+                    })
+                } else {
+                    let download_result =
+                        bot.download_file_to_vec(media.file, &mut media_data).await;
+                    unerror_download!(download_result);
+
+                    tokio::task::spawn_blocking(move || {
                         media_processing::resize_image(
                             &media_data,
                             dimensions.0,
@@ -217,10 +230,13 @@ impl Task {
                             false,
                         )
                         .map_err(|e| e.to_string())
-                    }
-                })
+                    })
+                }
                 .await
                 .expect("Worker died!");
+
+                drop(file);
+
                 let media_data = match woot {
                     Ok(m) => m,
                     Err(e) => {

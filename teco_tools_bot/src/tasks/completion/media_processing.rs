@@ -3,6 +3,7 @@
 use std::{
     ffi::OsStr,
     io::{Read, Write},
+    path::Path,
     process::{ChildStdout, Command, Stdio},
     sync::OnceLock,
 };
@@ -411,7 +412,7 @@ pub fn count_video_frames_and_framerate_and_audio(
 #[allow(clippy::too_many_arguments)]
 pub fn resize_video(
     status_report: Sender<String>,
-    data: Vec<u8>,
+    inputfile: &Path,
     (width, height): (isize, isize),
     rotation: f64,
     resize_type: ResizeType,
@@ -491,15 +492,12 @@ pub fn resize_video(
 
     let _ = status_report.send("Creating temp files...".to_string());
 
-    let mut inputfile = unfail!(NamedTempFile::new());
-    unfail!(inputfile.write_all(&data));
-    unfail!(inputfile.flush());
     let outputfile = unfail!(NamedTempFile::new());
 
     let _ = status_report.send("Counting frames...".to_string());
 
     let (input_frame_count, input_frame_rate, has_audio) =
-        unfail!(count_video_frames_and_framerate_and_audio(inputfile.path()));
+        unfail!(count_video_frames_and_framerate_and_audio(inputfile));
 
     let decoder = Command::new("ffmpeg")
         .args([
@@ -507,7 +505,7 @@ pub fn resize_video(
             OsStr::new("-loglevel"),
             OsStr::new("error"),
             OsStr::new("-i"),
-            inputfile.path().as_ref(),
+            inputfile.as_ref(),
             OsStr::new("-c:v"),
             OsStr::new("bmp"),
             OsStr::new("-vsync"),
@@ -703,7 +701,7 @@ pub fn resize_video(
                 OsStr::new("-loglevel"),
                 OsStr::new("error"),
                 OsStr::new("-i"),
-                inputfile.path().as_ref(),
+                inputfile.as_ref(),
                 OsStr::new("-i"),
                 outputfile.path().as_ref(),
                 OsStr::new("-c:v"),
@@ -740,7 +738,7 @@ pub fn resize_video(
 
     unfail!(finalfile.reopen());
 
-    let mut output = data;
+    let mut output = Vec::new();
     output.clear();
     unfail!(finalfile.read_to_end(&mut output));
 
