@@ -39,7 +39,6 @@ pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
         return Some(IsSpam::Yes);
     }
 
-
     if !username.ends_with("bot") {
         // Not a telegram bot (usually).
         return Some(IsSpam::No);
@@ -138,7 +137,8 @@ mod tests {
         let spam_url = Url::parse("http://t.me/trumpton_bot/game?ref=129383dHJJS").unwrap();
         assert!(matches!(is_spam_telegram_url(&spam_url), Some(IsSpam::Yes)));
 
-        let spam_url = Url::parse("https://t.me/notpixel/app?startapp=f6983374587_s573790").unwrap();
+        let spam_url =
+            Url::parse("https://t.me/notpixel/app?startapp=f6983374587_s573790").unwrap();
         assert!(matches!(is_spam_telegram_url(&spam_url), Some(IsSpam::Yes)));
     }
 }
