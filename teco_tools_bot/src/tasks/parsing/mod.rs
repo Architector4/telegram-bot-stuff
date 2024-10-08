@@ -698,7 +698,8 @@ fn rotation_parser(data: &str) -> Option<(f64, bool)> {
         }
         std::f64::consts::TAU.to_degrees()
     } else {
-        data.parse().ok()?
+        // SQLite doesn't particularly like inf/nan floats lmao
+        data.parse().ok().filter(|x: &f64| x.is_finite())?
     };
 
     if in_radians {
