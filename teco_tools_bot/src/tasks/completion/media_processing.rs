@@ -409,6 +409,28 @@ pub fn count_video_frames_and_framerate_and_audio(
     Ok((count, framerate, has_audio))
 }
 
+fn approx_same_aspect_ratio(
+    (input_width, input_height): (f64, f64),
+    (end_width, end_height): (f64, f64),
+) -> bool {
+    let input_aspect_ratio = input_width / input_height;
+    let end_aspect_ratio = end_width / end_height;
+
+    // Now, compute the stretch we'd have on the smallest width and height
+    // of the two if we were to correct from one aspect ratio to another.
+    let smallest_width = input_width.min(end_width);
+    let smallest_width_corrected = smallest_width * input_aspect_ratio / end_aspect_ratio;
+    let smallest_height = input_height.min(end_height);
+    let smallest_height_corrected = smallest_height * input_aspect_ratio / end_aspect_ratio;
+
+    // If both of them don't change significantly, then we can just stretch.
+
+    let width_diff_is_insignificant = f64::abs(smallest_width_corrected - smallest_width) < 1.5;
+    let height_diff_is_insignificant = f64::abs(smallest_height_corrected - smallest_height) < 1.5;
+
+    width_diff_is_insignificant && height_diff_is_insignificant
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn resize_video(
     status_report: Sender<String>,
@@ -465,27 +487,12 @@ pub fn resize_video(
     let stretch_to_output_size = if is_curved {
         let input_width = input_dimensions.0 as f64;
         let input_height = input_dimensions.1 as f64;
-        let input_aspect_ratio = input_width / input_height;
 
         // "max" to avoid inf/NaN values
         let end_width = f64::abs(width as f64).max(1.0);
         let end_height = f64::abs(height as f64).max(1.0);
-        let end_aspect_ratio = end_width / end_height;
 
-        // Now, compute the stretch we'd have on the smallest width and height
-        // of the two if we were to correct from one aspect ratio to another.
-        let smallest_width = input_width.min(end_width);
-        let smallest_width_corrected = smallest_width * input_aspect_ratio / end_aspect_ratio;
-        let smallest_height = input_height.min(end_height);
-        let smallest_height_corrected = smallest_height * input_aspect_ratio / end_aspect_ratio;
-
-        // If both of them don't change significantly, then we can just stretch.
-
-        let width_diff_is_insignificant = f64::abs(smallest_width_corrected - smallest_width) < 1.5;
-        let height_diff_is_insignificant =
-            f64::abs(smallest_height_corrected - smallest_height) < 1.5;
-
-        width_diff_is_insignificant && height_diff_is_insignificant
+        approx_same_aspect_ratio((input_width, input_height), (end_width, end_height))
     } else {
         false
     };
