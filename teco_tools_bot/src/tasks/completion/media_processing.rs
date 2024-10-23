@@ -209,17 +209,23 @@ pub fn resize_image(
         let pre_rotation_height = wand.get_image_height();
 
         wand.rotate_image(&transparent, rotation)?;
+        // Image page data is inconsistent after rotations (when divisible by 90 degrees),
+        // so reset it.
+        wand.reset_image_page("")?;
 
         if crop_rotation {
             // If we want cropping after rotation, do the cropping.
             // This also means extending the image so that it fits the old
             // resolution *exactly*, not bigger, not smaller.
 
-            // crop_image here seems to respect the gravity, and using offset of 0,0
-            // crops around the center.
-            wand.crop_image(pre_rotation_width, pre_rotation_height, 0, 0)?;
-            // extend_image here, however, does not.
-            // Compute the offset to center the image in the extended result.
+            // Crop it to the middle.
+            wand.crop_image(
+                pre_rotation_width,
+                pre_rotation_height,
+                (wand.get_image_width() as isize - pre_rotation_width as isize) / 2,
+                (wand.get_image_height() as isize - pre_rotation_height as isize) / 2,
+            )?;
+            // Extend it, with the new image placed in the middle.
             wand.extend_image(
                 pre_rotation_width,
                 pre_rotation_height,
