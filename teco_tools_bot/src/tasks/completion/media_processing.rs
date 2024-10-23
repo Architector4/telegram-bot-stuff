@@ -11,7 +11,7 @@ use std::{
 use rayon::prelude::*;
 use tokio::sync::watch::Sender;
 
-use magick_rust::{MagickError, MagickWand, PixelWand};
+use magick_rust::{AlphaChannelOption, FilterType, MagickError, MagickWand, PixelWand};
 use regex::Regex;
 use tempfile::NamedTempFile;
 
@@ -34,7 +34,9 @@ pub fn resize_image(
     if format == ImageFormat::Preserve {
         // yeah this isn't a MagickError, but we'd get one in the last line
         // anyways, so might as well make a better description for ourselves lol
-        return Err(MagickError("ImageFormat::Preserve was specified"));
+        return Err(MagickError(
+            "ImageFormat::Preserve was specified".to_string(),
+        ));
     }
 
     let wand = MagickWand::new();
@@ -92,11 +94,7 @@ pub fn resize_image(
                 if current_width <= 1 || current_height <= 1 {
                     // ImageMagick is likely to abort/segfault in this situation.
                     // Switch up resize type.
-                    wand.resize_image(
-                        width,
-                        height,
-                        magick_rust::bindings::FilterType_LagrangeFilter,
-                    );
+                    wand.resize_image(width, height, FilterType::Lagrange)?;
                     break;
                 }
                 wand.liquid_rescale_image(
@@ -112,11 +110,7 @@ pub fn resize_image(
             }
         }
         ResizeType::Stretch => {
-            wand.resize_image(
-                width,
-                height,
-                magick_rust::bindings::FilterType_LagrangeFilter,
-            );
+            wand.resize_image(width, height, FilterType::Lagrange)?;
         }
         ResizeType::Fit | ResizeType::ToSticker => {
             wand.fit(width, height);
@@ -161,11 +155,7 @@ pub fn resize_image(
             // Resize to desired size... Yes, this may stretch, but that's better
             // since then we keep the exact end size, and the crop below
             // will not fail then lol
-            wand.resize_image(
-                size_pre_crop.0,
-                size_pre_crop.1,
-                magick_rust::bindings::FilterType_LagrangeFilter,
-            );
+            wand.resize_image(size_pre_crop.0, size_pre_crop.1, FilterType::Lagrange)?;
 
             // Now crop the result to desired size.
             wand.crop_image(
@@ -189,11 +179,7 @@ pub fn resize_image(
     if let Some(output_size) = output_size {
         // Apply output size.
         if output_size.2 {
-            wand.resize_image(
-                output_size.0,
-                output_size.1,
-                magick_rust::bindings::FilterType_LagrangeFilter,
-            );
+            wand.resize_image(output_size.0, output_size.1, FilterType::Lagrange)?;
         } else {
             wand.fit(output_size.0, output_size.1);
 
@@ -216,7 +202,7 @@ pub fn resize_image(
             // No alpha channel, but output format supports it, and
             // we are rotating by an angle that will add empty space.
             // Add alpha channel.
-            wand.set_image_alpha_channel(magick_rust::bindings::AlphaChannelOption_OnAlphaChannel)?;
+            wand.set_image_alpha_channel(AlphaChannelOption::On)?;
         }
 
         let pre_rotation_width = wand.get_image_width();

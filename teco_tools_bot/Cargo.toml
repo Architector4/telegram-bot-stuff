@@ -11,7 +11,7 @@ chrono = "0.4.38"
 crossbeam-channel = "0.5.12"
 html-escape = "0.2.13"
 log = "0.4.17"
-magick_rust = "0.21.0"
+magick_rust = "1.0.0"
 # This seems to depend on OpenSSL 3.3.0, but Fedora Server 40 only has 3.2.1.
 # Use "vendored" feature to work around that lmao
 native-tls = { version = "0.2.12", features = ["vendored"] }
