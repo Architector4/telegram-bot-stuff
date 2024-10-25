@@ -690,43 +690,76 @@ pub fn resize_video(
         // Now to transfer audio... This means we need a THIRD file to put the final result into.
         let muxfile = unfail!(NamedTempFile::new());
         // Will exclude cases of 0.0, -0.0, and all the NaNs and infinities
-        let distort_audio = vibrato_hz.is_normal() && vibrato_depth.is_normal();
+        let distort_audio = vibrato_hz.is_normal()
+            && vibrato_depth.is_normal()
+            && vibrato_hz >= 0.1
+            && vibrato_depth > 0.0;
 
-        let vibrato_str_temp;
+        let mut args = vec![
+            OsStr::new("-y"),
+            OsStr::new("-loglevel"),
+            OsStr::new("error"),
+            OsStr::new("-i"),
+            inputfile.as_ref(),
+            OsStr::new("-i"),
+            outputfile.path().as_ref(),
+            OsStr::new("-c:v"),
+            OsStr::new("copy"),
+            OsStr::new("-map"),
+            OsStr::new("1:v:0"),
+            OsStr::new("-map"),
+            OsStr::new("0:a:0"),
+            //OsStr::new(if distort_audio { "-af" } else { "-c:a" }),
+            //OsStr::new(if distort_audio {
+            //    vibrato_str_temp = format!(
+            //        "vibrato=f={}:d={},aformat=s16p",
+            //        vibrato_hz.max(0.1).min(20000.0),
+            //        vibrato_depth.max(0.0).min(1.0)
+            //    );
+            //    vibrato_str_temp.as_str()
+            //} else {
+            //    "copy"
+            //}),
+            //OsStr::new("-f"),
+            //OsStr::new("mp4"),
+            //OsStr::new("-preset"),
+            //OsStr::new("slow"),
+            //muxfile.path().as_ref(),
+        ];
 
-        let audiomuxer = Command::new("ffmpeg")
-            .args([
-                OsStr::new("-y"),
-                OsStr::new("-loglevel"),
-                OsStr::new("error"),
-                OsStr::new("-i"),
-                inputfile.as_ref(),
-                OsStr::new("-i"),
-                outputfile.path().as_ref(),
-                OsStr::new("-c:v"),
-                OsStr::new("copy"),
-                OsStr::new("-map"),
-                OsStr::new("1:v:0"),
-                OsStr::new("-map"),
-                OsStr::new("0:a:0"),
-                OsStr::new(if distort_audio { "-af" } else { "-c:a" }),
-                OsStr::new(if distort_audio {
-                    vibrato_str_temp = format!(
-                        "vibrato=f={}:d={},aformat=s16p",
-                        vibrato_hz.max(0.1).min(20000.0),
-                        vibrato_depth.max(0.0).min(1.0)
-                    );
-                    vibrato_str_temp.as_str()
-                } else {
-                    "copy"
-                }),
-                OsStr::new("-f"),
-                OsStr::new("mp4"),
-                OsStr::new("-preset"),
-                OsStr::new("slow"),
-                muxfile.path().as_ref(),
-            ])
-            .spawn();
+        let mut vibrato_str_temp: String = String::new();
+
+        if distort_audio {
+            args.push(OsStr::new("-af"));
+
+            let mut vibrato_depth_left = vibrato_depth;
+            while vibrato_depth_left > 0.0 {
+                use std::fmt::Write;
+                write!(
+                    vibrato_str_temp,
+                    "vibrato=f={}:d={},aformat=s16p,",
+                    vibrato_hz.min(20000.0),
+                    vibrato_depth.min(1.0)
+                )
+                .expect("this literally cannot panic");
+
+                vibrato_depth_left -= 1.0;
+            }
+
+            args.push(vibrato_str_temp.as_ref());
+        }
+
+        args.extend_from_slice(&[
+            OsStr::new("-f"),
+            OsStr::new("mp4"),
+            OsStr::new("-preset"),
+            OsStr::new("slow"),
+            muxfile.path().as_ref(),
+        ]);
+
+        println!("{:#?}", args);
+
+        let audiomuxer = Command::new("ffmpeg").args(args).spawn();
 
         unfail!(unfail!(audiomuxer).wait());
 
