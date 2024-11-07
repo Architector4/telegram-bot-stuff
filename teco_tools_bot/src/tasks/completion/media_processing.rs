@@ -684,8 +684,9 @@ pub fn resize_video(
     });
 
     // Try to find an error and fail on it, if any lol
-    let reduce = writing_stream.reduce(|| Ok(()), |a, b| if b.is_err() { b } else { a });
-    unfail!(reduce);
+    if let Some(err) = writing_stream.find_any(Result::is_err) {
+        unfail!(err);
+    }
 
     let _ = status_report.send("Finalizing...".to_string());
 
