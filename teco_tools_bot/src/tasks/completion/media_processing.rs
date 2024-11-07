@@ -8,6 +8,7 @@ use std::{
     sync::OnceLock,
 };
 
+use log::error;
 use rayon::prelude::*;
 use tokio::sync::watch::Sender;
 
@@ -578,84 +579,100 @@ pub fn resize_video(
     let outputfilepath_for_encoder = outputfile.path().as_os_str().to_os_string();
     let status_report_for_encoder = status_report.clone();
 
-    let encoder_thread = std::thread::spawn(move || {
-        let frame_receiver = frame_receiver;
-        let mut encoder = Command::new("ffmpeg")
-            .args([
-                OsStr::new("-y"),
-                OsStr::new("-loglevel"),
-                OsStr::new("error"),
-                OsStr::new("-framerate"),
-                OsStr::new(input_frame_rate.to_string().as_str()),
-                OsStr::new("-i"),
-                OsStr::new("-"),
-                OsStr::new("-vf"), // Pad uneven pixels with black.
-                OsStr::new("pad=ceil(iw/2)*2:ceil(ih/2)*2"),
-                // I'd prefer the crop filter instead, but it leaves
-                // a chance of cropping to 0 width/height and stuff breaking :(
-                //OsStr::new("crop=trunc(iw/2)*2:trunc(ih/2)*2"),
-                OsStr::new("-pix_fmt"),
-                OsStr::new("yuv420p"),
-                OsStr::new("-f"),
-                OsStr::new("mp4"),
-                outputfilepath_for_encoder.as_ref(),
-            ])
-            .stdin(Stdio::piped())
-            .spawn()
-            .expect("Spawning encoder failed!");
-        let mut encoder_stdin = encoder.stdin.take().unwrap();
+    let encoder_thread = std::thread::Builder::new()
+        .name(String::from("Encoder thread"))
+        .spawn(move || {
+            let frame_receiver = frame_receiver;
+            let Ok(mut encoder) = Command::new("ffmpeg")
+                .args([
+                    OsStr::new("-y"),
+                    OsStr::new("-loglevel"),
+                    OsStr::new("error"),
+                    OsStr::new("-framerate"),
+                    OsStr::new(input_frame_rate.to_string().as_str()),
+                    OsStr::new("-i"),
+                    OsStr::new("-"),
+                    OsStr::new("-vf"), // Pad uneven pixels with black.
+                    OsStr::new("pad=ceil(iw/2)*2:ceil(ih/2)*2"),
+                    // I'd prefer the crop filter instead, but it leaves
+                    // a chance of cropping to 0 width/height and stuff breaking :(
+                    //OsStr::new("crop=trunc(iw/2)*2:trunc(ih/2)*2"),
+                    OsStr::new("-pix_fmt"),
+                    OsStr::new("yuv420p"),
+                    OsStr::new("-f"),
+                    OsStr::new("mp4"),
+                    outputfilepath_for_encoder.as_ref(),
+                ])
+                .stdin(Stdio::piped())
+                .spawn()
+            else {
+                log::error!("Spawning encoder failed!");
+                return;
+            };
+            let mut encoder_stdin = encoder.stdin.take().unwrap();
 
-        let _ = status_report_for_encoder.send("Waiting for the thread pool...".to_string());
+            let _ = status_report_for_encoder.send("Waiting for the thread pool...".to_string());
 
-        std::thread::spawn(move || {
-            let mut frame_number: usize = 0;
-            let mut frames_received: usize = 0;
-            let mut out_of_order_frames: Vec<(usize, Vec<u8>)> = Vec::new();
+            std::thread::Builder::new()
+                .name(String::from("Encoder pusher"))
+                .spawn(move || {
+                    let mut frame_number: usize = 0;
+                    let mut frames_received: usize = 0;
+                    let mut out_of_order_frames: Vec<(usize, Vec<u8>)> = Vec::new();
 
-            while let Ok(frame) = frame_receiver.recv() {
-                frames_received += 1;
-                if frame.0 == frame_number {
-                    // Frame received in order. Push it in directly.
-                    encoder_stdin
-                        .write_all(&frame.1)
-                        .expect("Failed writing frame to encoder!");
-                    frame_number += 1;
-                } else {
-                    // It's out of order. Push it away.
-                    out_of_order_frames.push(frame);
-                }
+                    while let Ok(frame) = frame_receiver.recv() {
+                        frames_received += 1;
+                        if frame.0 == frame_number {
+                            // Frame received in order. Push it in directly.
+                            if encoder_stdin.write_all(&frame.1).is_err() {
+                                error!("Failed writing frame to encoder!");
+                                return;
+                            }
+                            frame_number += 1;
+                        } else {
+                            // It's out of order. Push it away.
+                            out_of_order_frames.push(frame);
+                        }
 
-                if !out_of_order_frames.is_empty() {
-                    // If possible, send them in order.
+                        if !out_of_order_frames.is_empty() {
+                            // If possible, send them in order.
 
-                    while let Some(in_order_frame) =
-                        out_of_order_frames.iter().position(|x| x.0 == frame_number)
-                    {
-                        let in_order_frame = out_of_order_frames.swap_remove(in_order_frame);
+                            while let Some(in_order_frame) =
+                                out_of_order_frames.iter().position(|x| x.0 == frame_number)
+                            {
+                                let in_order_frame =
+                                    out_of_order_frames.swap_remove(in_order_frame);
 
-                        encoder_stdin
-                            .write_all(&in_order_frame.1)
-                            .expect("Failed writing frame to encoder!");
-                        frame_number += 1;
+                                if encoder_stdin.write_all(&in_order_frame.1).is_err() {
+                                    error!("Failed writing frame to encoder!");
+                                    return;
+                                }
+                                frame_number += 1;
+                            }
+                        }
+
+                        if input_frame_count != 0 {
+                            let _ = status_report_for_encoder
+                                .send(format!("Frame {} / {}", frames_received, input_frame_count));
+                        } else {
+                            let _ = status_report_for_encoder
+                                .send(format!("Frame {}", frames_received));
+                        }
                     }
-                }
+                    drop(encoder_stdin);
+                })
+                .unwrap();
 
-                if input_frame_count != 0 {
-                    let _ = status_report_for_encoder
-                        .send(format!("Frame {} / {}", frames_received, input_frame_count));
-                } else {
-                    let _ = status_report_for_encoder.send(format!("Frame {}", frames_received));
-                }
+            if encoder.wait().is_err() {
+                error!("Encoder process died!");
             }
-            drop(encoder_stdin);
-        });
-
-        encoder.wait().expect("Encoder died!");
-    });
+        })
+        .unwrap();
 
     let writing_stream = converted_image_stream.map(|frame| match frame {
         Ok(frame) => {
             let Ok(()) = frame_sender.send(frame) else {
+                error!("Failed sending frame to encoder!");
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::UnexpectedEof,
                     "Failed sending frame to encoder!",
