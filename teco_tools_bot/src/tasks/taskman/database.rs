@@ -414,10 +414,10 @@ impl Database {
     }
 
     pub async fn user_has_too_much_tasks(&self, user: Option<UserId>) -> Result<bool, Error> {
-
         let parallelisms = std::thread::available_parallelism()
             .map(|x| x.get())
-            .unwrap_or_default().max(3);
+            .unwrap_or_default()
+            .max(3);
 
         sqlx::query("SELECT 1 FROM tasks WHERE userid=? GROUP BY userid HAVING COUNT(*) >= ?")
             .bind(user.map(|x| x.0 as i64))
