@@ -56,12 +56,12 @@ pub async fn check_spam_html(
 /// This function does not check if the passed HTML is actually from Telegram,
 /// so don't use it for pages that aren't.
 pub fn check_spam_telegram_html(html: &str) -> bool {
-    if html.contains("<span dir=\"auto\">American groundhog 🇺🇸</span>") {
+    if html.contains("<span dir=\"auto\">American groundhog 🇺🇸") {
         // buh-bye!
         return true;
     }
 
-    if html.contains("<span dir=\"auto\">WikiLeaks</span>")
+    if html.contains("<span dir=\"auto\">WikiLeaks")
         && html.contains("We are here to bring you the truth")
     {
         return true;
