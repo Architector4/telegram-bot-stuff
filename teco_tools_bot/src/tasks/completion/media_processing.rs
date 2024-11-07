@@ -757,8 +757,6 @@ pub fn resize_video(
             muxfile.path().as_ref(),
         ]);
 
-        println!("{:#?}", args);
-
         let audiomuxer = Command::new("ffmpeg").args(args).spawn();
 
         unfail!(unfail!(audiomuxer).wait());
