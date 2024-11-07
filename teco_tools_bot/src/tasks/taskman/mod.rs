@@ -53,8 +53,25 @@ impl Taskman {
         });
 
         tokio::task::spawn(queue_counter_spinjob(Arc::downgrade(&taskman)));
-        tokio::task::spawn(task_completion_spinjob(Arc::downgrade(&taskman), false));
-        tokio::task::spawn(task_completion_spinjob(Arc::downgrade(&taskman), true));
+
+        // Closure that spawns a task completion spinjob
+        let spawntask = |premium| {
+            tokio::task::spawn(task_completion_spinjob(Arc::downgrade(&taskman), premium))
+        };
+
+        let parallelisms = std::thread::available_parallelism()
+            .map(|x| x.get())
+            .unwrap_or(2);
+
+        // Spawn two tasks per each pair of parallelisms, at least once
+        for _ in 0..parallelisms.max(2) / 2 {
+            spawntask(false);
+            spawntask(true);
+        }
+        if parallelisms % 2 > 0 {
+            // If we have an odd amount of parallelisms, spawn an extra task for that one
+            spawntask(true);
+        }
 
         taskman
     }
