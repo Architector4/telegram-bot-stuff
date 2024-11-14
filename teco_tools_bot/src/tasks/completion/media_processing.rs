@@ -9,7 +9,6 @@ use std::{
 };
 
 use log::error;
-use rayon::prelude::*;
 use tokio::sync::watch::Sender;
 
 use magick_rust::{AlphaChannelOption, FilterType, MagickError, MagickWand, PixelWand};
@@ -523,7 +522,6 @@ pub fn resize_video(
     let converted_image_stream = {
         SplitIntoBmps::<ChildStdout>::new(data_stream)
             .enumerate()
-            .par_bridge()
             .map(|(count, frame)| match frame {
                 Ok(frame) => {
                     let curved_width = resize_curve.apply_resize_for(
@@ -669,7 +667,7 @@ pub fn resize_video(
         })
         .unwrap();
 
-    let writing_stream = converted_image_stream.map(|frame| match frame {
+    let mut writing_stream = converted_image_stream.map(|frame| match frame {
         Ok(frame) => {
             let Ok(()) = frame_sender.send(frame) else {
                 error!("Failed sending frame to encoder!");
@@ -684,7 +682,7 @@ pub fn resize_video(
     });
 
     // Try to find an error and fail on it, if any lol
-    if let Some(err) = writing_stream.find_any(Result::is_err) {
+    if let Some(err) = writing_stream.find(Result::is_err) {
         unfail!(err);
     }
 
