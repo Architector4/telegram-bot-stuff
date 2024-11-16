@@ -338,11 +338,15 @@ async fn gather_suspicion(
 
     let text = text.to_lowercase();
 
-    if text.contains("spam")
-        || text.contains("scam")
-        || text.contains("admin")
-        || text.contains("begone")
-    {
+    // Old check that captured links in a wider net.
+    // Now our review queue is too big, so this is scaled
+    // down to only handling the explicit /spam and /scam commands.
+
+    //if text.contains("spam")
+    //    || text.contains("scam")
+    //    || text.contains("admin")
+    //    || text.contains("begone")
+    if text.starts_with("/spam") | text.starts_with("/scam") {
         // This or replied-to message has sus links.
         // Tag them.
 
@@ -422,7 +426,9 @@ async fn gather_suspicion(
         let already_marked_spam = already_marked_spam_count > 0;
         let manually_reviewed_not_spam = manually_reviewed_not_spam_count > 0;
 
-        if text.starts_with("/spam") | text.starts_with("/scam") {
+        //if text.starts_with("/spam") | text.starts_with("/scam")
+        // This condition is moved to the top of the function now.
+        {
             // That's the bot command, most likely. Users like indication that it does things.
 
             // Purposefully ambiguous message wording, where "this" both refers to the
