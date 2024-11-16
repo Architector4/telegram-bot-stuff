@@ -13,6 +13,7 @@ use crate::{
     database::Database,
     parse_url_like_telegram,
     types::{Domain, IsSpam, ReviewResponse},
+    CONTROL_CHAT_ID,
 };
 
 pub mod reviews;
@@ -461,6 +462,30 @@ async fn gather_suspicion(
             };
             bot.archsendmsg(message.chat.id, response, message.id)
                 .await?;
+        }
+
+        if marked {
+            // We marked something. In this case, notify reviewers to review.
+
+            let to_review = database.get_review_count().await.expect("Database died!");
+            // Should always be true, considering context above, but eh.
+            if to_review > 0 {
+                // We don't care if this fails lmao
+                let _ = bot
+                    .archsendmsg(
+                        CONTROL_CHAT_ID,
+                        format!(
+                            concat!(
+                                "New link was added to review pool.\n",
+                                "There are {} links to review."
+                            ),
+                            to_review
+                        )
+                        .as_str(),
+                        None,
+                    )
+                    .await;
+            }
         }
     }
 

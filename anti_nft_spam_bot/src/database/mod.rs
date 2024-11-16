@@ -525,6 +525,21 @@ impl Database {
         Ok(())
     }
 
+    /// Count and return the amount of links left to review.
+    pub async fn get_review_count(&self) -> Result<u32, Error> {
+        sqlx::query(
+            "SELECT SUM(A) FROM
+                (
+                    SELECT COUNT(*) AS A FROM urls WHERE is_spam=2
+                UNION ALL
+                    SELECT COUNT(*) AS A FROM domains WHERE is_spam=2
+                );",
+        )
+        .map(|x: SqliteRow| x.get(0))
+        .fetch_one(&self.pool)
+        .await
+    }
+
     /// Get a URL, and its database table and ID, for review, and its state in the database.
     pub async fn get_url_for_review(&self) -> Result<Option<(Url, &str, i64, IsSpam)>, Error> {
         // Get the mutex. It'll be unlocked at the end of the function
