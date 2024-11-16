@@ -375,6 +375,9 @@ async fn gather_suspicion(
         let mut already_marked_spam_count = 0u32;
         let mut manually_reviewed_not_spam_count = 0u32;
 
+        use std::fmt::Write;
+        let mut links_marked = String::new();
+
         macro_rules! marksus {
             ($url: expr, $domain: expr) => {
                 log::debug!("Marking {} and its domain as sus...", $url);
@@ -390,7 +393,10 @@ async fn gather_suspicion(
                     use crate::types::MarkSusResult::*;
 
                     match result {
-                        Marked => marked_count += 1,
+                        Marked => {
+                            let _ = writeln!(links_marked, "<code>{}</code>", $url);
+                            marked_count += 1
+                        }
                         AlreadyMarkedSus => already_marked_sus_count += 1,
                         AlreadyMarkedSpam => already_marked_spam_count += 1,
                         ManuallyReviewedNotSpam => manually_reviewed_not_spam_count += 1,
@@ -482,10 +488,10 @@ async fn gather_suspicion(
                         CONTROL_CHAT_ID,
                         format!(
                             concat!(
-                                "New link was added to review pool.\n",
+                                "New link(s) were added to review pool:\n{}",
                                 "There are {} links to review."
                             ),
-                            to_review
+                            links_marked, to_review
                         )
                         .as_str(),
                         None,
