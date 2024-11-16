@@ -15,7 +15,7 @@ log = "0.4.17"
 native-tls = { version = "0.2.12", features = ["vendored"] }
 notify = { version = "6.1.1", default-features = false, features = ["macos_kqueue"] }
 reqwest = "0.11.24"
-sqlx = { version = "0.7.3", features = [
+sqlx = { version = "0.8.2", features = [
 	"sqlite",
 	"chrono",
 	"runtime-tokio-rustls",
