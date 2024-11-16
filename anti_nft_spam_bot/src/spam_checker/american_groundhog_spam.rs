@@ -111,9 +111,10 @@ mod tests {
         // https://telegra.ph/2-out-of-3-Simpsons-Predictions-in-BANNED-Episode-Come-True-Third-One-Targeting-Donald-Trump-Expected-for-April-30-04-29
     }
 
-    #[tokio::test]
-    async fn detect_wikileaks() {
-        check_url("https://telegra.ph/Sex-Trafficking-Ring-Organized-By-Famous-People-03-31").await;
-        check_url("https://telegra.ph/No-Way-He-Did-That-05-28").await;
-    }
+    // Same issue as above.
+    //#[tokio::test]
+    //async fn detect_wikileaks() {
+    //    check_url("https://telegra.ph/Sex-Trafficking-Ring-Organized-By-Famous-People-03-31").await;
+    //    check_url("https://telegra.ph/No-Way-He-Did-That-05-28").await;
+    //}
 }
