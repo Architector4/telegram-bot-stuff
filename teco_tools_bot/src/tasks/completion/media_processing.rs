@@ -144,8 +144,8 @@ pub fn resize_image(
             // A bit of a safeguard. I don't want to hold images this big
             // in memory lol
             if size_pre_crop.0 > 16384 {
-                size_pre_crop.1 = (size_pre_crop.1 * size_pre_crop.0) / 16384;
                 size_pre_crop.0 = 16384;
+                size_pre_crop.1 = (size_pre_crop.1 * size_pre_crop.0) / 16384;
             }
             if size_pre_crop.1 > 16384 {
                 size_pre_crop.0 = (size_pre_crop.0 * size_pre_crop.1) / 16384;
@@ -519,57 +519,55 @@ pub fn resize_video(
     let mut decoder = unfail!(decoder);
     let data_stream = decoder.stdout.take().unwrap();
 
-    let converted_image_stream = {
-        SplitIntoBmps::<ChildStdout>::new(data_stream)
-            .enumerate()
-            .map(|(count, frame)| match frame {
-                Ok(frame) => {
-                    let curved_width = resize_curve.apply_resize_for(
-                        count,
-                        input_frame_count,
-                        input_dimensions.0 as f64,
-                        width as f64,
-                    );
-                    let curved_height = resize_curve.apply_resize_for(
-                        count,
-                        input_frame_count,
-                        input_dimensions.1 as f64,
-                        height as f64,
-                    );
-                    let curved_rotation =
-                        resize_curve.apply_resize_for(count, input_frame_count, 0.0, rotation);
+    let converted_image_stream = SplitIntoBmps::<ChildStdout>::new(data_stream)
+        .enumerate()
+        .map(|(count, frame)| match frame {
+            Ok(frame) => {
+                let curved_width = resize_curve.apply_resize_for(
+                    count,
+                    input_frame_count,
+                    input_dimensions.0 as f64,
+                    width as f64,
+                );
+                let curved_height = resize_curve.apply_resize_for(
+                    count,
+                    input_frame_count,
+                    input_dimensions.1 as f64,
+                    height as f64,
+                );
+                let curved_rotation =
+                    resize_curve.apply_resize_for(count, input_frame_count, 0.0, rotation);
 
-                    // Check if this operation changes the image at all.
-                    // If the dimensions (both target and output) and rotation
-                    // are the same, it doesn't.
-                    let input_dimensions = get_bmp_width_height(&frame);
-                    let resize_result = if rotation.abs() == 0.0
-                        && input_dimensions == Some((output_width as isize, output_height as isize))
-                        && input_dimensions == Some((curved_width as isize, curved_height as isize))
-                    {
-                        // It doesn't. Just return the same buffer directly.
-                        Ok(frame)
-                    } else {
-                        resize_image(
-                            &frame,
-                            curved_width as isize,
-                            curved_height as isize,
-                            curved_rotation,
-                            resize_type,
-                            ImageFormat::Bmp,
-                            Some((output_width, output_height, stretch_to_output_size)),
-                            is_curved, // Prevent bounds bouncing.
-                        )
-                    };
+                // Check if this operation changes the image at all.
+                // If the dimensions (both target and output) and rotation
+                // are the same, it doesn't.
+                let input_dimensions = get_bmp_width_height(&frame);
+                let resize_result = if rotation.abs() == 0.0
+                    && input_dimensions == Some((output_width as isize, output_height as isize))
+                    && input_dimensions == Some((curved_width as isize, curved_height as isize))
+                {
+                    // It doesn't. Just return the same buffer directly.
+                    Ok(frame)
+                } else {
+                    resize_image(
+                        &frame,
+                        curved_width as isize,
+                        curved_height as isize,
+                        curved_rotation,
+                        resize_type,
+                        ImageFormat::Bmp,
+                        Some((output_width, output_height, stretch_to_output_size)),
+                        is_curved, // Prevent bounds bouncing.
+                    )
+                };
 
-                    match resize_result {
-                        Ok(resize) => Ok((count, resize)),
-                        Err(e) => Err(std::io::Error::other(e)),
-                    }
+                match resize_result {
+                    Ok(resize) => Ok((count, resize)),
+                    Err(e) => Err(std::io::Error::other(e)),
                 }
-                Err(e) => Err(e),
-            })
-    };
+            }
+            Err(e) => Err(e),
+        });
 
     let _ = status_report.send("Initializing encoder...".to_string());
 
@@ -615,48 +613,24 @@ pub fn resize_video(
                 .name(String::from("Encoder pusher"))
                 .spawn(move || {
                     let mut frame_number: usize = 0;
-                    let mut frames_received: usize = 0;
-                    let mut out_of_order_frames: Vec<(usize, Vec<u8>)> = Vec::new();
 
                     while let Ok(frame) = frame_receiver.recv() {
-                        frames_received += 1;
-                        if frame.0 == frame_number {
-                            // Frame received in order. Push it in directly.
-                            if encoder_stdin.write_all(&frame.1).is_err() {
-                                error!("Failed writing frame to encoder!");
-                                return;
-                            }
-                            frame_number += 1;
-                        } else {
-                            // It's out of order. Push it away.
-                            out_of_order_frames.push(frame);
+                        // Assert that incoming frames are perfectly sequential.
+                        assert_eq!(frame.0, frame_number);
+                        frame_number += 1;
+                        if encoder_stdin.write_all(frame.1.as_slice()).is_err() {
+                            error!("Failed writing frame to encoder!");
+                            return;
                         }
-
-                        if !out_of_order_frames.is_empty() {
-                            // If possible, send them in order.
-
-                            while let Some(in_order_frame) =
-                                out_of_order_frames.iter().position(|x| x.0 == frame_number)
-                            {
-                                let in_order_frame =
-                                    out_of_order_frames.swap_remove(in_order_frame);
-
-                                if encoder_stdin.write_all(&in_order_frame.1).is_err() {
-                                    error!("Failed writing frame to encoder!");
-                                    return;
-                                }
-                                frame_number += 1;
-                            }
-                        }
-
                         if input_frame_count != 0 {
                             let _ = status_report_for_encoder
-                                .send(format!("Frame {} / {}", frames_received, input_frame_count));
+                                .send(format!("Frame {} / {}", frame_number, input_frame_count));
                         } else {
-                            let _ = status_report_for_encoder
-                                .send(format!("Frame {}", frames_received));
+                            let _ =
+                                status_report_for_encoder.send(format!("Frame {}", frame_number));
                         }
                     }
+
                     drop(encoder_stdin);
                 })
                 .unwrap();
