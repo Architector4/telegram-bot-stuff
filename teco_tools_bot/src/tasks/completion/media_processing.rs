@@ -593,7 +593,7 @@ pub fn resize_video(
             OsStr::new("yuv420p"),
             OsStr::new("-f"),
             OsStr::new("mp4"),
-            outputfile.path().as_os_str()
+            outputfile.path().as_os_str(),
         ])
         .stdin(Stdio::piped())
         .spawn();
@@ -604,8 +604,7 @@ pub fn resize_video(
         Ok(frame) => {
             encoder_stdin.write_all(frame.1.as_slice())?;
             if input_frame_count != 0 {
-                let _ = status_report
-                    .send(format!("Frame {} / {}", frame.0, input_frame_count));
+                let _ = status_report.send(format!("Frame {} / {}", frame.0, input_frame_count));
             } else {
                 let _ = status_report.send(format!("Frame {}", frame.0));
             }
