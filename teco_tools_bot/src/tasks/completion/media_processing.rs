@@ -476,14 +476,20 @@ pub fn resize_video(
     // cases, the very slight mismatch causes black bars on edges
     // of the image to pop in and out.
     let stretch_to_output_size = if is_curved {
-        let input_width = input_dimensions.0 as f64;
-        let input_height = input_dimensions.1 as f64;
+        if width < 0 || height < 0 {
+            // If target is flipped or flopped or both,
+            // don't stretch.
+            false
+        } else {
+            let input_width = input_dimensions.0 as f64;
+            let input_height = input_dimensions.1 as f64;
 
-        // "max" to avoid inf/NaN values
-        let end_width = f64::abs(width as f64).max(1.0);
-        let end_height = f64::abs(height as f64).max(1.0);
+            // "max" to avoid inf/NaN values
+            let end_width = (width as f64).max(1.0);
+            let end_height = (height as f64).max(1.0);
 
-        approx_same_aspect_ratio((input_width, input_height), (end_width, end_height))
+            approx_same_aspect_ratio((input_width, input_height), (end_width, end_height))
+        }
     } else {
         false
     };
