@@ -575,9 +575,6 @@ pub fn resize_video(
 
     let _ = status_report.send("Initializing encoder...".to_string());
 
-    let outputfilepath_for_encoder = outputfile.path().as_os_str().to_os_string();
-    let status_report_for_encoder = status_report.clone();
-
     let encoder = Command::new("ffmpeg")
         .args([
             OsStr::new("-y"),
@@ -596,7 +593,7 @@ pub fn resize_video(
             OsStr::new("yuv420p"),
             OsStr::new("-f"),
             OsStr::new("mp4"),
-            outputfilepath_for_encoder.as_ref(),
+            outputfile.path().as_os_str()
         ])
         .stdin(Stdio::piped())
         .spawn();
@@ -607,10 +604,10 @@ pub fn resize_video(
         Ok(frame) => {
             encoder_stdin.write_all(frame.1.as_slice())?;
             if input_frame_count != 0 {
-                let _ = status_report_for_encoder
+                let _ = status_report
                     .send(format!("Frame {} / {}", frame.0, input_frame_count));
             } else {
-                let _ = status_report_for_encoder.send(format!("Frame {}", frame.0));
+                let _ = status_report.send(format!("Frame {}", frame.0));
             }
 
             Ok(())
