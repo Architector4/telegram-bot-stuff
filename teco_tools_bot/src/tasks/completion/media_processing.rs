@@ -8,7 +8,6 @@ use std::{
     sync::OnceLock,
 };
 
-use log::error;
 use tokio::sync::watch::Sender;
 
 use magick_rust::{AlphaChannelOption, FilterType, MagickError, MagickWand, PixelWand};
@@ -244,7 +243,7 @@ struct SplitIntoBmps<T: Read> {
 }
 
 impl<T: Read> SplitIntoBmps<T> {
-    pub fn new<N: Read>(item: N) -> SplitIntoBmps<N> {
+    pub fn new(item: T) -> SplitIntoBmps<T> {
         SplitIntoBmps {
             item,
             // Somewhere about enough to fit a 2048x204832-bits-per-pixel image
@@ -515,11 +514,10 @@ pub fn resize_video(
         ])
         .stdout(Stdio::piped())
         .spawn();
-
     let mut decoder = unfail!(decoder);
-    let data_stream = decoder.stdout.take().unwrap();
+    let decoder_stdout = decoder.stdout.take().unwrap();
 
-    let converted_image_stream = SplitIntoBmps::<ChildStdout>::new(data_stream)
+    let converted_image_stream = SplitIntoBmps::<ChildStdout>::new(decoder_stdout)
         .enumerate()
         .map(|(count, frame)| match frame {
             Ok(frame) => {
@@ -571,85 +569,44 @@ pub fn resize_video(
 
     let _ = status_report.send("Initializing encoder...".to_string());
 
-    let (frame_sender, frame_receiver) = crossbeam_channel::bounded::<(usize, Vec<u8>)>(256);
     let outputfilepath_for_encoder = outputfile.path().as_os_str().to_os_string();
     let status_report_for_encoder = status_report.clone();
 
-    let encoder_thread = std::thread::Builder::new()
-        .name(String::from("Encoder thread"))
-        .spawn(move || {
-            let frame_receiver = frame_receiver;
-            let Ok(mut encoder) = Command::new("ffmpeg")
-                .args([
-                    OsStr::new("-y"),
-                    OsStr::new("-loglevel"),
-                    OsStr::new("error"),
-                    OsStr::new("-framerate"),
-                    OsStr::new(input_frame_rate.to_string().as_str()),
-                    OsStr::new("-i"),
-                    OsStr::new("-"),
-                    OsStr::new("-vf"), // Pad uneven pixels with black.
-                    OsStr::new("pad=ceil(iw/2)*2:ceil(ih/2)*2"),
-                    // I'd prefer the crop filter instead, but it leaves
-                    // a chance of cropping to 0 width/height and stuff breaking :(
-                    //OsStr::new("crop=trunc(iw/2)*2:trunc(ih/2)*2"),
-                    OsStr::new("-pix_fmt"),
-                    OsStr::new("yuv420p"),
-                    OsStr::new("-f"),
-                    OsStr::new("mp4"),
-                    outputfilepath_for_encoder.as_ref(),
-                ])
-                .stdin(Stdio::piped())
-                .spawn()
-            else {
-                log::error!("Spawning encoder failed!");
-                return;
-            };
-            let mut encoder_stdin = encoder.stdin.take().unwrap();
-
-            let _ = status_report_for_encoder.send("Waiting for the thread pool...".to_string());
-
-            std::thread::Builder::new()
-                .name(String::from("Encoder pusher"))
-                .spawn(move || {
-                    let mut frame_number: usize = 0;
-
-                    while let Ok(frame) = frame_receiver.recv() {
-                        // Assert that incoming frames are perfectly sequential.
-                        assert_eq!(frame.0, frame_number);
-                        frame_number += 1;
-                        if encoder_stdin.write_all(frame.1.as_slice()).is_err() {
-                            error!("Failed writing frame to encoder!");
-                            return;
-                        }
-                        if input_frame_count != 0 {
-                            let _ = status_report_for_encoder
-                                .send(format!("Frame {} / {}", frame_number, input_frame_count));
-                        } else {
-                            let _ =
-                                status_report_for_encoder.send(format!("Frame {}", frame_number));
-                        }
-                    }
-
-                    drop(encoder_stdin);
-                })
-                .unwrap();
-
-            if encoder.wait().is_err() {
-                error!("Encoder process died!");
-            }
-        })
-        .unwrap();
+    let encoder = Command::new("ffmpeg")
+        .args([
+            OsStr::new("-y"),
+            OsStr::new("-loglevel"),
+            OsStr::new("error"),
+            OsStr::new("-framerate"),
+            OsStr::new(input_frame_rate.to_string().as_str()),
+            OsStr::new("-i"),
+            OsStr::new("-"),
+            OsStr::new("-vf"), // Pad uneven pixels with black.
+            OsStr::new("pad=ceil(iw/2)*2:ceil(ih/2)*2"),
+            // I'd prefer the crop filter instead, but it leaves
+            // a chance of cropping to 0 width/height and stuff breaking :(
+            //OsStr::new("crop=trunc(iw/2)*2:trunc(ih/2)*2"),
+            OsStr::new("-pix_fmt"),
+            OsStr::new("yuv420p"),
+            OsStr::new("-f"),
+            OsStr::new("mp4"),
+            outputfilepath_for_encoder.as_ref(),
+        ])
+        .stdin(Stdio::piped())
+        .spawn();
+    let mut encoder = unfail!(encoder);
+    let mut encoder_stdin = encoder.stdin.take().unwrap();
 
     let mut writing_stream = converted_image_stream.map(|frame| match frame {
         Ok(frame) => {
-            let Ok(()) = frame_sender.send(frame) else {
-                error!("Failed sending frame to encoder!");
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "Failed sending frame to encoder!",
-                ));
-            };
+            encoder_stdin.write_all(frame.1.as_slice())?;
+            if input_frame_count != 0 {
+                let _ = status_report_for_encoder
+                    .send(format!("Frame {} / {}", frame.0, input_frame_count));
+            } else {
+                let _ = status_report_for_encoder.send(format!("Frame {}", frame.0));
+            }
+
             Ok(())
         }
         Err(e) => Err(e),
@@ -662,18 +619,9 @@ pub fn resize_video(
 
     let _ = status_report.send("Finalizing...".to_string());
 
-    drop(frame_sender);
-
-    let encoder_thread = encoder_thread.join().map_err(|e| {
-        if let Ok(e) = e.downcast::<Box<&'static str>>() {
-            **e
-        } else {
-            "Joining encoder thread failed!"
-        }
-    });
-
+    drop(encoder_stdin);
     unfail!(decoder.wait());
-    unfail!(encoder_thread);
+    unfail!(encoder.wait());
 
     let mut finalfile = if has_audio && !strip_audio {
         let _ = status_report.send("Writing audio...".to_string());
@@ -699,22 +647,6 @@ pub fn resize_video(
             OsStr::new("1:v:0"),
             OsStr::new("-map"),
             OsStr::new("0:a:0"),
-            //OsStr::new(if distort_audio { "-af" } else { "-c:a" }),
-            //OsStr::new(if distort_audio {
-            //    vibrato_str_temp = format!(
-            //        "vibrato=f={}:d={},aformat=s16p",
-            //        vibrato_hz.max(0.1).min(20000.0),
-            //        vibrato_depth.max(0.0).min(1.0)
-            //    );
-            //    vibrato_str_temp.as_str()
-            //} else {
-            //    "copy"
-            //}),
-            //OsStr::new("-f"),
-            //OsStr::new("mp4"),
-            //OsStr::new("-preset"),
-            //OsStr::new("slow"),
-            //muxfile.path().as_ref(),
         ];
 
         let mut vibrato_str_temp: String = String::new();
