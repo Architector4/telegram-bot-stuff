@@ -9,7 +9,6 @@ use sqlx::{
     Executor, Row, Sqlite,
 };
 use teloxide::types::{ChatId, Message, MessageId, UserId};
-use tokio::sync::Mutex;
 use tokio_stream::Stream;
 
 use crate::{tasks::Task, OWNER_ID};
@@ -54,7 +53,6 @@ impl TaskDatabaseInfo {
 
 pub struct Database {
     pool: Pool,
-    grabbing_task_mutex: Mutex<()>,
 }
 
 impl Database {
@@ -152,7 +150,6 @@ impl Database {
 
         let woot = Database {
             pool,
-            grabbing_task_mutex: Mutex::new(()),
         };
 
         woot.idle_cleanup().await;
@@ -383,18 +380,24 @@ impl Database {
     }
 
     pub async fn grab_task(&self, premium: bool) -> Result<Option<TaskDatabaseInfo>, Error> {
-        // Will be dropped by the end of this function
-        let _mutex = self.grabbing_task_mutex.lock().await;
-
         let now = Utc::now();
-        // Select a task
+        // Select a task. Find a fitting one to complete,
+        // then set it as in-progress and return its ID.
         let Some(taskid): Option<i64> = sqlx::query(
-            "SELECT taskid FROM tasks
+            "UPDATE tasks SET in_progress = 1
+            FROM (
+                SELECT
+                    min(taskid) AS minid
+                FROM
+                    tasks
+                WHERE
+                    in_progress=0 AND
+                    premium=? AND
+                    COALESCE(delay_processing_until <= ?, 1)
+            ) AS fitting_task
             WHERE
-                in_progress=0 AND
-                premium=? AND
-                COALESCE(delay_processing_until <= ?, 1)
-            ORDER BY taskid",
+                taskid=fitting_task.minid
+            RETURNING taskid",
         )
         .bind(premium)
         .bind(now)
@@ -404,11 +407,6 @@ impl Database {
         else {
             return Ok(None);
         };
-
-        sqlx::query("UPDATE tasks SET in_progress=1 WHERE taskid=?")
-            .bind(taskid)
-            .execute(&self.pool)
-            .await?;
 
         self.get_task_by_id(taskid).await
     }
