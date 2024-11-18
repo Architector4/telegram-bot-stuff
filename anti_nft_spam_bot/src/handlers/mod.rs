@@ -482,16 +482,34 @@ async fn gather_suspicion(
             let to_review = database.get_review_count().await.expect("Database died!");
             // Should always be true, considering context above, but eh.
             if to_review > 0 {
+                let username = if let Some(user) = message.from() {
+                    if let Some(username) = &user.username {
+                        format!("@{} (userid <code>{}</code>)", username, user.id)
+                    } else {
+                        format!("{} (userid <code>{}</code>)", user.full_name(), user.id)
+                    }
+                } else {
+                    "Anonymous".to_string()
+                };
+
+                let chatname = if let Some(username) = message.chat.username() {
+                    format!("@{} (chatid <code>{}</code>)", username, message.chat.id)
+                } else if let Some(title) = message.chat.title() {
+                    format!("{} (chatid <code>{}</code>)", title, message.chat.id)
+                } else {
+                    format!("Unknown (chatid <code>{}</code>)", message.chat.id)
+                };
+
                 // We don't care if this fails lmao
                 let _ = bot
                     .archsendmsg(
                         CONTROL_CHAT_ID,
                         format!(
                             concat!(
-                                "New link(s) were added to review pool:\n{}",
+                                "New link(s) were added to review pool by {} in {}:\n{}",
                                 "There are {} links to review."
                             ),
-                            links_marked, to_review
+                            username, chatname, links_marked, to_review
                         )
                         .as_str(),
                         None,
