@@ -6,6 +6,7 @@ use std::{
     path::Path,
     process::{ChildStdout, Command, Stdio},
     sync::OnceLock,
+    time::Duration,
 };
 
 use tokio::sync::watch::Sender;
@@ -325,79 +326,77 @@ pub fn count_video_frames_and_framerate_and_audio(
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, $desc))
         };
     }
-    let counter = Command::new("ffprobe")
+
+    let counter = Command::new("ffmpeg")
         .args([
-            OsStr::new("-loglevel"),
-            OsStr::new("error"),
-            OsStr::new("-count_frames"),
-            OsStr::new("-show_entries"),
-            OsStr::new("stream=nb_read_frames,codec_type"),
-            OsStr::new("-show_entries"),
-            OsStr::new("format=duration"),
-            OsStr::new("-of"),
-            OsStr::new("default=noprint_wrappers=1"),
+            OsStr::new("-stats"),
+            OsStr::new("-i"),
             path.as_ref(),
+            OsStr::new("-vsync"),
+            OsStr::new("passthrough"),
+            OsStr::new("-f"),
+            OsStr::new("null"),
+            OsStr::new("-"),
         ])
-        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()?;
 
     let output = counter.wait_with_output()?;
-    let Ok(output) = String::from_utf8(output.stdout) else {
-        goodbye!("Counter returned non UTF-8 response");
+    let Ok(output) = String::from_utf8(output.stderr) else {
+        goodbye!("Frame counter returned non UTF-8 response");
     };
 
-    // output may be in a format like
-    // codec_type=video
-    // nb_read_frames=69
-    // duration=69.420
-    // Or
-    // codec_type=audio
-    // avg_frame_rate=0/0
-    // codec_type=video
-    // nb_read_frames=80
-    // duration=1312.1312
+    // Output may be in a format like
+    // ...
+    // (OPTIONAL)  Stream #0:1(eng): Audio: pcm_s16le, 44100 Hz, stereo, s16, 1411 kb/s (default)
+    // ...
+    // frame= 2280 fps=0.0 q=-0.0 Lsize=N/A time=00:38:00.00 bitrate=N/A speed=3.19e+04x
+    // Whitespace after "frame=" is not guaranteed
 
-    let mut count = 0;
-    let mut observing_video_codecs = false;
-    let mut has_audio = false;
-    // Random ass default value lol
-    let mut duration = 10.0;
+    let audio_stream_regex = Regex::new(r" *Stream .*: Audio:.*").unwrap();
 
-    for line in output.lines() {
-        if let Some(line) = line.strip_prefix("duration=") {
-            let Ok(d) = line.parse::<f64>() else {
-                goodbye!("Duration couldn't be parsed");
-            };
-            duration = d;
-        }
+    let has_audio = audio_stream_regex.is_match(&output);
 
-        if line == "codec_type=audio" {
-            observing_video_codecs = false;
-            has_audio = true;
-            continue;
-        }
-        if line == "codec_type=video" {
-            observing_video_codecs = true;
-            continue;
-        }
-        if !observing_video_codecs {
-            continue;
-        }
+    let stats_line_regex = Regex::new(r"frame= *(\d+).*time=(\d+):(\d+):(\d+)\.(\d+).*").unwrap();
 
-        if let Some(line) = line.strip_prefix("nb_read_frames=") {
-            if line == "N/A" {
-                continue;
-            }
-            let Ok(this_count) = line.parse::<u64>() else {
-                goodbye!("Counter returned a non-integer");
-            };
-            count = this_count;
-        }
-    }
+    let Some(last_line) = output.lines().last() else {
+        goodbye!("Frame counter returned no output");
+    };
 
-    let framerate = count as f64 / duration;
+    let Some(captures) = stats_line_regex.captures(last_line) else {
+        goodbye!("Frame counter returned an invalid response");
+    };
 
-    Ok((count, framerate, has_audio))
+    assert_eq!(captures.len(), 6);
+
+    let Ok(frame_count): Result<u64, _> = captures[1].parse() else {
+        goodbye!("Failed to parse frame count");
+    };
+
+    let Ok(hours): Result<u64, _> = captures[2].parse() else {
+        goodbye!("Failed to parse hours in length");
+    };
+
+    let Ok(minutes): Result<u64, _> = captures[3].parse() else {
+        goodbye!("Failed to parse minutes in length");
+    };
+
+    let Ok(seconds): Result<u64, _> = captures[4].parse() else {
+        goodbye!("Failed to parse seconds in length");
+    };
+
+    let Ok(centiseconds): Result<u64, _> = captures[5].parse() else {
+        goodbye!("Failed to parse centiseconds in length");
+    };
+
+    let length: Duration = Duration::from_millis(10 * centiseconds)
+        + Duration::from_secs(seconds)
+        + Duration::from_secs(minutes * 60)
+        + Duration::from_secs(hours * 60 * 60);
+
+    let framerate = frame_count as f64 / length.as_secs_f64();
+
+    Ok((frame_count, framerate, has_audio))
 }
 
 fn approx_same_aspect_ratio(
