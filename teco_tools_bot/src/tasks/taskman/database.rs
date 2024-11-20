@@ -148,9 +148,7 @@ impl Database {
         pool.execute(sqlx::query("UPDATE tasks SET in_progress=0;"))
             .await?;
 
-        let woot = Database {
-            pool,
-        };
+        let woot = Database { pool };
 
         woot.idle_cleanup().await;
 
