@@ -13,7 +13,7 @@ use tempfile::NamedTempFile;
 
 use crate::{
     tasks::{
-        completion::media_processing::count_video_frames_and_framerate_and_audio,
+        completion::media_processing::count_video_frames_and_framerate_and_audio_and_length,
         parsing::TaskError, taskman::Taskman, ImageFormat, ResizeType, Task, VideoTypePreference,
     },
     MAX_DOWNLOAD_SIZE_MEGABYTES, OWNER_ID,
@@ -617,7 +617,8 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
                 let mut tempfile = NamedTempFile::new()?;
                 tempfile.write_all(&buf)?;
                 tempfile.flush()?;
-                let has_audio = count_video_frames_and_framerate_and_audio(tempfile.path())?.2;
+                let has_audio =
+                    count_video_frames_and_framerate_and_audio_and_length(tempfile.path())?.2;
                 Ok::<_, std::io::Error>(has_audio)
             };
 

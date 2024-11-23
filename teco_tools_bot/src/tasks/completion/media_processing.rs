@@ -318,9 +318,9 @@ fn get_bmp_width_height(buffer: &[u8]) -> Option<(isize, isize)> {
     Some((width as isize, height as isize))
 }
 
-pub fn count_video_frames_and_framerate_and_audio(
+pub fn count_video_frames_and_framerate_and_audio_and_length(
     path: &std::path::Path,
-) -> Result<(u64, f64, bool), std::io::Error> {
+) -> Result<(u64, f64, bool, Duration), std::io::Error> {
     macro_rules! goodbye {
         ($desc: expr) => {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, $desc))
@@ -352,40 +352,48 @@ pub fn count_video_frames_and_framerate_and_audio(
     // ...
     // frame= 2280 fps=0.0 q=-0.0 Lsize=N/A time=00:38:00.00 bitrate=N/A speed=3.19e+04x
     // Whitespace after "frame=" is not guaranteed
+    //
+    // If input is audio only, the first 'frame = 2280' field will not be present.
 
     let audio_stream_regex = Regex::new(r" *Stream .*: Audio:.*").unwrap();
 
     let has_audio = audio_stream_regex.is_match(&output);
 
-    let stats_line_regex = Regex::new(r"frame= *(\d+).*time=(\d+):(\d+):(\d+)\.(\d+).*").unwrap();
+    let frame_regex = Regex::new(r"frame= *(\d+).*").unwrap();
+    let time_regex = Regex::new(r".*time=(\d+):(\d+):(\d+)\.(\d+).*").unwrap();
 
     let Some(last_line) = output.lines().last() else {
         goodbye!("Frame counter returned no output");
     };
 
-    let Some(captures) = stats_line_regex.captures(last_line) else {
+    let frame_count = if let Some(frame_capture) = frame_regex.captures(last_line) {
+        let Ok(frame_count): Result<u64, _> = frame_capture[1].parse() else {
+            goodbye!("Failed to parse frame count");
+        };
+        frame_count
+    } else {
+        0
+    };
+
+    let Some(time_captures) = time_regex.captures(last_line) else {
         goodbye!("Frame counter returned an invalid response");
     };
 
-    assert_eq!(captures.len(), 6);
+    assert_eq!(time_captures.len(), 5);
 
-    let Ok(frame_count): Result<u64, _> = captures[1].parse() else {
-        goodbye!("Failed to parse frame count");
-    };
-
-    let Ok(hours): Result<u64, _> = captures[2].parse() else {
+    let Ok(hours): Result<u64, _> = time_captures[1].parse() else {
         goodbye!("Failed to parse hours in length");
     };
 
-    let Ok(minutes): Result<u64, _> = captures[3].parse() else {
+    let Ok(minutes): Result<u64, _> = time_captures[2].parse() else {
         goodbye!("Failed to parse minutes in length");
     };
 
-    let Ok(seconds): Result<u64, _> = captures[4].parse() else {
+    let Ok(seconds): Result<u64, _> = time_captures[3].parse() else {
         goodbye!("Failed to parse seconds in length");
     };
 
-    let Ok(centiseconds): Result<u64, _> = captures[5].parse() else {
+    let Ok(centiseconds): Result<u64, _> = time_captures[4].parse() else {
         goodbye!("Failed to parse centiseconds in length");
     };
 
@@ -396,7 +404,7 @@ pub fn count_video_frames_and_framerate_and_audio(
 
     let framerate = frame_count as f64 / length.as_secs_f64();
 
-    Ok((frame_count, framerate, has_audio))
+    Ok((frame_count, framerate, has_audio, length))
 }
 
 fn approx_same_aspect_ratio(
@@ -499,8 +507,9 @@ pub fn resize_video(
 
     let _ = status_report.send("Counting frames...".to_string());
 
-    let (input_frame_count, input_frame_rate, has_audio) =
-        unfail!(count_video_frames_and_framerate_and_audio(inputfile));
+    let (input_frame_count, input_frame_rate, has_audio, _input_length) = unfail!(
+        count_video_frames_and_framerate_and_audio_and_length(inputfile)
+    );
 
     let decoder = Command::new("ffmpeg")
         .args([
@@ -806,7 +815,6 @@ pub fn amen_break_video(
     let _ = status_report.send("Creating temp files...".to_string());
     let mut outputfile = unfail!(NamedTempFile::new());
 
-
     let _ = status_report.send("Choosing an amen break...".to_string());
     let count = unfail!(std::fs::read_dir("amen-breaks")).count();
     let mut rng = rand::thread_rng();
@@ -818,17 +826,43 @@ pub fn amen_break_video(
 
     let break_path = unfail!(the_break).path();
 
+    let _ = status_report.send("Checking amen break length".to_string());
+    let (_input_frame_count, _input_frame_rate, _has_audio, amen_break_length) = unfail!(
+        count_video_frames_and_framerate_and_audio_and_length(&break_path)
+    );
+
+    let _ = status_report.send("Checking video length...".to_string());
+    let (_input_frame_count, _input_frame_rate, _has_audio, input_length) = unfail!(
+        count_video_frames_and_framerate_and_audio_and_length(inputfile)
+    );
+
     let _ = status_report.send("Amen breaking...".to_string());
+
+    let input_params = if amen_break_length > input_length {
+        [
+            OsStr::new("-stream_loop"),
+            OsStr::new("-1"),
+            OsStr::new("-i"),
+            inputfile.as_ref(),
+        ]
+    } else {
+        [
+            OsStr::new("-i"),
+            inputfile.as_ref(),
+            OsStr::new("-stream_loop"),
+            OsStr::new("-1"),
+        ]
+    };
 
     let converter = Command::new("ffmpeg")
         .args([
             OsStr::new("-y"),
             OsStr::new("-loglevel"),
             OsStr::new("error"),
-            OsStr::new("-i"),
-            inputfile.as_ref(),
-            OsStr::new("-stream_loop"),
-            OsStr::new("-1"),
+            input_params[0],
+            input_params[1],
+            input_params[2],
+            input_params[3],
             OsStr::new("-i"),
             break_path.as_ref(),
             OsStr::new("-map"),
