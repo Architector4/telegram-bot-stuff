@@ -872,6 +872,8 @@ pub fn amen_break_video(
             OsStr::new("-map"),
             OsStr::new("1:a"),
             OsStr::new("-shortest"),
+            OsStr::new("-pix_fmt"),
+            OsStr::new("yuv420p"),
             OsStr::new("-f"),
             OsStr::new("mp4"),
             OsStr::new("-preset"),
