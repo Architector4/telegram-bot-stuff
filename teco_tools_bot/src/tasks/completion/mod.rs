@@ -52,6 +52,22 @@ impl Task {
             }};
         }
 
+        // Little handler for the downloading.
+        macro_rules! unerror_download {
+            ($download: expr) => {{
+                if let Err(RequestError::Api(ApiError::Unknown(text))) = &$download {
+                    if text.contains("file is temporarily unavailable") {
+                        goodbye!(concat!(
+                            "Error: the media file is unavailable for the bot. ",
+                            "This is likely a Telegram server issue. ",
+                            "Try reuploading and performing the command again."
+                        ));
+                    }
+                };
+                $download?
+            }};
+        }
+
         match self {
             Task::Amogus { amogus } => {
                 let sign = amogus.signum();
@@ -173,22 +189,6 @@ impl Task {
                 };
 
                 let status_report_for_processing = status_report.clone();
-
-                // Little handler for the downloading.
-                macro_rules! unerror_download {
-                    ($download: expr) => {{
-                        if let Err(RequestError::Api(ApiError::Unknown(text))) = &$download {
-                            if text.contains("file is temporarily unavailable") {
-                                goodbye!(concat!(
-                                    "Error: the media file is unavailable for the bot. ",
-                                    "This is likely a Telegram server issue. ",
-                                    "Try reuploading and performing the command again."
-                                ));
-                            }
-                        };
-                        $download?
-                    }};
-                }
 
                 // Variable just to hold the temporary file and drop it later.
                 let mut file = None;
@@ -352,6 +352,77 @@ impl Task {
                 text.push_str("\n\n(automatically generated caption)");
 
                 goodbye!(encode_text(&text).as_ref());
+            }
+            Task::AmenBreak => {
+                let media = data.message.get_media_info();
+                let media = match media {
+                    Some(media) => {
+                        if !media.is_raster() {
+                            goodbye!(
+                                "Error: can't work with animated stickers nor voice messages."
+                            );
+                        }
+                        if !media.is_video {
+                            goodbye!("Error: can only work with videos.");
+                        }
+                        if media.file.size > 150 * 1000 * 1000 {
+                            goodbye!("Error: media is too large. The limit is 150MB.");
+                        }
+                        media
+                    }
+                    None => goodbye!("Error: can't find the media.."),
+                };
+
+                let _ = status_report.send("Downloading media...".to_string());
+
+                let download =
+                    unerror_download!(bot.download_file_to_temp_or_directly(media.file).await);
+                let path = download.0;
+                let file = download.1;
+
+                let status_report_for_processing = status_report.clone();
+
+                let result = tokio::task::spawn_blocking(move || {
+                    media_processing::amen_break_video(status_report_for_processing, &path)
+                })
+                .await
+                .expect("Worker died!");
+
+                drop(file);
+
+                let video_data = match result {
+                    Ok(m) => m,
+                    Err(e) => {
+                        log::error!("Error when amen breaking video: {}", e);
+                        goodbye!("Error: failed to amen break the video");
+                    }
+                };
+
+                if video_data.is_empty() {
+                    goodbye!(
+                        "Error: failed to amen break the video; got empty file as a result. Sorry!"
+                    );
+                }
+
+                if video_data.len() > MAX_UPLOAD_SIZE_MEGABYTES as usize * 1000 * 1000 {
+                    goodbye!(format!(
+                        "Error: the resulting media is too big ({:.3}MB, max is {}MB). Sorry!",
+                        video_data.len() as f64 / 1000.0 / 100.00,
+                        MAX_UPLOAD_SIZE_MEGABYTES
+                    )
+                    .as_str());
+                }
+
+                let _ = status_report.send("Uploading result...".to_string());
+
+                teloxide_retry!({
+                    let send = video_data.clone();
+
+                    bot.send_video(data.message.chat.id, InputFile::memory(send))
+                        .reply_to_message_id(data.message.id)
+                        .await
+                })?;
+                Ok(())
             }
         }
     }

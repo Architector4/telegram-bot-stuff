@@ -692,7 +692,6 @@ pub fn resize_video(
     unfail!(finalfile.reopen());
 
     let mut output = Vec::new();
-    output.clear();
     unfail!(finalfile.read_to_end(&mut output));
 
     Ok(output)
@@ -789,4 +788,74 @@ pub fn ocr_image(data: &[u8]) -> Result<String, MagickError> {
     }
 
     Ok(result)
+}
+
+pub fn amen_break_video(
+    status_report: Sender<String>,
+    inputfile: &Path,
+) -> Result<Vec<u8>, String> {
+    macro_rules! unfail {
+        ($thing: expr) => {
+            match $thing {
+                Ok(o) => o,
+                Err(e) => return Err(e.to_string()),
+            }
+        };
+    }
+
+    let _ = status_report.send("Creating temp files...".to_string());
+    let mut outputfile = unfail!(NamedTempFile::new());
+
+
+    let _ = status_report.send("Choosing an amen break...".to_string());
+    let count = unfail!(std::fs::read_dir("amen-breaks")).count();
+    let mut rng = rand::thread_rng();
+    use rand::Rng;
+    let which_to_pick = rng.gen_range(0..count);
+    let Some(the_break) = unfail!(std::fs::read_dir("amen-breaks")).nth(which_to_pick) else {
+        return Err("Failed to pick an amen break!".to_string());
+    };
+
+    let break_path = unfail!(the_break).path();
+
+    let _ = status_report.send("Amen breaking...".to_string());
+
+    let converter = Command::new("ffmpeg")
+        .args([
+            OsStr::new("-y"),
+            OsStr::new("-loglevel"),
+            OsStr::new("error"),
+            OsStr::new("-i"),
+            inputfile.as_ref(),
+            OsStr::new("-stream_loop"),
+            OsStr::new("-1"),
+            OsStr::new("-i"),
+            break_path.as_ref(),
+            OsStr::new("-map"),
+            OsStr::new("0:"),
+            OsStr::new("-map"),
+            OsStr::new("-0:a"),
+            OsStr::new("-map"),
+            OsStr::new("1:a"),
+            OsStr::new("-shortest"),
+            OsStr::new("-f"),
+            OsStr::new("mp4"),
+            OsStr::new("-preset"),
+            OsStr::new("slow"),
+            outputfile.path().as_os_str(),
+        ])
+        .spawn();
+
+    let converter_result = unfail!(converter).wait();
+    let converter_result = unfail!(converter_result);
+    if !converter_result.success() {
+        return Err("Converter returned an error.".to_string());
+    }
+
+    unfail!(outputfile.reopen());
+
+    let mut output = Vec::new();
+    unfail!(outputfile.read_to_end(&mut output));
+
+    Ok(output)
 }

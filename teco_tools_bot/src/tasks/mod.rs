@@ -262,6 +262,7 @@ pub enum Task {
     },
     /// Optical Character Recognition, i.e. extracting text from an image
     Ocr,
+    AmenBreak,
 }
 
 impl Task {
@@ -372,6 +373,7 @@ impl Task {
                 Ok(())
             }
             Task::Ocr => Ok(()),
+            Task::AmenBreak => Ok(()),
         }
     }
 
@@ -479,5 +481,8 @@ impl Task {
     }
     pub fn default_ocr() -> Task {
         Task::Ocr
+    }
+    pub fn default_amenbreak() -> Task {
+        Task::AmenBreak
     }
 }

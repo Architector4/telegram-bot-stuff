@@ -232,7 +232,8 @@ impl Task {
                             ),
                 }
             },
-        Task::Ocr => ""
+        Task::Ocr => "",
+        Task::AmenBreak => ""
         }
     }
 
@@ -588,6 +589,7 @@ impl Task {
                 }
             }
             Task::Ocr => Ok(Task::Ocr),
+            Task::AmenBreak => Ok(Task::AmenBreak),
         }
     }
 }

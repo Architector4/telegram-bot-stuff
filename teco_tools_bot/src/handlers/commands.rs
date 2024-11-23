@@ -25,6 +25,7 @@ pub const COMMANDS: &[Command] = &[
     AMOGUS,
     DISTORT,
     OCR,
+    AMENBREAK,
     RESIZE,
     REVERSE_TEXT,
     TO_CUSTOM_EMOJI,
@@ -748,6 +749,36 @@ pub const UNPREMIUM: Command = Command {
 };
 fn unpremium(tp: TaskParams<'_>) -> impl Future<Output = Ret> + '_ {
     premium_inner(tp, false)
+}
+
+pub const AMENBREAK: Command = Command {
+    callname: "/amenbreak",
+    description: "Replace a video/gif's audio with an amen break.",
+    function: wrap!(amenbreak),
+    hidden: false,
+};
+async fn amenbreak(tp: TaskParams<'_>) -> Ret {
+    let temp_task = Task::default_amenbreak();
+    print_help!(tp, temp_task);
+    let video = tp.message.get_media_info();
+    let _video = match video {
+        Some(video) => {
+            if !video.is_raster() {
+                goodbye_cancel!("can't work with animated stickers.");
+            }
+            if !video.is_video {
+                goodbye_cancel!("can't work with non-video images.");
+            }
+            check_too_large!(video);
+            video
+        }
+        None => goodbye_cancel!(concat!(
+            "can't find a video. ",
+            "This command needs to be used as either a reply or caption to one."
+        )),
+    };
+
+    Ok(Ok(temp_task))
 }
 
 #[cfg(test)]

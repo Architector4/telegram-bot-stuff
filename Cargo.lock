@@ -2514,6 +2514,7 @@ dependencies = [
  "log",
  "magick_rust",
  "native-tls",
+ "rand",
  "rayon",
  "regex",
  "serde",
