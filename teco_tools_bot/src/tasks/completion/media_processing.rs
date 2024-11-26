@@ -872,6 +872,11 @@ pub fn amen_break_video(
             OsStr::new("-map"),
             OsStr::new("1:a"),
             OsStr::new("-shortest"),
+            OsStr::new("-vf"), // Pad uneven pixels with black.
+            OsStr::new("pad=ceil(iw/2)*2:ceil(ih/2)*2"),
+            // I'd prefer the crop filter instead, but it leaves
+            // a chance of cropping to 0 width/height and stuff breaking :(
+            //OsStr::new("crop=trunc(iw/2)*2:trunc(ih/2)*2"),
             OsStr::new("-pix_fmt"),
             OsStr::new("yuv420p"),
             OsStr::new("-f"),

@@ -362,15 +362,15 @@ impl Task {
                                 "Error: can't work with animated stickers nor voice messages."
                             );
                         }
-                        if !media.is_video {
-                            goodbye!("Error: can only work with videos.");
+                        if media.is_sound {
+                            goodbye!("Error: can't work with audio messages.");
                         }
                         if media.file.size > 150 * 1000 * 1000 {
                             goodbye!("Error: media is too large. The limit is 150MB.");
                         }
                         media
                     }
-                    None => goodbye!("Error: can't find the media.."),
+                    None => goodbye!("Error: can't find the video or photo."),
                 };
 
                 let _ = status_report.send("Downloading media...".to_string());

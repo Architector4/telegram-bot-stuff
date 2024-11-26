@@ -761,20 +761,20 @@ pub const AMENBREAK: Command = Command {
 async fn amenbreak(tp: TaskParams<'_>) -> Ret {
     let temp_task = Task::default_amenbreak();
     print_help!(tp, temp_task);
-    let video = tp.message.get_media_info();
-    let _video = match video {
-        Some(video) => {
-            if !video.is_raster() {
+    let media = tp.message.get_media_info();
+    let _media = match media {
+        Some(media) => {
+            if !media.is_raster() {
                 goodbye_cancel!("can't work with animated stickers.");
             }
-            if !video.is_video {
-                goodbye_cancel!("can't work with non-video images.");
+            if media.is_sound {
+                goodbye_cancel!("can't work with audio messages.");
             }
-            check_too_large!(video);
-            video
+            check_too_large!(media);
+            media
         }
         None => goodbye_cancel!(concat!(
-            "can't find a video. ",
+            "can't find a video or a photo. ",
             "This command needs to be used as either a reply or caption to one."
         )),
     };
