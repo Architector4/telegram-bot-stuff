@@ -383,7 +383,11 @@ impl Task {
                 let status_report_for_processing = status_report.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
-                    media_processing::amen_break_video(status_report_for_processing, &path)
+                    media_processing::amen_break_media(
+                        status_report_for_processing,
+                        &path,
+                        media.is_video,
+                    )
                 })
                 .await
                 .expect("Worker died!");

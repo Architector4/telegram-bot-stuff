@@ -799,9 +799,10 @@ pub fn ocr_image(data: &[u8]) -> Result<String, MagickError> {
     Ok(result)
 }
 
-pub fn amen_break_video(
+pub fn amen_break_media(
     status_report: Sender<String>,
     inputfile: &Path,
+    is_video: bool,
 ) -> Result<Vec<u8>, String> {
     macro_rules! unfail {
         ($thing: expr) => {
@@ -838,10 +839,19 @@ pub fn amen_break_video(
 
     let _ = status_report.send("Amen breaking...".to_string());
 
+    let loop_params = if is_video {
+        // For some reason, using -loop for videos makes
+        // ffmpeg complain that this flag doesn't exist.
+        [OsStr::new("-stream_loop"), OsStr::new("-1")]
+    } else {
+        // For some reason, using -stream_loop for images makes ffmpeg hang.
+        [OsStr::new("-loop"), OsStr::new("1")]
+    };
+
     let input_params = if amen_break_length > input_length {
         [
-            OsStr::new("-stream_loop"),
-            OsStr::new("-1"),
+            loop_params[0],
+            loop_params[1],
             OsStr::new("-i"),
             inputfile.as_ref(),
         ]
@@ -849,8 +859,8 @@ pub fn amen_break_video(
         [
             OsStr::new("-i"),
             inputfile.as_ref(),
-            OsStr::new("-stream_loop"),
-            OsStr::new("-1"),
+            loop_params[0],
+            loop_params[1],
         ]
     };
 
