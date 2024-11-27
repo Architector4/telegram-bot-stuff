@@ -837,6 +837,11 @@ pub fn amen_break_media(
         count_video_frames_and_framerate_and_audio_and_length(inputfile)
     );
 
+    let target_length = amen_break_length
+        .max(input_length)
+        .as_secs_f64()
+        .to_string();
+
     let _ = status_report.send("Amen breaking...".to_string());
 
     let loop_params = if is_video {
@@ -848,31 +853,17 @@ pub fn amen_break_media(
         [OsStr::new("-loop"), OsStr::new("1")]
     };
 
-    let input_params = if amen_break_length > input_length {
-        [
-            loop_params[0],
-            loop_params[1],
-            OsStr::new("-i"),
-            inputfile.as_ref(),
-        ]
-    } else {
-        [
-            OsStr::new("-i"),
-            inputfile.as_ref(),
-            loop_params[0],
-            loop_params[1],
-        ]
-    };
-
     let converter = Command::new("ffmpeg")
         .args([
             OsStr::new("-y"),
             OsStr::new("-loglevel"),
             OsStr::new("error"),
-            input_params[0],
-            input_params[1],
-            input_params[2],
-            input_params[3],
+            loop_params[0],
+            loop_params[1],
+            OsStr::new("-i"),
+            inputfile.as_ref(),
+            OsStr::new("-stream_loop"),
+            OsStr::new("-1"),
             OsStr::new("-i"),
             break_path.as_ref(),
             OsStr::new("-map"),
@@ -881,7 +872,6 @@ pub fn amen_break_media(
             OsStr::new("-0:a"),
             OsStr::new("-map"),
             OsStr::new("1:a"),
-            OsStr::new("-shortest"),
             OsStr::new("-vf"), // Pad uneven pixels with black.
             OsStr::new("pad=ceil(iw/2)*2:ceil(ih/2)*2"),
             // I'd prefer the crop filter instead, but it leaves
@@ -889,6 +879,10 @@ pub fn amen_break_media(
             //OsStr::new("crop=trunc(iw/2)*2:trunc(ih/2)*2"),
             OsStr::new("-pix_fmt"),
             OsStr::new("yuv420p"),
+            // Ideally I'd just use -shortest, but this is broken on ffmpeg 7.0.2,
+            // and Fedora 41 doesn't have newer ffmpeg. Sad!
+            OsStr::new("-t"),
+            OsStr::new(target_length.as_str()),
             OsStr::new("-f"),
             OsStr::new("mp4"),
             OsStr::new("-preset"),
