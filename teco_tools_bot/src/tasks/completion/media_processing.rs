@@ -687,7 +687,7 @@ pub fn resize_video(
             OsStr::new("-preset"),
             OsStr::new("slow"),
             OsStr::new("-movflags"),
-            OsStr::new("+faststart +dash"),
+            OsStr::new("+faststart"),
             muxfile.path().as_ref(),
         ]);
 
@@ -890,7 +890,7 @@ pub fn amen_break_media(
             OsStr::new("-preset"),
             OsStr::new("slow"),
             OsStr::new("-movflags"),
-            OsStr::new("+faststart +dash"),
+            OsStr::new("+faststart"),
             outputfile.path().as_os_str(),
         ])
         .spawn();
