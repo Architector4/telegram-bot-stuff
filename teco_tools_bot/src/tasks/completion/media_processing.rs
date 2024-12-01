@@ -736,7 +736,7 @@ pub fn ocr_image(data: &[u8]) -> Result<String, MagickError> {
             &args_default[..]
         };
 
-        let tesseract = Command::new("tesseract")
+        let mut tesseract = Command::new("tesseract")
             .args(args)
             .stdout(Stdio::piped())
             .stdin(Stdio::piped())
@@ -744,17 +744,21 @@ pub fn ocr_image(data: &[u8]) -> Result<String, MagickError> {
             .spawn()
             .expect("Spawning tesseract failed!");
 
-        tesseract
-            .stdin
-            .unwrap()
+        let mut stdin = tesseract.stdin.take().unwrap();
+        let mut stdout = tesseract.stdout.take().unwrap();
+
+        stdin
             .write_all(data)
             .expect("Failed sending image to Tesseract!");
 
-        tesseract
-            .stdout
-            .unwrap()
+        drop(stdin);
+
+        stdout
             .read_to_string(buffer)
             .expect("Failed reading Tesseract's output!");
+
+        // Might return an error. Bleh, we'll see from its output lol
+        let _ = tesseract.wait().expect("Failed closing Tesseract!");
 
         // Postprocess the text...
         let new = {
