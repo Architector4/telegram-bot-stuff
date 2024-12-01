@@ -766,9 +766,13 @@ pub fn ocr_image(data: &[u8]) -> Result<String, MagickError> {
             static OCR_REGEX_2: OnceLock<Regex> = OnceLock::new();
             let regex_1 = OCR_REGEX_1.get_or_init(|| Regex::new(r#"[ \t]{2,}"#).unwrap());
             let regex_2 = OCR_REGEX_2.get_or_init(|| Regex::new(r#"\s\s\s+"#).unwrap());
+            // Sometimes, Tesseract inserts | (pipe) instead of I (uppercase i).
+            // Replace those in-place, if they exist.
+            let regex_3 = OCR_REGEX_2.get_or_init(|| Regex::new(r#"\|"#).unwrap());
 
             let stripped = regex_1.replace_all(buffer, " ");
             let stripped = regex_2.replace_all(&stripped, "\n");
+            let stripped = regex_3.replace_all(&stripped, "I");
 
             let stripped = stripped.trim();
 
