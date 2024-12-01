@@ -44,14 +44,31 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
         .await
         .expect("Database died!");
 
-    log::debug!("Checked {} with database and got: {:?}", url, db_result);
+    log::debug!(
+        concat!(
+            "Checked {} with database and got: {:?}\n",
+            "(second flag is true if manually reviewed)"
+        ),
+        url,
+        db_result
+    );
 
-    if db_result == Some(IsSpam::Yes) {
+    if let Some((result, true)) = db_result {
+        // Manually reviewed. Go ahead.
+        return Some(result);
+    };
+
+    // We now know it's not manually reviewed. Discard that flag.
+    let db_result = db_result.map(|x| x.0);
+
+    if let Some(IsSpam::Yes) = db_result {
         // Confirmed spam. Just return.
         Some(IsSpam::Yes)
     } else {
         if let Some(db_result) = db_result {
             // It's marked as not spam or maybe spam.
+            // Was this manually reviewed?
+
             // Is this specifically for this URL, or just the general domain result?
             if let Some(db_result_for_url) = database
                 .is_url_spam(url, false)
@@ -63,7 +80,7 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
                     url,
                     db_result_for_url
                 );
-                return Some(db_result_for_url);
+                return Some(db_result_for_url.0);
             }
 
             // No result for the URL specifically, but we are in this branch.
@@ -103,6 +120,7 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
                     .is_spam(url, domain, false)
                     .await
                     .expect("Database died!")
+                    .map(|x| x.0)
             } else if let Ok(is_spam_check) = visit_and_check_if_spam(url).await {
                 // Add it to the database.
                 log::debug!("Visited {} and got: {:?}", url, is_spam_check);

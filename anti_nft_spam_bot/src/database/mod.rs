@@ -191,16 +191,18 @@ impl Database {
     ///
     /// "No" and "Maybe" results that were automatically determined by
     /// an old spam checker are ignored unless `return_old_checker_results` is set to true.
+    ///
+    /// Also returns a boolean that is true if this result is manually reviewed.
     pub async fn is_domain_spam(
         &self,
         domain: &Domain,
         return_old_checker_results: bool,
-    ) -> Result<Option<IsSpam>, Error> {
+    ) -> Result<Option<(IsSpam, bool)>, Error> {
         // The "NOT" condition is to exclude results that says anything other than `IsSpam::Yes`
         // and are automatically determined by an older spam check version.
         // We DON'T want to delete those, because they should still be useful for review.
         sqlx::query(
-            "SELECT is_spam FROM domains
+            "SELECT is_spam, manually_reviewed FROM domains
             WHERE domain=? AND
                 NOT (
                     is_spam!=1 AND
@@ -214,7 +216,12 @@ impl Database {
         } else {
             SPAM_CHECKER_VERSION
         })
-        .map(|row: SqliteRow| IsSpam::from(row.get::<u8, _>("is_spam")))
+        .map(|row: SqliteRow| {
+            (
+                IsSpam::from(row.get::<u8, _>("is_spam")),
+                row.get::<bool, _>("manually_reviewed"),
+            )
+        })
         .fetch_optional(&self.pool)
         .await
     }
@@ -227,16 +234,18 @@ impl Database {
     ///
     /// "No" and "Maybe" results that were automatically determined by
     /// an old spam checker are ignored unless `return_old_checker_results` is set to true.
+    ///
+    /// Also returns a boolean that is true if this result is manually reviewed.
     pub async fn is_url_spam(
         &self,
         url: &Url,
         return_old_checker_results: bool,
-    ) -> Result<Option<IsSpam>, Error> {
+    ) -> Result<Option<(IsSpam, bool)>, Error> {
         // The "NOT" condition is to exclude results that says anything other than `IsSpam::Yes`
         // and are automatically determined by an older spam check version.
         // We DON'T want to delete those, because they should still be useful for review.
         sqlx::query(
-            "SELECT is_spam FROM urls
+            "SELECT is_spam, manually_reviewed FROM urls
             WHERE url=? AND
                 NOT (
                     is_spam!=1 AND
@@ -250,7 +259,12 @@ impl Database {
         } else {
             SPAM_CHECKER_VERSION
         })
-        .map(|row: SqliteRow| IsSpam::from(row.get::<u8, _>("is_spam")))
+        .map(|row: SqliteRow| {
+            (
+                IsSpam::from(row.get::<u8, _>("is_spam")),
+                row.get::<bool, _>("manually_reviewed"),
+            )
+        })
         .fetch_optional(&self.pool)
         .await
     }
@@ -264,17 +278,19 @@ impl Database {
     ///
     /// "No" and "Maybe" results that were automatically determined by
     /// an old spam checker are ignored unless `return_old_checker_results` is set to true.
+    ///
+    /// Also returns a boolean that is true if this result is manually reviewed.
     pub async fn is_spam(
         &self,
         url: &Url,
         domain: impl Into<Option<&Domain>>,
         return_old_checker_results: bool,
-    ) -> Result<Option<IsSpam>, Error> {
+    ) -> Result<Option<(IsSpam, bool)>, Error> {
         let mut domain = domain.into();
         // Look for URL match...
         let url_result = self.is_url_spam(url, return_old_checker_results).await?;
 
-        if let Some(IsSpam::Yes) = url_result {
+        if let Some((IsSpam::Yes, _)) = url_result {
             return Ok(url_result);
         }
 
@@ -295,8 +311,20 @@ impl Database {
         };
 
         // Pick the most condemning one.
-        let result = IsSpam::pick_most_condemning(url_result, domain_result);
-        Ok(result)
+        let most_condeming =
+            IsSpam::pick_most_condemning(url_result.map(|x| x.0), domain_result.map(|x| x.0));
+
+        if let Some(most_condeming) = most_condeming {
+            let manually_reviewed = if most_condeming.1 {
+                domain_result.unwrap().1
+            } else {
+                url_result.unwrap().1
+            };
+
+            Ok(Some((most_condeming.0, manually_reviewed)))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Inserts a domain into the database and tags it as spam or not.
@@ -465,7 +493,11 @@ impl Database {
 
         // Check the URL one.
         if let Some(is_spam_url) = self.is_url_spam(url, false).await? {
-            let result = match is_spam_url {
+            if is_spam_url.1 {
+                return Ok(MarkSusResult::ManuallyReviewedNotSpam);
+            }
+
+            let result = match is_spam_url.0 {
                 IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
                 IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
                 IsSpam::No => {
@@ -491,7 +523,10 @@ impl Database {
         if let Some(domain) = domain {
             // Check the domain one.
             if let Some(is_spam_domain) = self.is_domain_spam(domain, false).await? {
-                let result = match is_spam_domain {
+                if is_spam_domain.1 {
+                    return Ok(MarkSusResult::ManuallyReviewedNotSpam);
+                }
+                let result = match is_spam_domain.0 {
                     IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
                     IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
                     IsSpam::No => {

@@ -15,12 +15,16 @@ pub enum IsSpam {
 }
 
 impl IsSpam {
-    /// Picks the option that is most condemning.
-    pub fn pick_most_condemning(a: Option<Self>, b: Option<Self>) -> Option<Self> {
+    /// Picks the option that is most condemning,
+    /// along with a boolean that is true if `b` was picked, false otherwise.
+    pub fn pick_most_condemning(a: Option<Self>, b: Option<Self>) -> Option<(Self, bool)> {
         match (a, b) {
-            (Some(Self::Yes), _) | (_, Some(Self::Yes)) => Some(Self::Yes),
-            (Some(Self::Maybe), _) | (_, Some(Self::Maybe)) => Some(Self::Maybe),
-            (Some(Self::No), _) | (_, Some(Self::No)) => Some(Self::No),
+            (Some(Self::Yes), _) => Some((Self::Yes, false)),
+            (_, Some(Self::Yes)) => Some((Self::Yes, true)),
+            (Some(Self::Maybe), _) => Some((Self::Maybe, false)),
+            (_, Some(Self::Maybe)) => Some((Self::Maybe, true)),
+            (_, Some(Self::No)) => Some((Self::No, true)),
+            (Some(Self::No), _) => Some((Self::No, false)),
             (None, _) => None,
         }
     }
@@ -119,16 +123,16 @@ impl ReviewResponse {
             ReviewResponse::UrlSpam(_, url) => database
                 .is_url_spam(url, false)
                 .await?
-                .map_or(true, |x| x != IsSpam::Yes),
+                .map_or(true, |x| x.0 != IsSpam::Yes || !x.1),
             ReviewResponse::DomainSpam(domain, _url) => database
                 .is_domain_spam(domain, false)
                 .await?
-                .map_or(true, |x| x != IsSpam::Yes),
+                .map_or(true, |x| x.0 != IsSpam::Yes || !x.1),
             ReviewResponse::NotSpam(domain, url) => database
                 .is_spam(url, domain.as_ref(), true)
                 .await?
                 // `IsSpam::Maybe` case here is ignored too.
-                .map_or(true, |x| x != IsSpam::No),
+                .map_or(true, |x| x.0 != IsSpam::No || !x.1),
         })
     }
 
