@@ -25,7 +25,7 @@ pub struct MessageMediaInfo<'a> {
     pub file: &'a FileMeta,
 }
 
-impl<'a> MessageMediaInfo<'a> {
+impl MessageMediaInfo<'_> {
     pub fn is_image(&self) -> bool {
         !self.is_video && self.is_raster()
     }

@@ -132,7 +132,7 @@ pub struct SplitOverLengthTokens<'a> {
     max_len: usize,
 }
 
-impl<'a> SplitOverLengthTokens<'a> {
+impl SplitOverLengthTokens<'_> {
     /// Create a new splitter with specified max length by bytes.
     ///
     /// # Panics
