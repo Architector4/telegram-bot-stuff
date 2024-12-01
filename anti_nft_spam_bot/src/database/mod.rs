@@ -888,7 +888,10 @@ mod tests {
         assert_eq!(db.is_spam(&spam, None, false).await?, None);
 
         db.add_url(&spam, IsSpam::Yes, false, false).await?;
-        assert_eq!(db.is_url_spam(&spam, false).await?, Some(IsSpam::Yes));
+        assert_eq!(
+            db.is_url_spam(&spam, false).await?,
+            Some((IsSpam::Yes, false))
+        );
 
         let other: Url = parse_url_like_telegram("amogus.com/otherurl").unwrap();
         assert_eq!(db.is_url_spam(&other, false).await?, None);
@@ -916,12 +919,15 @@ mod tests {
         assert_eq!(db.is_url_spam(&spamurl, false).await?, None);
         assert_eq!(
             db.is_domain_spam(&spamdomain, false).await?,
-            Some(IsSpam::Yes)
+            Some((IsSpam::Yes, false))
         );
-        assert_eq!(db.is_spam(&spamurl, None, false).await?, Some(IsSpam::Yes));
+        assert_eq!(
+            db.is_spam(&spamurl, None, false).await?,
+            Some((IsSpam::Yes, false))
+        );
         assert_eq!(
             db.is_spam(&spamurl, Some(&spamdomain), false).await?,
-            Some(IsSpam::Yes)
+            Some((IsSpam::Yes, false))
         );
 
         let other: Url = parse_url_like_telegram("amogus.com/otherurl").unwrap();
@@ -929,10 +935,13 @@ mod tests {
         assert_eq!(spamdomain, otherdomain);
         // This checks if the URL specifically is a spam, so it will return None.
         assert_eq!(db.is_url_spam(&other, false).await?, None);
-        assert_eq!(db.is_spam(&other, None, false).await?, Some(IsSpam::Yes));
+        assert_eq!(
+            db.is_spam(&other, None, false).await?,
+            Some((IsSpam::Yes, false))
+        );
         assert_eq!(
             db.is_spam(&other, Some(&otherdomain), false).await?,
-            Some(IsSpam::Yes)
+            Some((IsSpam::Yes, false))
         );
         Ok(())
     }
@@ -957,7 +966,10 @@ mod tests {
         assert_eq!(db.mark_sus(&link, None).await?, MarkSusResult::Marked);
 
         // Check if this is what it is in the database.
-        assert_eq!(db.is_spam(&link, None, false).await?, Some(IsSpam::Maybe));
+        assert_eq!(
+            db.is_spam(&link, None, false).await?,
+            Some((IsSpam::Maybe, false))
+        );
 
         // Someone gets it in review...
         let (review_url, review_table, review_id, db_state) =
@@ -976,7 +988,10 @@ mod tests {
 
         // Someone later posts the link again.
         // Check if this is what it is in the database.
-        assert_eq!(db.is_spam(&link, None, false).await?, Some(IsSpam::No));
+        assert_eq!(
+            db.is_spam(&link, None, false).await?,
+            Some((IsSpam::No, true))
+        );
 
         // Someone marks it as sus again...
         assert_eq!(
@@ -1000,10 +1015,16 @@ mod tests {
             let db = new_temp().await?;
             db.add_domain(&domain, &url, spam_status, false, false)
                 .await?;
-            assert_eq!(db.is_spam(&url, &domain, true).await?, Some(spam_status));
+            assert_eq!(
+                db.is_spam(&url, &domain, true).await?,
+                Some((spam_status, false))
+            );
             let db = new_temp().await?;
             db.add_url(&url, spam_status, false, false).await?;
-            assert_eq!(db.is_spam(&url, &domain, true).await?, Some(spam_status));
+            assert_eq!(
+                db.is_spam(&url, &domain, true).await?,
+                Some((spam_status, false))
+            );
         }
 
         Ok(())
@@ -1033,7 +1054,7 @@ mod tests {
 
         // The URL is marked as not spam.
         let db = new_temp().await?;
-        db.add_url(&url, IsSpam::No, false, false).await?;
+        db.add_url(&url, IsSpam::No, false, true).await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(!notspam.conflicts_with_db(&db).await?);
         assert!(urlspam.conflicts_with_db(&db).await?);
@@ -1041,7 +1062,7 @@ mod tests {
 
         // The URL is marked as maybe spam.
         let db = new_temp().await?;
-        db.add_url(&url, IsSpam::Maybe, false, false).await?;
+        db.add_url(&url, IsSpam::Maybe, false, true).await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(notspam.conflicts_with_db(&db).await?);
         assert!(urlspam.conflicts_with_db(&db).await?);
@@ -1049,7 +1070,7 @@ mod tests {
 
         // The URL is marked as yes spam.
         let db = new_temp().await?;
-        db.add_url(&url, IsSpam::Yes, false, false).await?;
+        db.add_url(&url, IsSpam::Yes, false, true).await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(notspam.conflicts_with_db(&db).await?);
         assert!(!urlspam.conflicts_with_db(&db).await?);
@@ -1059,7 +1080,7 @@ mod tests {
 
         // The domain is marked as not spam.
         let db = new_temp().await?;
-        db.add_domain(&domain, &url, IsSpam::No, false, false)
+        db.add_domain(&domain, &url, IsSpam::No, false, true)
             .await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(!notspam.conflicts_with_db(&db).await?);
@@ -1068,7 +1089,7 @@ mod tests {
 
         // The domain is marked as maybe spam.
         let db = new_temp().await?;
-        db.add_domain(&domain, &url, IsSpam::Maybe, false, false)
+        db.add_domain(&domain, &url, IsSpam::Maybe, false, true)
             .await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(notspam.conflicts_with_db(&db).await?);
@@ -1077,7 +1098,7 @@ mod tests {
 
         // The domain is marked as yes spam.
         let db = new_temp().await?;
-        db.add_domain(&domain, &url, IsSpam::Yes, false, false)
+        db.add_domain(&domain, &url, IsSpam::Yes, false, true)
             .await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(notspam.conflicts_with_db(&db).await?);
@@ -1145,7 +1166,7 @@ mod tests {
             // Oh no. The normal link is spam too.
             assert_eq!(
                 db.is_spam(&normal, None, false).await.unwrap(),
-                Some(IsSpam::Yes)
+                Some((IsSpam::Yes, true))
             );
 
             // How will our heroes get out of this one? Find out on next episode of...
@@ -1161,12 +1182,12 @@ mod tests {
         // Normal link shouldn't be spam now.
         assert_eq!(
             db.is_spam(&normal, None, false).await.unwrap(),
-            Some(IsSpam::No)
+            Some((IsSpam::No, true))
         );
         // In this case the spam link isn't either though.
         assert_eq!(
             db.is_spam(&spam, None, false).await.unwrap(),
-            Some(IsSpam::No)
+            Some((IsSpam::No, true))
         );
 
         // Scenario continuation:
@@ -1178,12 +1199,12 @@ mod tests {
         // Normal link shouldn't be spam now.
         assert_eq!(
             db.is_spam(&normal, None, false).await.unwrap(),
-            Some(IsSpam::No)
+            Some((IsSpam::No, true))
         );
         // In this case the spam link should still be considered spam.
         assert_eq!(
             db.is_spam(&spam, None, false).await.unwrap(),
-            Some(IsSpam::Yes)
+            Some((IsSpam::Yes, true))
         );
 
         Ok(())
