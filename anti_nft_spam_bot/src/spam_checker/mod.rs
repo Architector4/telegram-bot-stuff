@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 use url::Url;
 
 use crate::{
@@ -37,7 +37,20 @@ impl From<IsSpamCheckResult> for IsSpam {
 /// Check the link's domain against the database, or by visiting, as needed.
 ///
 /// Returns [`None`] if both checking methods failed.
-pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Option<IsSpam> {
+pub fn check<'a>(
+    database: &'a Arc<Database>,
+    domain: &'a Domain,
+    url: &'a Url,
+) -> impl std::future::Future<Output = Option<IsSpam>> + 'a {
+    check_inner(database, domain, url, 0)
+}
+
+async fn check_inner(
+    database: &Arc<Database>,
+    domain: &Domain,
+    url: &Url,
+    recursion_depth: u8,
+) -> Option<IsSpam> {
     // Check the database...
     let db_result = database
         .is_spam(url, Some(domain), false)
@@ -46,12 +59,18 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
 
     log::debug!(
         concat!(
-            "Checked {} with database and got: {:?}\n",
+            "Checked {} with database (recursion {}) and got: {:?}\n",
             "(second flag is true if manually reviewed)"
         ),
         url,
+        recursion_depth,
         db_result
     );
+
+    if recursion_depth > 1 {
+        log::debug!("Recursion level in checker reached...");
+        return None;
+    }
 
     if let Some((result, true)) = db_result {
         // Manually reviewed. Go ahead.
@@ -97,61 +116,92 @@ pub async fn check(database: &Arc<Database>, domain: &Domain, url: &Url) -> Opti
             }
         }
 
-        // All stuff above did not answer anything. Check for real...
+        let mut url_maybe_spam = false;
 
-        if let Some(is_telegram_spam) = nft_spam::is_spam_telegram_url(url) {
+        // All stuff above did not answer anything. Vibe check just the link...
+
+        if let Some(url_looks_like_spam) = check_url_by_its_looks(url) {
             // Add it to the database.
-            log::debug!("Checked TG URL {} and got: {:?}", url, is_telegram_spam);
-            database
-                .add_url(url, is_telegram_spam, false, false)
-                .await
-                .expect("Database died!");
-            Some(is_telegram_spam)
-        } else {
-            log::debug!("{} Is not in the database. Debouncing...", url);
-            let visit_guard = database.domain_visit_debounce(domain.clone()).await;
+            log::debug!(
+                "Checked if URL {} looks like a spam URL and got: {:?}",
+                url,
+                url_looks_like_spam
+            );
 
-            if visit_guard.is_none() {
-                log::debug!("{} was just visited. Trying the database.", url);
-                // Oh no nevermind, someone else visited it.
-                // Just get the database result.
-                drop(visit_guard);
-                database
-                    .is_spam(url, domain, false)
-                    .await
-                    .expect("Database died!")
-                    .map(|x| x.0)
-            } else if let Ok(is_spam_check) = visit_and_check_if_spam(url).await {
-                // Add it to the database.
-                log::debug!("Visited {} and got: {:?}", url, is_spam_check);
-                match is_spam_check {
-                    IsSpamCheckResult::YesUrl => {
-                        database
-                            .add_url(url, IsSpam::Yes, false, false)
-                            .await
-                            .expect("Database died!");
-                    }
-                    _ => {
-                        // All the other cases effectively apply to the domains.
-                        database
-                            .add_domain(domain, url, is_spam_check.into(), false, false)
-                            .await
-                            .expect("Database died!");
-                    }
-                };
-
-                Some(is_spam_check.into())
-            } else {
-                // The visit probably timed out or something. Meh.
-                log::debug!("{} timed out", url);
-                None
+            match url_looks_like_spam {
+                IsSpam::Yes => {
+                    database
+                        .add_url(url, url_looks_like_spam, false, false)
+                        .await
+                        .expect("Database died!");
+                    return Some(url_looks_like_spam);
+                }
+                // In case it's maybe spam or not spam, still check it properly.
+                IsSpam::Maybe => url_maybe_spam = true,
+                IsSpam::No => (),
             }
+        }
+
+        log::debug!("{} Is not in the database. Debouncing...", url);
+        let mut visit_guard = None;
+        let has_visit_guard = if recursion_depth == 0 {
+            visit_guard = database.domain_visit_debounce(domain.clone()).await;
+            visit_guard.is_some()
+        } else {
+            true
+        };
+
+        if !has_visit_guard {
+            log::debug!("{} was just visited. Trying the database.", url);
+            // Oh no nevermind, someone else visited it.
+            // Just get the database result.
+            drop(visit_guard);
+            database
+                .is_spam(url, domain, false)
+                .await
+                .expect("Database died!")
+                .map(|x| x.0)
+        } else if let Ok(mut is_spam_check) =
+            visit_and_check_if_spam(database, domain, url, recursion_depth).await
+        {
+            // Add it to the database.
+            log::debug!("Visited {} and got: {:?}", url, is_spam_check);
+            match is_spam_check {
+                IsSpamCheckResult::YesUrl => {
+                    database
+                        .add_url(url, IsSpam::Yes, false, false)
+                        .await
+                        .expect("Database died!");
+                }
+                // All the other cases effectively apply to the domains.
+                _ => {
+                    if is_spam_check == IsSpamCheckResult::No && url_maybe_spam {
+                        is_spam_check = IsSpamCheckResult::Maybe;
+                    }
+
+                    database
+                        .add_domain(domain, url, is_spam_check.into(), false, false)
+                        .await
+                        .expect("Database died!");
+                }
+            };
+
+            Some(is_spam_check.into())
+        } else {
+            // The visit probably timed out or something. Meh.
+            log::debug!("{} timed out", url);
+            None
         }
     }
 }
 
 /// Check if a website served by the given URL is spam or not by visiting it.
-async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpamCheckResult, reqwest::Error> {
+async fn visit_and_check_if_spam(
+    database: &Arc<Database>,
+    domain: &Domain,
+    url: &Url,
+    recursion_depth: u8,
+) -> Result<IsSpamCheckResult, reqwest::Error> {
     // Default policy is to follow up to 10 redirects.
     let client = reqwest::Client::builder()
         .user_agent("GoogleOther")
@@ -188,21 +238,88 @@ async fn visit_and_check_if_spam(url: &Url) -> Result<IsSpamCheckResult, reqwest
         return Ok(IsSpamCheckResult::YesUrl);
     }
 
+    dbg!(domain.as_str());
+
+    if dbg!(domain.as_str().eq_ignore_ascii_case("telegra.ph")) {
+        // If it's telegra.ph, do some extra funny checks.
+        // Find links here and figure if they're spam themselves.
+
+        let mut matches: HashSet<Url> = HashSet::new();
+        let mut html: &str = &text;
+        let mut current_consensus = IsSpamCheckResult::No;
+
+        // Limit this to 20 matches
+        for _ in 0..20 {
+            let Some(link_start) = html.find("http") else {
+                break;
+            };
+
+            let mut a_match = &html[link_start..];
+
+            let link_length = a_match.find('"').unwrap_or(a_match.len());
+
+            a_match = &a_match[..link_length];
+
+            dbg!(a_match);
+
+            // We found a potential link. Add it to our collection.
+            if let Ok(new_url) = Url::parse(a_match) {
+                if &new_url != url {
+                    matches.insert(new_url);
+                }
+            }
+            // Advance html forward so we don't match on this same thing.
+            html = &html[link_start + link_length..];
+        }
+
+        let mut iter = matches.iter().peekable();
+
+        // Now check each of those links.
+        while let Some(a_match) = iter.next() {
+            let Some(match_domain) = Domain::from_url(a_match) else {
+                continue;
+            };
+            if let Some(x) = Box::pin(check_inner(
+                database,
+                &match_domain,
+                a_match,
+                recursion_depth + 1,
+            ))
+            .await
+            {
+                match x {
+                    IsSpam::No => (),
+                    IsSpam::Yes => return Ok(IsSpamCheckResult::YesUrl),
+                    IsSpam::Maybe => current_consensus = IsSpamCheckResult::Maybe,
+                }
+            }
+
+            // Sleep for a bit, so we don't hammer telegram in case there's multiple links.
+            if iter.peek().is_some() {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            }
+        }
+
+        // Checked a telegra.ph link. Return results on that.
+        return Ok(current_consensus);
+    }
+
     // Check the HTML...
     if nft_spam::is_spam_html(&text) {
         return Ok(IsSpamCheckResult::YesDomain);
     }
-    if american_groundhog_spam::check_spam_html(&client, &text).await? {
-        return Ok(IsSpamCheckResult::YesUrl);
-    }
 
-    // It may also be American Groundhog's Telegram spam link directly. Check while we're here.
     if is_telegram_url(url) && american_groundhog_spam::check_spam_telegram_html(&text) {
         return Ok(IsSpamCheckResult::YesUrl);
     }
 
     // guess not.
     Ok(IsSpamCheckResult::No)
+}
+
+/// Check if this URL, just on its own, looks like spam.
+pub fn check_url_by_its_looks(url: &Url) -> Option<IsSpam> {
+    nft_spam::is_spam_telegram_url(url)
 }
 
 /// Returns true if this URL's domain is Telegram.

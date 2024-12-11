@@ -9,6 +9,8 @@ pub fn is_spam_html(text: &str) -> bool {
 }
 
 /// Returns `None` if it's not a telegram URL.
+/// Returns `Some(IsSpam::No)` if it's not recognized as spam
+/// by this function.
 pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
     if !super::is_telegram_url(url) {
         return None;
