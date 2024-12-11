@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{borrow::Cow, collections::HashSet, sync::Arc, time::Duration};
 use url::Url;
 
 use crate::{
@@ -51,6 +51,18 @@ async fn check_inner(
     url: &Url,
     recursion_depth: u8,
 ) -> Option<IsSpam> {
+    // Some telegram spam (like telegram bots) use queries a lot,
+    // especially referral links in spammed "games".
+    // Strip those just from telegram URLs.
+    let url = if is_telegram_url(url) {
+        Cow::Borrowed(url)
+    } else {
+        let mut new_url = url.clone();
+        new_url.set_query(None);
+        Cow::Owned(new_url)
+    };
+    let url = url.as_ref();
+
     // Check the database...
     let db_result = database
         .is_spam(url, Some(domain), false)
@@ -242,7 +254,6 @@ async fn visit_and_check_if_spam(
         // If it's telegra.ph, do some extra funny checks.
         // Find links here and figure if they're spam themselves.
 
-
         let mut matches: HashSet<Url> = HashSet::with_capacity(20);
         let mut html: &str = &text;
         let mut current_consensus = IsSpamCheckResult::No;
@@ -269,7 +280,12 @@ async fn visit_and_check_if_spam(
             html = &html[link_start + link_length..];
         }
 
-        log::debug!("RECURSING #{} on {} with {} links...", recursion_depth, url, matches.len());
+        log::debug!(
+            "RECURSING #{} on {} with {} links...",
+            recursion_depth,
+            url,
+            matches.len()
+        );
 
         let mut iter = matches.iter().peekable();
 
