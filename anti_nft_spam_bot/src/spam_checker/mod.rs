@@ -51,18 +51,6 @@ async fn check_inner(
     url: &Url,
     recursion_depth: u8,
 ) -> Option<IsSpam> {
-    // Some telegram spam (like telegram bots) use queries a lot,
-    // especially referral links in spammed "games".
-    // Strip those just from telegram URLs.
-    let url = if is_telegram_url(url) {
-        Cow::Borrowed(url)
-    } else {
-        let mut new_url = url.clone();
-        new_url.set_query(None);
-        Cow::Owned(new_url)
-    };
-    let url = url.as_ref();
-
     // Check the database...
     let db_result = database
         .is_spam(url, Some(domain), false)

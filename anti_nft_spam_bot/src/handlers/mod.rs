@@ -21,7 +21,7 @@ use self::reviews::handle_review_command;
 
 /// Get a domain and a URL from this entity, if available.
 fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
-    let url = match entity.kind() {
+    let mut url = match entity.kind() {
         MessageEntityKind::Url => {
             if let Ok(url) = parse_url_like_telegram(entity.text()) {
                 url
@@ -54,6 +54,12 @@ fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
             return None;
         }
     };
+    // Some telegram spam (like telegram bots) use queries a lot,
+    // especially referral links in spammed "games".
+    // Strip those just from telegram URLs.
+    if crate::spam_checker::is_telegram_url(&url) {
+        url.set_query(None);
+    }
 
     let Some(domain) = Domain::from_url(&url) else {
         // Does not have a domain. An IP address link?
