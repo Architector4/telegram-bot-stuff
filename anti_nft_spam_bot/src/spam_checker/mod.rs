@@ -243,12 +243,12 @@ async fn visit_and_check_if_spam(
         // If it's telegra.ph, do some extra funny checks.
         // Find links here and figure if they're spam themselves.
 
-        let mut matches: HashSet<Url> = HashSet::new();
+        let mut matches: HashSet<Url> = HashSet::with_capacity(20);
         let mut html: &str = &text;
         let mut current_consensus = IsSpamCheckResult::No;
 
         // Limit this to 20 matches
-        for _ in 0..20 {
+        while matches.len() < 20 {
             let Some(link_start) = html.find("http") else {
                 break;
             };
