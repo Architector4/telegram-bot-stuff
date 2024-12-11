@@ -238,10 +238,10 @@ async fn visit_and_check_if_spam(
         return Ok(IsSpamCheckResult::YesUrl);
     }
 
-
     if domain.as_str().eq_ignore_ascii_case("telegra.ph") {
         // If it's telegra.ph, do some extra funny checks.
         // Find links here and figure if they're spam themselves.
+
 
         let mut matches: HashSet<Url> = HashSet::with_capacity(20);
         let mut html: &str = &text;
@@ -268,6 +268,8 @@ async fn visit_and_check_if_spam(
             // Advance html forward so we don't match on this same thing.
             html = &html[link_start + link_length..];
         }
+
+        log::debug!("RECURSING #{} on {} with {} links...", recursion_depth, url, matches.len());
 
         let mut iter = matches.iter().peekable();
 
