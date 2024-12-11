@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashSet, sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 use url::Url;
 
 use crate::{
