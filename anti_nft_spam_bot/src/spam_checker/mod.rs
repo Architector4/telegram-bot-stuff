@@ -238,9 +238,8 @@ async fn visit_and_check_if_spam(
         return Ok(IsSpamCheckResult::YesUrl);
     }
 
-    dbg!(domain.as_str());
 
-    if dbg!(domain.as_str().eq_ignore_ascii_case("telegra.ph")) {
+    if domain.as_str().eq_ignore_ascii_case("telegra.ph") {
         // If it's telegra.ph, do some extra funny checks.
         // Find links here and figure if they're spam themselves.
 
@@ -259,8 +258,6 @@ async fn visit_and_check_if_spam(
             let link_length = a_match.find('"').unwrap_or(a_match.len());
 
             a_match = &a_match[..link_length];
-
-            dbg!(a_match);
 
             // We found a potential link. Add it to our collection.
             if let Ok(new_url) = Url::parse(a_match) {
