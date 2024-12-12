@@ -22,12 +22,16 @@ use self::reviews::handle_review_command;
 /// Get a domain and a URL from this entity, if available.
 fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
     let mut url = match entity.kind() {
-        MessageEntityKind::Url => {
+        MessageEntityKind::Url | MessageEntityKind::Code | MessageEntityKind::Pre { .. } => {
+            // Code and Pre because some spammers use monospace to make links unclickable
+            // but undetectable.
             if let Ok(url) = parse_url_like_telegram(entity.text()) {
                 url
             } else {
-                // Does not parse as a URL anyway. Shouldn't happen, but eh.
-                log::warn!("Received an imparsable URL: {}", entity.text());
+                if *entity.kind() == MessageEntityKind::Url {
+                    // Does not parse as a URL anyway. Shouldn't happen, but eh.
+                    log::warn!("Received an imparsable URL: {}", entity.text());
+                }
                 return None;
             }
         }
