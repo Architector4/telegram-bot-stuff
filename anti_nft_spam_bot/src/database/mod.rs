@@ -493,19 +493,19 @@ impl Database {
 
         // Check the URL one.
         if let Some(is_spam_url) = self.is_url_spam(url, false).await? {
-            if is_spam_url.1 {
-                return Ok(MarkSusResult::ManuallyReviewedNotSpam);
-            }
-
             let result = match is_spam_url.0 {
                 IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
                 IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
                 IsSpam::No => {
-                    let mark_result = self.mark_url_sus(url).await?;
-                    if mark_result {
-                        MarkSusResult::Marked
-                    } else {
+                    if is_spam_url.1 {
                         MarkSusResult::ManuallyReviewedNotSpam
+                    } else {
+                        let mark_result = self.mark_url_sus(url).await?;
+                        if mark_result {
+                            MarkSusResult::Marked
+                        } else {
+                            MarkSusResult::ManuallyReviewedNotSpam
+                        }
                     }
                 }
             };
