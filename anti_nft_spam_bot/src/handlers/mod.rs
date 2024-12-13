@@ -307,7 +307,9 @@ async fn handle_message_inner(
                         message.chat.id,
                         concat!(
                             "Tried to remove a message containing a spam link, but failed. ",
-                            "Is this bot an admin with ability to remove messages?"
+                            "Is this bot an admin with ability to remove messages?\n\n",
+                            "If so, this may also be a Telegram bug, and an admin ",
+                            "has to remove the message manually."
                         ),
                         None,
                     )
