@@ -276,6 +276,8 @@ impl Task {
 
                 if amogus == 69 {
                     return Err(TaskError::Cancel("WEIRD AMOGUS".to_string()));
+                } else if amogus == 1312 {
+                    return Err(TaskError::Cancel("ACAB AMOGUS".to_string()));
                 }
 
                 Ok(Task::Amogus { amogus })
