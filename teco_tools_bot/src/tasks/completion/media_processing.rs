@@ -511,6 +511,55 @@ pub fn resize_video(
         count_video_frames_and_framerate_and_audio_and_length(inputfile)
     );
 
+    let converting_function = move |(count, frame): (_, Result<Vec<u8>, _>)| match frame {
+        Ok(frame) => {
+            let curved_width = resize_curve.apply_resize_for(
+                count,
+                input_frame_count,
+                input_dimensions.0 as f64,
+                width as f64,
+            );
+            let curved_height = resize_curve.apply_resize_for(
+                count,
+                input_frame_count,
+                input_dimensions.1 as f64,
+                height as f64,
+            );
+            let curved_rotation =
+                resize_curve.apply_resize_for(count, input_frame_count, 0.0, rotation);
+
+            // Check if this operation changes the image at all.
+            // If the dimensions (both target and output) and rotation
+            // are the same, it doesn't.
+            let input_dimensions = get_bmp_width_height(&frame);
+            let resize_result = if rotation.abs() == 0.0
+                && input_dimensions == Some((output_width as isize, output_height as isize))
+                && input_dimensions == Some((curved_width as isize, curved_height as isize))
+            {
+                // It doesn't. Just return the same buffer directly.
+                Ok(frame)
+            } else {
+                resize_image(
+                    &frame,
+                    curved_width as isize,
+                    curved_height as isize,
+                    curved_rotation,
+                    resize_type,
+                    ImageFormat::Bmp,
+                    Some((output_width, output_height, stretch_to_output_size)),
+                    is_curved, // Prevent bounds bouncing.
+                )
+            };
+
+            match resize_result {
+                Ok(resize) => Ok((count, resize)),
+                Err(e) => Err(std::io::Error::other(e)),
+            }
+        }
+        Err(e) => Err(e),
+    };
+
+    // We computed all the internal stuff. Now to actually do something useful.
     let decoder = Command::new("ffmpeg")
         .args([
             OsStr::new("-y"),
@@ -531,55 +580,47 @@ pub fn resize_video(
     let mut decoder = unfail!(decoder);
     let decoder_stdout = decoder.stdout.take().unwrap();
 
-    let converted_image_stream = SplitIntoBmps::<ChildStdout>::new(decoder_stdout)
-        .enumerate()
-        .map(|(count, frame)| match frame {
-            Ok(frame) => {
-                let curved_width = resize_curve.apply_resize_for(
-                    count,
-                    input_frame_count,
-                    input_dimensions.0 as f64,
-                    width as f64,
-                );
-                let curved_height = resize_curve.apply_resize_for(
-                    count,
-                    input_frame_count,
-                    input_dimensions.1 as f64,
-                    height as f64,
-                );
-                let curved_rotation =
-                    resize_curve.apply_resize_for(count, input_frame_count, 0.0, rotation);
+    let decoded_image_stream = SplitIntoBmps::<ChildStdout>::new(decoder_stdout).enumerate();
 
-                // Check if this operation changes the image at all.
-                // If the dimensions (both target and output) and rotation
-                // are the same, it doesn't.
-                let input_dimensions = get_bmp_width_height(&frame);
-                let resize_result = if rotation.abs() == 0.0
-                    && input_dimensions == Some((output_width as isize, output_height as isize))
-                    && input_dimensions == Some((curved_width as isize, curved_height as isize))
-                {
-                    // It doesn't. Just return the same buffer directly.
-                    Ok(frame)
-                } else {
-                    resize_image(
-                        &frame,
-                        curved_width as isize,
-                        curved_height as isize,
-                        curved_rotation,
-                        resize_type,
-                        ImageFormat::Bmp,
-                        Some((output_width, output_height, stretch_to_output_size)),
-                        is_curved, // Prevent bounds bouncing.
-                    )
-                };
+    let parallelisms = std::thread::available_parallelism()
+        .map(|x| x.get())
+        .unwrap_or(1);
 
-                match resize_result {
-                    Ok(resize) => Ok((count, resize)),
-                    Err(e) => Err(std::io::Error::other(e)),
+    let mut converting_thread_handles = Vec::with_capacity(parallelisms);
+
+    let (decoded_sender, decoded_receiver) =
+        crossbeam_channel::bounded::<(usize, Result<Vec<u8>, std::io::Error>)>(parallelisms);
+    let (resized_sender, resized_receiver) =
+        crossbeam_channel::bounded::<Result<(usize, Vec<u8>), std::io::Error>>(parallelisms);
+
+    // Spawn a worker thread per one CPU core.
+    // Yeah, with multiple tasks running this inevitably
+    // leads to more working threads than there are CPU cores.
+    // But from quick benchmarks, this doesn't appear to actually slow down much,
+    // and it's the easiest approach, so, meh.
+    for _ in 0..parallelisms {
+        let decoded_receiver = decoded_receiver.clone();
+        let resized_sender = resized_sender.clone();
+        converting_thread_handles.push(std::thread::spawn(move || {
+            while let Ok(frame) = decoded_receiver.recv() {
+                let result = converting_function(frame);
+                if resized_sender.send(result).is_err() {
+                    return;
                 }
             }
-            Err(e) => Err(e),
-        });
+        }));
+    }
+
+    drop(decoded_receiver);
+    drop(resized_sender);
+
+    let sending_thread = std::thread::spawn(move || {
+        for frame in decoded_image_stream {
+            if decoded_sender.send(frame).is_err() {
+                return;
+            }
+        }
+    });
 
     let _ = status_report.send("Initializing encoder...".to_string());
 
@@ -608,34 +649,75 @@ pub fn resize_video(
     let mut encoder = unfail!(encoder);
     let mut encoder_stdin = encoder.stdin.take().unwrap();
 
-    let mut writing_stream = converted_image_stream.map(|frame| match frame {
-        Ok(frame) => {
-            encoder_stdin.write_all(frame.1.as_slice())?;
+    //let mut writing_stream = resized_receiver
+    //    .iter()
+    //    .map(|frame| -> Result<(), std::io::Error> {
+    //        let frame = frame?;
+    //        encoder_stdin.write_all(frame.1.as_slice())?;
+    //        if input_frame_count != 0 {
+    //            let _ = status_report.send(format!("Frame {} / {}", frame.0, input_frame_count));
+    //        } else {
+    //            let _ = status_report.send(format!("Frame {}", frame.0));
+    //        }
+
+    //        Ok(())
+    //    });
+
+    //// Try to find an error and fail on it, if any lol
+    //if let Some(err) = writing_stream.find(Result::is_err) {
+    //    unfail!(err);
+    //}
+
+    let mut frame_store = Vec::with_capacity(parallelisms + 1);
+    let mut frames_received = 0usize;
+    let mut next_frame_to_write = 0;
+
+    loop {
+        let new_frame = resized_receiver.recv();
+        let new_frame_received = new_frame.is_ok();
+        if let Ok(new_frame) = new_frame {
+            frame_store.push(unfail!(new_frame));
+            frames_received += 1;
+
             if input_frame_count != 0 {
-                let _ = status_report.send(format!("Frame {} / {}", frame.0, input_frame_count));
+                let _ = status_report
+                    .send(format!("Frame {} / {}", frames_received, input_frame_count));
             } else {
-                let _ = status_report.send(format!("Frame {}", frame.0));
+                let _ = status_report.send(format!("Frame {}", frames_received));
             }
-
-            Ok(())
         }
-        Err(e) => Err(e),
-    });
 
-    // Try to find an error and fail on it, if any lol
-    if let Some(err) = writing_stream.find(Result::is_err) {
-        unfail!(err);
+        while let Some(next_frame_idx_in_store) = frame_store
+            .iter()
+            .enumerate()
+            .find(|x| x.1 .0 == next_frame_to_write)
+            .map(|x| x.0)
+        {
+            let next_frame = frame_store.swap_remove(next_frame_idx_in_store);
+            unfail!(encoder_stdin.write_all(next_frame.1.as_slice()));
+            next_frame_to_write += 1;
+        }
+
+        if !new_frame_received {
+            break;
+        }
     }
 
     let _ = status_report.send("Finalizing...".to_string());
 
     drop(encoder_stdin);
+    sending_thread.join().unwrap();
+    for h in converting_thread_handles {
+        h.join().unwrap();
+    }
     unfail!(decoder.wait());
     unfail!(encoder.wait());
 
     let mut finalfile = if has_audio && !strip_audio {
         let _ = status_report.send("Writing audio...".to_string());
         // Now to transfer audio... This means we need a THIRD file to put the final result into.
+        // It's probably possible to do some funny mapping shenanigans to add the audio
+        // in at the same time as muxing the video, but I'm too lazy to figure that out right now.
         let muxfile = unfail!(NamedTempFile::new());
         // Will exclude cases of 0.0, -0.0, and all the NaNs and infinities
         let distort_audio = vibrato_hz.is_normal()
