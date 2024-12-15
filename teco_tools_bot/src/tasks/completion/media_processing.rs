@@ -239,17 +239,22 @@ pub fn resize_image(
 
     // Quality tends to behave in an exponential manner.
     // Normalize this to make it perceptually linear.
-    let quality = (quality.get() as f64 / 100.0 - 0.01).powi(4) * 100.0 + 1.0;
-    let quality = NonZeroU8::new(quality as u8).unwrap_or(NonZeroU8::MIN);
-    wand.set_image_compression_quality(quality.get().into())?;
-    wand.set_compression_quality(quality.get().into())?;
+    let quality = quality.get() - 1; // From 0 to 99.
+    let quality_pow_4 = (quality as u32).pow(4); // From 0 to 99⁴.
+
+    // Bring it back to 0..99, then back to 1.100.
+    let quality = quality_pow_4 / 99u32.pow(3) + 1;
+    let quality = quality.min(100) as usize;
+
+    wand.set_image_compression_quality(quality)?;
+    wand.set_compression_quality(quality)?;
 
     let compressible = match format {
         ImageFormat::Jpeg | ImageFormat::Webp => true,
         ImageFormat::Bmp | ImageFormat::Png | ImageFormat::Preserve => false,
     };
 
-    if !compressible && quality.get() < 100 {
+    if !compressible && quality < 100 {
         // If this format is not compressible but we want it to be,
         // artificially introduce compression by way of JPEG.
         let jpg = wand.write_image_blob("jpg")?;
@@ -804,7 +809,24 @@ pub fn resize_video(
             args.push(vibrato_str_temp.as_ref());
         }
 
+        // Quality tends to behave in an exponential manner.
+        // Normalize this to make it perceptually linear.
+        let quality = quality.get() - 1; // From 0 to 99.
+        let quality_pow_4 = (quality as u32).pow(3); // From 0 to 99³.
+
+        // Bring it back to 0..99, then back to 1.100.
+        let quality = quality_pow_4 / 99u32.pow(2) + 1;
+        let quality = quality.min(100);
+
+        // We want to map "quality" to an audio bitrate.
+        // Specifically, map quality of 100 to 145k,
+        // and quality of 0 to 20k.
+        let bitrate = 20 + quality.saturating_add(quality / 4).min(125);
+        let bitrate_str = format!("{}k", bitrate);
+
         args.extend_from_slice(&[
+            OsStr::new("-b:a"),
+            bitrate_str.as_ref(),
             OsStr::new("-f"),
             OsStr::new("mp4"),
             OsStr::new("-preset"),
