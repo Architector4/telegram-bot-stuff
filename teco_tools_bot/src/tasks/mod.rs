@@ -2,7 +2,7 @@ pub mod completion;
 pub mod parsing;
 pub mod taskman;
 
-use std::{f64::consts::TAU, fmt::Display, str::FromStr};
+use std::{f64::consts::TAU, fmt::Display, num::NonZeroU8, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use teloxide::{
@@ -245,6 +245,8 @@ pub enum Task {
         percentage: Option<f32>,
         format: ImageFormat,
         resize_type: ResizeType,
+        /// Between 1 and 100.
+        quality: NonZeroU8,
     },
     VideoResize {
         /// Signed integer to allow specifying negative resolutions
@@ -259,6 +261,8 @@ pub enum Task {
         resize_curve: ResizeCurve,
         #[serde(default = "VideoTypePreference::default")]
         type_pref: VideoTypePreference,
+        /// Between 1 and 100.
+        quality: NonZeroU8,
     },
     /// Optical Character Recognition, i.e. extracting text from an image
     Ocr,
@@ -320,6 +324,7 @@ impl Task {
                 vibrato_depth: _,
                 resize_curve: _,
                 type_pref: _,
+                quality,
             }
             | Task::ImageResize {
                 new_dimensions,
@@ -327,6 +332,7 @@ impl Task {
                 percentage,
                 format: _,
                 resize_type,
+                quality,
             } => {
                 if let ResizeType::ToSticker | ResizeType::ToCustomEmoji = resize_type {
                     return Ok(());
@@ -370,7 +376,8 @@ impl Task {
                     wp!(vibrato_depth)?;
                     write_param!("Resize curve", resize_curve)?;
                 };
-                Ok(())
+
+                writeln!(output, "<b>Quality</b>: {}%", quality)
             }
             Task::Ocr => Ok(()),
             Task::AmenBreak => Ok(()),
@@ -426,6 +433,7 @@ impl Task {
             percentage: None,
             format: ImageFormat::Webp,
             resize_type: ResizeType::ToSticker,
+            quality: NonZeroU8::new(92).unwrap(),
         }
     }
     pub fn default_to_custom_emoji() -> Task {
@@ -435,6 +443,7 @@ impl Task {
             percentage: None,
             format: ImageFormat::Webp,
             resize_type: ResizeType::ToCustomEmoji,
+            quality: NonZeroU8::new(92).unwrap(),
         }
     }
     pub fn default_amogus() -> Task {
@@ -452,6 +461,7 @@ impl Task {
             percentage: Some(100.0),
             format,
             resize_type,
+            quality: NonZeroU8::new(92).unwrap(),
         }
     }
     pub fn default_video_resize(
@@ -477,6 +487,7 @@ impl Task {
             },
             resize_curve: ResizeCurve::default(),
             type_pref,
+            quality: NonZeroU8::new(100).unwrap(),
         }
     }
     pub fn default_ocr() -> Task {

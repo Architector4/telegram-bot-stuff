@@ -178,6 +178,8 @@ impl Task {
                             "Can't be less than -4 or bigger than 4.\n",
                             "<code>rigidity</code>: Bias for non-straight seams. Default is 0. ",
                             "Can't be less than -1024 or bigger than 1024.\n",
+                            "<code>quality</code>: Quality level, between 1% and 100%. ",
+                            "For videos, this compresses each frame to JPG before encoding to create a compressed effect.\n",
                             "\n",
                             "Only for images:\n",
                             "<code>format</code>: Output image format. Can be \"webp\" or \"jpg\".\n",
@@ -211,6 +213,8 @@ impl Task {
                             "\n",
                             "<code>rot</code>: Rotate the media by this much after resizing.\n",
                             "<code>method</code>: Resize method. Can only be \"fit\" (default), \"stretch\" or \"crop\".\n",
+                            "<code>quality</code>: Quality level, between 1% and 100%. ",
+                            "For videos, this compresses each frame to JPG before encoding to create a compressed effect.\n",
                             "\n",
                             "Only for images:\n",
                             "<code>format</code>: Output image format. Can be \"webp\" or \"jpg\".\n",
@@ -286,6 +290,7 @@ impl Task {
                 percentage: _,
                 format: _,
                 mut resize_type,
+                mut quality,
             }
             | Task::VideoResize {
                 new_dimensions: original_dimensions,
@@ -296,6 +301,7 @@ impl Task {
                 vibrato_depth: _,
                 resize_curve: _,
                 type_pref: _,
+                mut quality,
             } => {
                 if let ResizeType::ToSticker | ResizeType::ToCustomEmoji = resize_type {
                     return Ok(self.clone());
@@ -351,6 +357,15 @@ impl Task {
                             Err(())
                         }
                     }
+                };
+
+                let quality_parser = |input: &str| -> Result<NonZeroU8, ()> {
+                    let tmp: u8 = input.trim_end_matches('%').parse().map_err(|_| ())?;
+                    if tmp > 100 {
+                        return Err(());
+                    }
+
+                    Ok(NonZeroU8::new(tmp).unwrap_or(NonZeroU8::MIN))
                 };
 
                 // Rename this variable to a more human friendly name,
@@ -457,6 +472,8 @@ impl Task {
                     } else {
                         parse_keyval_param!(param, format, help);
                     }
+
+                    parse_keyval_param_with_parser!(param, quality, quality_parser, help);
 
                     if let Token::KeyVal(k, v) = param {
                         let v = (k, v);
@@ -577,6 +594,7 @@ impl Task {
                         vibrato_depth,
                         type_pref: r#type,
                         resize_curve: curve,
+                        quality,
                     })
                 } else {
                     Ok(Task::ImageResize {
@@ -585,6 +603,7 @@ impl Task {
                         percentage: new_dimensions.2,
                         resize_type,
                         format,
+                        quality,
                     })
                 }
             }

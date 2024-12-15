@@ -111,6 +111,7 @@ impl Task {
                 percentage: _,
                 format: _,
                 resize_type,
+                quality,
             }
             | Task::VideoResize {
                 new_dimensions,
@@ -121,6 +122,7 @@ impl Task {
                 vibrato_depth: _,
                 resize_curve: _,
                 type_pref: _,
+                quality,
             } => {
                 let media = data.message.get_media_info();
                 let media = match media {
@@ -164,6 +166,7 @@ impl Task {
                 let dimensions = (new_dimensions.0 as isize, new_dimensions.1 as isize);
                 let resize_type = *resize_type;
                 let rotation = *rotation;
+                let quality = *quality;
 
                 let (vibrato_hz, vibrato_depth, resize_curve) = if let Task::VideoResize {
                     vibrato_hz,
@@ -211,6 +214,7 @@ impl Task {
                             vibrato_depth,
                             input_dimensions,
                             resize_curve,
+                            quality,
                         )
                     })
                 } else {
@@ -228,6 +232,7 @@ impl Task {
                             format,
                             None,
                             false,
+                            quality,
                         )
                         .map_err(|e| e.to_string())
                     })

@@ -3,6 +3,7 @@
 use std::{
     ffi::OsStr,
     io::{Read, Write},
+    num::NonZeroU8,
     path::Path,
     process::{ChildStdout, Command, Stdio},
     sync::OnceLock,
@@ -30,6 +31,7 @@ pub fn resize_image(
     // output size instead of fitting.
     output_size: Option<(usize, usize, bool)>,
     crop_rotation: bool,
+    quality: NonZeroU8,
 ) -> Result<Vec<u8>, MagickError> {
     if format == ImageFormat::Preserve {
         // yeah this isn't a MagickError, but we'd get one in the last line
@@ -39,7 +41,7 @@ pub fn resize_image(
         ));
     }
 
-    let wand = MagickWand::new();
+    let mut wand = MagickWand::new();
 
     wand.read_image_blob(data)?;
 
@@ -235,6 +237,26 @@ pub fn resize_image(
         }
     }
 
+    // Quality tends to behave in an exponential manner.
+    // Normalize this to make it perceptually linear.
+    let quality = (quality.get() as f64 / 100.0 - 0.01).powi(4) * 100.0 + 1.0;
+    let quality = NonZeroU8::new(quality as u8).unwrap_or(NonZeroU8::MIN);
+    wand.set_image_compression_quality(quality.get().into())?;
+    wand.set_compression_quality(quality.get().into())?;
+
+    let compressible = match format {
+        ImageFormat::Jpeg | ImageFormat::Webp => true,
+        ImageFormat::Bmp | ImageFormat::Png | ImageFormat::Preserve => false,
+    };
+
+    if !compressible && quality.get() < 100 {
+        // If this format is not compressible but we want it to be,
+        // artificially introduce compression by way of JPEG.
+        let jpg = wand.write_image_blob("jpg")?;
+        wand = MagickWand::new();
+        wand.read_image_blob(jpg)?;
+    }
+
     wand.write_image_blob(format.as_str())
 }
 
@@ -247,7 +269,7 @@ impl<T: Read> SplitIntoBmps<T> {
     pub fn new(item: T) -> SplitIntoBmps<T> {
         SplitIntoBmps {
             item,
-            // Somewhere about enough to fit a 2048x204832-bits-per-pixel image
+            // Somewhere about enough to fit a 2048x2048 32-bits-per-pixel image
             // plus 4MB of other whiff.
             buffer: Vec::with_capacity(2048 * 2048 * 5),
         }
@@ -441,6 +463,7 @@ pub fn resize_video(
     vibrato_depth: f64,
     input_dimensions: (u32, u32),
     resize_curve: ResizeCurve,
+    quality: NonZeroU8,
 ) -> Result<Vec<u8>, String> {
     macro_rules! unfail {
         ($thing: expr) => {
@@ -469,6 +492,14 @@ pub fn resize_video(
     // h264 needs output dimensions divisible by 2; make absolutely sure we do that.
     output_width += output_width % 2;
     output_height += output_height % 2;
+
+    // If we want JPEG compression, the frames should just be outputted in JPEG.
+    // Otherwise, BMP is simplest.
+    let format = if quality.get() < 100 {
+        ImageFormat::Jpeg
+    } else {
+        ImageFormat::Bmp
+    };
 
     // Now, if the size is dynamic, we want to know if we want to
     // stretch every frame to the output dimensions, or just fit them.
@@ -528,6 +559,14 @@ pub fn resize_video(
             let curved_rotation =
                 resize_curve.apply_resize_for(count, input_frame_count, 0.0, rotation);
 
+            let curved_quality_f64 = resize_curve.apply_resize_for(
+                count,
+                input_frame_count,
+                100.0,
+                quality.get().into(),
+            );
+            let curved_quality = NonZeroU8::new(curved_quality_f64 as u8).unwrap_or(NonZeroU8::MIN);
+
             // Check if this operation changes the image at all.
             // If the dimensions (both target and output) and rotation
             // are the same, it doesn't.
@@ -535,6 +574,7 @@ pub fn resize_video(
             let resize_result = if rotation.abs() == 0.0
                 && input_dimensions == Some((output_width as isize, output_height as isize))
                 && input_dimensions == Some((curved_width as isize, curved_height as isize))
+                && quality.get() >= 100
             {
                 // It doesn't. Just return the same buffer directly.
                 Ok(frame)
@@ -545,9 +585,10 @@ pub fn resize_video(
                     curved_height as isize,
                     curved_rotation,
                     resize_type,
-                    ImageFormat::Bmp,
+                    format,
                     Some((output_width, output_height, stretch_to_output_size)),
                     is_curved, // Prevent bounds bouncing.
+                    curved_quality,
                 )
             };
 
