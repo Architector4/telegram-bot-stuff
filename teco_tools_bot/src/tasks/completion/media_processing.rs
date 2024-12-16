@@ -249,17 +249,25 @@ pub fn resize_image(
     wand.set_image_compression_quality(quality)?;
     wand.set_compression_quality(quality)?;
 
-    let compressible = match format {
-        ImageFormat::Jpeg | ImageFormat::Webp => true,
-        ImageFormat::Bmp | ImageFormat::Png | ImageFormat::Preserve => false,
-    };
+    if quality < 100 {
+        if format == ImageFormat::Webp {
+            wand.set_option("webp:method", "2")?;
+            wand.set_option("webp:alpha-quality", &quality.to_string())?;
+            wand.set_option("webp:filter-strength", "0")?;
+        }
 
-    if !compressible && quality < 100 {
-        // If this format is not compressible but we want it to be,
-        // artificially introduce compression by way of JPEG.
-        let jpg = wand.write_image_blob("jpg")?;
-        wand = MagickWand::new();
-        wand.read_image_blob(jpg)?;
+        let compressible = match format {
+            ImageFormat::Jpeg | ImageFormat::Webp => true,
+            ImageFormat::Bmp | ImageFormat::Png | ImageFormat::Preserve => false,
+        };
+
+        if !compressible {
+            // If this format is not compressible but we want it to be,
+            // artificially introduce compression by way of JPEG.
+            let jpg = wand.write_image_blob("jpg")?;
+            wand = MagickWand::new();
+            wand.read_image_blob(jpg)?;
+        }
     }
 
     wand.write_image_blob(format.as_str())
