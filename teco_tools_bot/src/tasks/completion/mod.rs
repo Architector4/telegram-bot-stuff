@@ -132,8 +132,12 @@ impl Task {
                                 "Error: can't work with animated stickers nor voice messages."
                             );
                         }
-                        if media.file.size > 150 * 1000 * 1000 {
-                            goodbye!("Error: media is too large. The limit is 150MB.");
+                        if media.file.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
+                            goodbye!(format!(
+                                "Error: media is too large. The limit is {}MB.",
+                                MAX_DOWNLOAD_SIZE_MEGABYTES
+                            )
+                            .as_str());
                         }
                         media
                     }
@@ -370,8 +374,12 @@ impl Task {
                         if media.is_sound {
                             goodbye!("Error: can't work with audio messages.");
                         }
-                        if media.file.size > 150 * 1000 * 1000 {
-                            goodbye!("Error: media is too large. The limit is 150MB.");
+                        if media.file.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
+                            goodbye!(format!(
+                                "Error: media is too large. The limit is {}MB.",
+                                MAX_DOWNLOAD_SIZE_MEGABYTES
+                            )
+                            .as_str());
                         }
                         media
                     }
