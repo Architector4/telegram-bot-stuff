@@ -238,7 +238,9 @@ async fn visit_and_check_if_spam(
         return Ok(IsSpamCheckResult::YesUrl);
     }
 
-    if domain.as_str().eq_ignore_ascii_case("telegra.ph") {
+    if domain.as_str().eq_ignore_ascii_case("telegra.ph")
+        || domain.as_str().eq_ignore_ascii_case("teletype.in")
+    {
         // If it's telegra.ph, do some extra funny checks.
         // Find links here and figure if they're spam themselves.
 
