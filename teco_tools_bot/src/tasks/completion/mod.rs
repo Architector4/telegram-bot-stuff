@@ -300,17 +300,25 @@ impl Task {
                             .await
                     };
 
-                    if let Err(RequestError::Api(teloxide::ApiError::RequestEntityTooLarge)) =
-                        result
-                    {
-                        goodbye!(format!(
+                    match &result {
+                        Err(RequestError::Api(teloxide::ApiError::RequestEntityTooLarge)) => {
+                            goodbye!(format!(
                             "Error: the resulting media is too big ({:.3}MB, max is {}MB). Sorry!",
                             media_data.len() as f64 / 1000.0 / 100.00,
                             MAX_UPLOAD_SIZE_MEGABYTES
                         )
-                        .as_str());
-                    } else {
-                        result
+                            .as_str());
+                        }
+                        Err(RequestError::Api(teloxide::ApiError::Unknown(e))) => {
+                            if e.contains("PHOTO_INVALID_DIMENSIONS") {
+                                goodbye!(concat!(
+                                    "Error: the resulting image's dimensions are invalid. ",
+                                    "It's probably too small or the aspect ratio is too extreme. Sorry!"
+                                ));
+                            }
+                            result
+                        }
+                        _ => result,
                     }
                 })?;
                 Ok(())
