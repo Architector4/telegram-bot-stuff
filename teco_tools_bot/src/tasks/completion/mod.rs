@@ -55,7 +55,8 @@ impl Task {
         // Little handler for the downloading.
         macro_rules! unerror_download {
             ($download: expr) => {{
-                if let Err(RequestError::Api(ApiError::Unknown(text))) = &$download {
+                let result = $download;
+                if let Err(RequestError::Api(ApiError::Unknown(text))) = &result {
                     if text.contains("file is temporarily unavailable") {
                         goodbye!(concat!(
                             "Error: the media file is unavailable for the bot. ",
@@ -64,7 +65,15 @@ impl Task {
                         ));
                     }
                 };
-                $download?
+                if let Err(RequestError::Network(_)) = &result {
+                    goodbye!(concat!(
+                        "Error: a networking error while downloading the file. ",
+                        "This is likely a Telegram server issue. ",
+                        "Try waiting some time, or reuploading the media, ",
+                        "and performing the command again."
+                    ));
+                };
+                result?
             }};
         }
 
