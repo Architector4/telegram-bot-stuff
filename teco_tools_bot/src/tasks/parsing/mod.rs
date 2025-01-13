@@ -727,11 +727,11 @@ fn rotation_parser(data: &str) -> Option<(f64, bool)> {
         rotation = rotation.to_degrees();
     }
 
-    // I want to limit rotation to be no bigger than 360.0,
-    // but allow exactly 360.0 through, hence epsilon.
-    // It may introduce a bit of inaccuracy in case someone
-    // types a large number, but meh.
-    Some((rotation % (360.0 + f64::EPSILON * 360.0), matched_anything))
+    if rotation > 3600.0 {
+        rotation %= 3600.0;
+    }
+
+    Some((rotation, matched_anything))
 }
 
 #[test]
