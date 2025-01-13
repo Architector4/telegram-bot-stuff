@@ -185,14 +185,16 @@ pub fn resize_image(
         } else {
             wand.fit(output_size.0, output_size.1);
 
-            let pre_extend_width = wand.get_image_width();
-            let pre_extend_height = wand.get_image_height();
-            wand.extend_image(
-                output_size.0,
-                output_size.1,
-                (pre_extend_width as isize - output_size.0 as isize) / 2,
-                (pre_extend_height as isize - output_size.1 as isize) / 2,
-            )?;
+            if resize_type != ResizeType::Fit {
+                let pre_extend_width = wand.get_image_width();
+                let pre_extend_height = wand.get_image_height();
+                wand.extend_image(
+                    output_size.0,
+                    output_size.1,
+                    (pre_extend_width as isize - output_size.0 as isize) / 2,
+                    (pre_extend_height as isize - output_size.1 as isize) / 2,
+                )?;
+            }
         }
     }
 
