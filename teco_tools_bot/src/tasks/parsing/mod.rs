@@ -187,7 +187,7 @@ impl Task {
                             "Only for videos:\n",
                             "<code>vibrato_hz</code>: Frequency of vibrato applied to audio. ",
                             "Can only be between 0.1 or 20000.0. Default is 7.\n",
-                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 100.0. Default is 1.\n",
+                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 1000.0. Default is 1.\n",
                             "<code>curve</code>: Curve that defines the blend between original and distorted size and rotation. ",
                             "Can be \"constant\" (default), \"rising\", \"falling\", \"loop\" or \"loopb\".\n",
                             "\n\n",
@@ -222,7 +222,7 @@ impl Task {
                             "Only for videos:\n",
                             "<code>vibrato_hz</code>: Frequency of vibrato applied to audio. ",
                             "Can only be between 0.1 or 20000.0. Default is 7.\n",
-                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 100.0. Default is 0.\n",
+                            "<code>vibrato_depth</code>: Vibrato depth. Can only be between 0.0 and 1000.0. Default is 0.\n",
                             "<code>curve</code>: Curve that defines the blend between original and distorted size and rotation. ",
                             "Can be \"constant\" (default), \"rising\", \"falling\", \"loop\" or \"loopb\".\n",
                             "\n\n",
@@ -465,7 +465,7 @@ impl Task {
                         parse_keyval_param_with_parser!(
                             param,
                             vibrato_depth,
-                            sanitized_f64_parser(0.0, 100.0),
+                            sanitized_f64_parser(0.0, 1000.0),
                             help
                         );
                         parse_keyval_param!(param, curve, help);
