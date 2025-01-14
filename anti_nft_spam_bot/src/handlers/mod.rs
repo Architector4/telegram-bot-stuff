@@ -362,24 +362,6 @@ async fn gather_suspicion(
         // This or replied-to message has sus links.
         // Tag them.
 
-        // Get this message "entities".
-        let Some(mut entities) = message
-            .parse_entities()
-            .or_else(|| message.parse_caption_entities())
-        else {
-            return Ok(());
-        };
-
-        // Get replied-to message "entities", if any.
-        if let Some(replied_message) = message.reply_to_message() {
-            if let Some(replied_entities) = replied_message
-                .parse_entities()
-                .or_else(|| replied_message.parse_caption_entities())
-            {
-                entities.extend(replied_entities);
-            }
-        }
-
         let mut had_links = false;
 
         let mut marked_count = 0u32;
@@ -417,26 +399,46 @@ async fn gather_suspicion(
             };
         }
 
+        // Get this message "entities".
+        let Some(mut entities) = message
+            .parse_entities()
+            .or_else(|| message.parse_caption_entities())
+        else {
+            return Ok(());
+        };
+
+        // Get replied-to message "entities", if any.
+        if let Some(replied_message) = message.reply_to_message() {
+            if let Some(replied_entities) = replied_message
+                .parse_entities()
+                .or_else(|| replied_message.parse_caption_entities())
+            {
+                entities.extend(replied_entities);
+            }
+
+            // While we're here, check for links in buttons on the replied-to message.
+            if let Some(markup) = replied_message.reply_markup() {
+                for row in &markup.inline_keyboard {
+                    for button in row {
+                        let Some((url, domain)) = get_button_url_domain(button) else {
+                            continue;
+                        };
+                        marksus!(url, &domain);
+                    }
+                }
+            }
+        }
+
         for entity in &entities {
             let Some((url, domain)) = get_entity_url_domain(entity) else {
-                log::warn!("Received a URL without a domain: {}", entity.text());
                 continue;
             };
 
             marksus!(&url, &domain);
         }
 
-        // Check all the buttons on the message for links.
-        if let Some(markup) = message.reply_markup() {
-            for row in &markup.inline_keyboard {
-                for button in row {
-                    let Some((url, domain)) = get_button_url_domain(button) else {
-                        continue;
-                    };
-                    marksus!(url, &domain);
-                }
-            }
-        }
+        // We assume there would be no buttons on the /spam message we're
+        // working for that we need to check. That'd be kind of ridiculous lol
 
         let mut response;
         let marked = marked_count > 0;
