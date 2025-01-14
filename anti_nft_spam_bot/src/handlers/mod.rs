@@ -399,12 +399,17 @@ async fn gather_suspicion(
             };
         }
 
-        // Get this message "entities".
-        let Some(mut entities) = message
+        if let Some(entities) = message
             .parse_entities()
             .or_else(|| message.parse_caption_entities())
-        else {
-            return Ok(());
+        {
+            for entity in &entities {
+                let Some((url, domain)) = get_entity_url_domain(entity) else {
+                    continue;
+                };
+
+                marksus!(&url, &domain);
+            }
         };
 
         // Get replied-to message "entities", if any.
@@ -413,7 +418,13 @@ async fn gather_suspicion(
                 .parse_entities()
                 .or_else(|| replied_message.parse_caption_entities())
             {
-                entities.extend(replied_entities);
+                for entity in &replied_entities {
+                    let Some((url, domain)) = get_entity_url_domain(entity) else {
+                        continue;
+                    };
+
+                    marksus!(&url, &domain);
+                }
             }
 
             // While we're here, check for links in buttons on the replied-to message.
@@ -427,14 +438,6 @@ async fn gather_suspicion(
                     }
                 }
             }
-        }
-
-        for entity in &entities {
-            let Some((url, domain)) = get_entity_url_domain(entity) else {
-                continue;
-            };
-
-            marksus!(&url, &domain);
         }
 
         // We assume there would be no buttons on the /spam message we're
