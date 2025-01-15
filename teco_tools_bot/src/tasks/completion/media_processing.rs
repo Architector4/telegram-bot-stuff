@@ -178,26 +178,6 @@ pub fn resize_image(
         wand.flip_image()?;
     }
 
-    if let Some(output_size) = output_size {
-        // Apply output size.
-        if output_size.2 {
-            wand.resize_image(output_size.0, output_size.1, FilterType::Lagrange)?;
-        } else {
-            wand.fit(output_size.0, output_size.1);
-
-            if resize_type != ResizeType::Fit {
-                let pre_extend_width = wand.get_image_width();
-                let pre_extend_height = wand.get_image_height();
-                wand.extend_image(
-                    output_size.0,
-                    output_size.1,
-                    (pre_extend_width as isize - output_size.0 as isize) / 2,
-                    (pre_extend_height as isize - output_size.1 as isize) / 2,
-                )?;
-            }
-        }
-    }
-
     if rotation.signum() % 360.0 != 0.0 {
         if format.supports_alpha_transparency()
             && rotation.signum() % 90.0 != 0.0
@@ -251,6 +231,8 @@ pub fn resize_image(
     wand.set_image_compression_quality(quality)?;
     wand.set_compression_quality(quality)?;
 
+    // Do we need to apply output size?
+
     if quality < 100 {
         if format == ImageFormat::Webp {
             wand.set_option("webp:method", "2")?;
@@ -263,12 +245,53 @@ pub fn resize_image(
             ImageFormat::Bmp | ImageFormat::Png | ImageFormat::Preserve => false,
         };
 
-        if !compressible {
+        if compressible {
+            let compressed_blob = wand.write_image_blob(format.as_str())?;
+
+            // If we need to apply output size, we need to decode the image now,
+            // *after* it was transformed.
+            let need_to_apply_output_size = if let Some(output_size) = output_size {
+                output_size.0 != wand.get_image_width() || output_size.1 != wand.get_image_height()
+            } else {
+                false
+            };
+
+            if need_to_apply_output_size {
+                wand = MagickWand::new();
+                wand.read_image_blob(compressed_blob)?;
+            } else {
+                // Otherwise, just return that.
+                return Ok(compressed_blob);
+            }
+        } else {
             // If this format is not compressible but we want it to be,
-            // artificially introduce compression by way of JPEG.
+            // artificially introduce compression by way of JPEG,
+            // and pass it on to be output as the output format.
             let jpg = wand.write_image_blob("jpg")?;
             wand = MagickWand::new();
             wand.read_image_blob(jpg)?;
+        };
+    }
+
+    // Apply output size to the results of above.
+    if let Some(output_size) = output_size {
+        wand.set_image_background_color(&transparent)?;
+        // Apply output size.
+        if output_size.2 {
+            wand.resize_image(output_size.0, output_size.1, FilterType::Lagrange)?;
+        } else {
+            wand.fit(output_size.0, output_size.1);
+
+            if resize_type != ResizeType::Fit {
+                let pre_extend_width = wand.get_image_width();
+                let pre_extend_height = wand.get_image_height();
+                wand.extend_image(
+                    output_size.0,
+                    output_size.1,
+                    (pre_extend_width as isize - output_size.0 as isize) / 2,
+                    (pre_extend_height as isize - output_size.1 as isize) / 2,
+                )?;
+            }
         }
     }
 
