@@ -372,7 +372,10 @@ impl Task {
                 // because the variable name is used by the parsing macros.
                 let mut r#type = video_type_pref;
 
+                let mut at_least_1_param = false;
+
                 for param in params {
+                    at_least_1_param = true;
                     if let Some(new_dimensions) = new_dimensions {
                         // If new dimensions were set by anything here,
                         // reset them to old dimensions.
@@ -543,24 +546,25 @@ impl Task {
                     let media_too_big_2x = old_dimensions.0.unsigned_abs()
                         > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2
                         || old_dimensions.1.unsigned_abs() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2;
-                    let default_percentage =
-                        if format == ImageFormat::Preserve || resize_type.is_seam_carve() {
-                            // We aren't changing format and/or we want seam carving.
-                            // Either way, this means we likely want to resize the media then. Do 50%.
-                            if media_too_big_2x {
-                                // Image is more than 200% big.
-                                // Scalling it to 50% will still be too big. Scale down.
-                                biggest_percentage_that_can_fit(old_dimensions)
-                            } else {
-                                50.0
-                            }
-                        } else if media_too_big {
-                            // We want to preserve the media size, but it's too big.
-                            // Scale down.
+                    let default_percentage = if !at_least_1_param || resize_type.is_seam_carve() {
+                        // We aren't changing format and/or we want seam carving.
+                        // We have no parameters and/or we want seam carving.
+                        // Either way, this means we likely want to resize the media then,
+                        // or this default will be overridden by parameters. Do 50%.
+                        if media_too_big_2x {
+                            // Image is more than 200% big.
+                            // Scalling it to 50% will still be too big. Scale down.
                             biggest_percentage_that_can_fit(old_dimensions)
                         } else {
-                            100.0
-                        };
+                            50.0
+                        }
+                    } else if media_too_big {
+                        // We want to preserve the media size, but it's too big.
+                        // Scale down.
+                        biggest_percentage_that_can_fit(old_dimensions)
+                    } else {
+                        100.0
+                    };
 
                     if let (Some(new_width), Some(new_height)) = (
                         perc_calc(default_percentage, old_dimensions.0),
