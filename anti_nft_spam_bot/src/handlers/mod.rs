@@ -359,8 +359,59 @@ async fn gather_suspicion(
     //    || text.contains("admin")
     //    || text.contains("begone")
     if text.starts_with("/spam") | text.starts_with("/scam") {
-        // This or replied-to message has sus links.
-        // Tag them.
+        // This or replied-to message may have sus links.
+
+        // First, check and skip if this is a reply to a post by
+        // the channel that is linked to this chat.
+        // This is worth doing because such messages are sanctioned by
+        // the chat's admins, and are most often just a misclick of
+        // the blue /spam command in comments to channel posts.
+        //
+        // The check for above is accomplished by is_sender_admin function,
+        // but there are other corner cases to consider too.
+
+        'reject_from_admin: {
+            let Some(reply_to) = message.reply_to_message() else {
+                // This isn't a reply to anything.
+                break 'reject_from_admin;
+            };
+
+            if message
+                .from()
+                .is_some_and(|x| Some(x.id) == reply_to.from().map(|x| x.id))
+                || message
+                    .sender_chat()
+                    .is_some_and(|x| Some(x.id) == reply_to.sender_chat().map(|x| x.id))
+            {
+                // The sender is replying to themselves and knows what they're doing.
+                break 'reject_from_admin;
+            }
+
+            let Ok(true) = is_sender_admin(bot, reply_to).await else {
+                // The sender of the replied-to message isn't an admin.
+                break 'reject_from_admin;
+            };
+
+            let Ok(false) = is_sender_admin(bot, message).await else {
+                // The sender of this message *is* an admin.
+                break 'reject_from_admin;
+            };
+
+            // The two checks above will return true for private chats without extra
+            // Telegram API queries.
+
+            // This is an applicable situation.
+            let response = concat!(
+                "Sorry, but the message you're replying to is posted by an admin of this chat, ",
+                "so it is ignored. If you believe it should be marked, ",
+                "DM this bot with the command <code>/spam badlink.com</code> to submit it anyway."
+            );
+            bot.archsendmsg(message.chat.id, response, message.id)
+                .await?;
+            return Ok(());
+        }
+
+        // Find and tag the sus links.
 
         let mut had_links = false;
 
