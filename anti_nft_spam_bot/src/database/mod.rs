@@ -1187,16 +1187,17 @@ mod tests {
             Some((IsSpam::No, true))
         );
 
-        // Scenario continuation:
+        // Scenario continuation (skill issue case):
         // 5. Admin tries to fix this by marking the spam link as URL spam.
         let db = make_a_db().await?;
         let response = ReviewResponse::UrlSpam(Some(tgdomain), spam.clone());
         db.read_review_response(&response).await?;
 
-        // Normal link shouldn't be spam now.
+        // Normal link should still be spam: marking a
+        // particular link as spam shouldn't unmark the domain.
         assert_eq!(
             db.is_spam(&normal, None, false).await.unwrap(),
-            Some((IsSpam::No, true))
+            Some((IsSpam::Yes, true))
         );
         // In this case the spam link should still be considered spam.
         assert_eq!(
