@@ -168,6 +168,21 @@ impl ImageFormat {
             Self::Png => "PNG",
         }
     }
+
+    /// Returns a name of a fitting ffmpeg codec for this format.
+    ///
+    /// # Panics
+    ///
+    /// Panics if [`ImageFormat::Preserve`] is sent.
+    pub fn as_str_for_ffmpeg(&self) -> &'static str {
+        match self {
+            Self::Preserve => panic!("Tried to run as_str_for_ffmpeg for ImageFormat::Preserve"),
+            Self::Webp => "webp",
+            Self::Jpeg => "jpegls",
+            Self::Bmp => "bmp",
+            Self::Png => "png",
+        }
+    }
 }
 
 impl Display for ImageFormat {
