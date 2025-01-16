@@ -685,6 +685,7 @@ impl Database {
     }
 
     /// Remove a domain from the database, if it exists.
+    #[allow(dead_code)]
     pub async fn remove_domain(&self, domain: &Domain) -> Result<(), Error> {
         sqlx::query("DELETE FROM domains WHERE domain=?;")
             .bind(domain.as_str())
@@ -705,12 +706,8 @@ impl Database {
     pub async fn read_review_response(&self, response: &ReviewResponse) -> Result<(), Error> {
         match response {
             ReviewResponse::Skip => (),
-            ReviewResponse::UrlSpam(domain, url) => {
+            ReviewResponse::UrlSpam(_domain, url) => {
                 self.add_url(url, IsSpam::Yes, false, true).await?;
-                // Implicitly this means that this URL's domain isn't spam.
-                if let Some(domain) = domain {
-                    self.remove_domain(domain).await?;
-                }
             }
             ReviewResponse::DomainSpam(domain, url) => {
                 self.add_domain(domain, Some(url), IsSpam::Yes, false, true)
