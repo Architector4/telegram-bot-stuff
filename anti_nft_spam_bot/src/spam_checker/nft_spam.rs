@@ -41,6 +41,22 @@ pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
         return Some(IsSpam::Yes);
     }
 
+    if username.starts_with("tgh") {
+        // If more than 3 digits at the end...
+        // (if position of first non-digit character from the end
+        // is bigger than the third counting from 0...)
+        if username
+            .chars()
+            .rev()
+            .position(|x| !x.is_ascii_digit())
+            .is_some_and(|x| x > 2)
+        {
+            // Some new spam has been flooding all over with usernames
+            // like "@TGHfocus25932" and such.
+            return Some(IsSpam::Yes);
+        }
+    }
+
     if !username.ends_with("bot") {
         // Not a telegram bot (usually).
         return Some(IsSpam::No);
