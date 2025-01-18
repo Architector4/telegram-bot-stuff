@@ -335,6 +335,40 @@ pub const HELP: Command = Command {
     hidden: false,
 };
 async fn help(tp: TaskParams<'_>) -> Ret {
+    use std::fmt::Write;
+
+    let mut params = tp.get_params().split_whitespace();
+    if let Some(cmdname) = params.next() {
+        // If a second parameter is present, just print normal help with code below.
+        if params.next().is_none() {
+            let cmdname = cmdname.trim_start_matches('/');
+            // Find the command...
+            let Some(cmd) = COMMANDS.iter().find(|x| {
+                x.callname
+                    .split_ascii_whitespace()
+                    .next()
+                    .is_some_and(|x| x.trim_start_matches('/').eq_ignore_ascii_case(cmdname))
+            }) else {
+                goodbye_desc!(&format!(
+                    "I don't know of a command named <code>/{}</code>.",
+                    encode_text(cmdname)
+                ));
+            };
+
+            let mut output = String::new();
+            cmd.get_help(&mut output).unwrap();
+
+            write!(
+                &mut output,
+                "\n\nSend <code>/{} help</code> for more info on parameters, if any.",
+                cmdname
+            )
+            .unwrap();
+
+            goodbye_desc!(output);
+        }
+    }
+
     if !tp.message.chat.is_private() {
         goodbye_desc!("Contact me in DMs for help!");
     }
@@ -506,12 +540,13 @@ pub const RESIZE: Command = Command {
         "[&lt;fit/stretch/crop&gt;] ",
         "[&lt;WxH&gt; or &lt;size%&gt;] ",
         "[&lt;format&gt;] ",
-        "[&lt;rot&gt;]",
+        "[&lt;rot&gt;] ",
+        "[...]",
     ),
     description: concat!(
         "Resizes a media by fitting (default), stretching or cropping it ",
-        "to specified resolution (or by default to 50% of original), and rotating by \"rot\" degrees. ",
-        "By default will reduce the image's size in half on each side unless a format is specified."
+        "to specified resolution, and rotating by \"rot\" degrees. ",
+        "By default will reduce the image/video's size in half on each side unless any options are specified."
     ),
     function: wrap!(resize),
     hidden: false,
@@ -526,10 +561,11 @@ pub const DISTORT: Command = Command {
         "[&lt;WxH&gt; or &lt;size%&gt;] ",
         "[&lt;delta_x&gt;] ",
         "[&lt;rigidity&gt;] ",
+        "[...]",
     ),
     description: concat!(
-        "Distorts the image using seam carving and rotates it by \"rot\" degrees. ",
-        "By default will reduce the media's size in half on each side."
+        "Distorts the media using seam carving and rotates it by \"rot\" degrees. ",
+        "By default will reduce the image/video's size in half on each side."
     ),
     function: wrap!(distort),
     hidden: false,
