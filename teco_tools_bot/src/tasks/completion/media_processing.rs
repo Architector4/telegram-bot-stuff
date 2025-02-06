@@ -380,6 +380,7 @@ fn get_bmp_width_height(buffer: &[u8]) -> Option<(isize, isize)> {
 
 pub fn count_video_frames_and_framerate_and_audio_and_length(
     path: &std::path::Path,
+    count_audio: bool,
 ) -> Result<(u64, f64, bool, Duration), std::io::Error> {
     macro_rules! goodbye {
         ($desc: expr) => {
@@ -394,7 +395,7 @@ pub fn count_video_frames_and_framerate_and_audio_and_length(
             path.as_ref(),
             OsStr::new("-vsync"),
             OsStr::new("passthrough"),
-            OsStr::new("-an"),
+            OsStr::new(if count_audio { "-vn" } else { "-an" }),
             OsStr::new("-f"),
             OsStr::new("null"),
             OsStr::new("-"),
@@ -406,6 +407,8 @@ pub fn count_video_frames_and_framerate_and_audio_and_length(
     let Ok(output) = String::from_utf8(output.stderr) else {
         goodbye!("Frame counter returned non UTF-8 response");
     };
+
+    dbg!(&output);
 
     // Output may be in a format like
     // ...
@@ -435,6 +438,8 @@ pub fn count_video_frames_and_framerate_and_audio_and_length(
     } else {
         0
     };
+
+    dbg!(last_line);
 
     let Some(time_captures) = time_regex.captures(last_line) else {
         goodbye!("Frame counter returned an invalid response");
@@ -578,7 +583,7 @@ pub fn resize_video(
     let _ = status_report.send("Counting frames...".to_string());
 
     let (input_frame_count, input_frame_rate, has_audio, _input_length) = unfail!(
-        count_video_frames_and_framerate_and_audio_and_length(inputfile)
+        count_video_frames_and_framerate_and_audio_and_length(inputfile, false)
     );
 
     let converting_function = move |(count, frame): (_, Result<Vec<u8>, _>)| match frame {
@@ -1022,12 +1027,12 @@ pub fn amen_break_media(
 
     let _ = status_report.send("Checking amen break length".to_string());
     let (_input_frame_count, _input_frame_rate, _has_audio, amen_break_length) = unfail!(
-        count_video_frames_and_framerate_and_audio_and_length(&break_path)
+        count_video_frames_and_framerate_and_audio_and_length(&break_path, true)
     );
 
     let _ = status_report.send("Checking video length...".to_string());
     let (_input_frame_count, _input_frame_rate, _has_audio, input_length) = unfail!(
-        count_video_frames_and_framerate_and_audio_and_length(inputfile)
+        count_video_frames_and_framerate_and_audio_and_length(inputfile, false)
     );
 
     let target_length = amen_break_length
