@@ -394,6 +394,7 @@ pub fn count_video_frames_and_framerate_and_audio_and_length(
             path.as_ref(),
             OsStr::new("-vsync"),
             OsStr::new("passthrough"),
+            OsStr::new("-an"),
             OsStr::new("-f"),
             OsStr::new("null"),
             OsStr::new("-"),
