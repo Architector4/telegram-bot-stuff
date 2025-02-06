@@ -408,8 +408,6 @@ pub fn count_video_frames_and_framerate_and_audio_and_length(
         goodbye!("Frame counter returned non UTF-8 response");
     };
 
-    dbg!(&output);
-
     // Output may be in a format like
     // ...
     // (OPTIONAL)  Stream #0:1(eng): Audio: pcm_s16le, 44100 Hz, stereo, s16, 1411 kb/s (default)
@@ -438,8 +436,6 @@ pub fn count_video_frames_and_framerate_and_audio_and_length(
     } else {
         0
     };
-
-    dbg!(last_line);
 
     let Some(time_captures) = time_regex.captures(last_line) else {
         goodbye!("Frame counter returned an invalid response");
