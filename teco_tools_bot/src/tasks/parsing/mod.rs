@@ -517,9 +517,9 @@ impl Task {
                             new_dimensions.1,
                             MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
                             MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
-                            old_dimensions.0,
-                            old_dimensions.1,
-                            biggest_percentage_that_can_fit(old_dimensions)
+                            original_dimensions.0,
+                            original_dimensions.1,
+                            biggest_percentage_that_can_fit(*original_dimensions)
                         )));
                     };
 
@@ -540,12 +540,13 @@ impl Task {
                     // Preset one.
 
                     // Calculate if the input media is too big.
-                    let media_too_big = old_dimensions.0.unsigned_abs()
+                    let media_too_big = original_dimensions.0.unsigned_abs()
                         > MAX_OUTPUT_MEDIA_DIMENSION_SIZE
-                        || old_dimensions.1.unsigned_abs() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
-                    let media_too_big_2x = old_dimensions.0.unsigned_abs()
+                        || original_dimensions.1.unsigned_abs() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE;
+                    let media_too_big_2x = original_dimensions.0.unsigned_abs()
                         > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2
-                        || old_dimensions.1.unsigned_abs() > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2;
+                        || original_dimensions.1.unsigned_abs()
+                            > MAX_OUTPUT_MEDIA_DIMENSION_SIZE * 2;
                     let default_percentage = if !at_least_1_param || resize_type.is_seam_carve() {
                         // We aren't changing format and/or we want seam carving.
                         // We have no parameters and/or we want seam carving.
@@ -554,27 +555,27 @@ impl Task {
                         if media_too_big_2x {
                             // Image is more than 200% big.
                             // Scalling it to 50% will still be too big. Scale down.
-                            biggest_percentage_that_can_fit(old_dimensions)
+                            biggest_percentage_that_can_fit(*original_dimensions)
                         } else {
                             50.0
                         }
                     } else if media_too_big {
                         // We want to preserve the media size, but it's too big.
                         // Scale down.
-                        biggest_percentage_that_can_fit(old_dimensions)
+                        biggest_percentage_that_can_fit(*original_dimensions)
                     } else {
                         100.0
                     };
 
                     if let (Some(new_width), Some(new_height)) = (
-                        perc_calc(default_percentage, old_dimensions.0),
-                        perc_calc(default_percentage, old_dimensions.1),
+                        perc_calc(default_percentage, original_dimensions.0),
+                        perc_calc(default_percentage, original_dimensions.1),
                     ) {
                         (new_width, new_height, Some(default_percentage))
                     } else {
                         panic!(
                             "computed bad default percentage {} from dimensions {:?}",
-                            default_percentage, old_dimensions
+                            default_percentage, original_dimensions
                         );
                     }
                 };
