@@ -495,7 +495,6 @@ impl Task {
                 let _ = status_report.send("Extracting audio...".to_string());
 
                 let wav = match tokio::task::spawn_blocking(move || {
-                    let _file = file; // Drop at the end of this closure
                     whisper::convert_to_suitable_wav(&path)
                 })
                 .await
@@ -507,6 +506,8 @@ impl Task {
                         goodbye!("Error: failed to extract audio. Does this media have any?");
                     }
                 };
+
+                drop(file);
 
                 if wav.is_empty() {
                     goodbye!("Error: the input media has no audio.");
