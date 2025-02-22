@@ -843,7 +843,9 @@ async fn transcribe(tp: TaskParams<'_>) -> Ret {
         )),
     };
 
-    Ok(Ok(temp_task))
+    let task = unfail!(temp_task.parse_params(&tp));
+
+    Ok(Ok(task))
 }
 
 #[cfg(test)]
