@@ -192,17 +192,18 @@ impl Database {
     /// "No" and "Maybe" results that were automatically determined by
     /// an old spam checker are ignored unless `return_old_checker_results` is set to true.
     ///
-    /// Also returns a boolean that is true if this result is manually reviewed.
+    /// Also returns an example URL stored with the database, and a
+    /// boolean that is true if this result is manually reviewed.
     pub async fn is_domain_spam(
         &self,
         domain: &Domain,
         return_old_checker_results: bool,
-    ) -> Result<Option<(IsSpam, bool)>, Error> {
+    ) -> Result<Option<(IsSpam, Option<Url>, bool)>, Error> {
         // The "NOT" condition is to exclude results that says anything other than `IsSpam::Yes`
         // and are automatically determined by an older spam check version.
         // We DON'T want to delete those, because they should still be useful for review.
         sqlx::query(
-            "SELECT is_spam, manually_reviewed FROM domains
+            "SELECT is_spam, example_url, manually_reviewed FROM domains
             WHERE domain=? AND
                 NOT (
                     is_spam!=1 AND
@@ -219,6 +220,8 @@ impl Database {
         .map(|row: SqliteRow| {
             (
                 IsSpam::from(row.get::<u8, _>("is_spam")),
+                row.get::<Option<String>, _>("example_url")
+                    .map(|x| Url::parse(&x).unwrap()),
                 row.get::<bool, _>("manually_reviewed"),
             )
         })
@@ -311,12 +314,14 @@ impl Database {
         };
 
         // Pick the most condemning one.
-        let most_condeming =
-            IsSpam::pick_most_condemning(url_result.map(|x| x.0), domain_result.map(|x| x.0));
+        let most_condeming = IsSpam::pick_most_condemning(
+            url_result.map(|x| x.0),
+            domain_result.as_ref().map(|x| x.0),
+        );
 
         if let Some(most_condeming) = most_condeming {
             let manually_reviewed = if most_condeming.1 {
-                domain_result.unwrap().1
+                domain_result.unwrap().2
             } else {
                 url_result.unwrap().1
             };
@@ -497,15 +502,11 @@ impl Database {
                 IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
                 IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
                 IsSpam::No => {
-                    if is_spam_url.1 {
-                        MarkSusResult::ManuallyReviewedNotSpam
+                    let mark_result = !is_spam_url.1 && self.mark_url_sus(url).await?;
+                    if mark_result {
+                        MarkSusResult::Marked
                     } else {
-                        let mark_result = self.mark_url_sus(url).await?;
-                        if mark_result {
-                            MarkSusResult::Marked
-                        } else {
-                            MarkSusResult::ManuallyReviewedNotSpam
-                        }
+                        MarkSusResult::ManuallyReviewedNotSpam
                     }
                 }
             };
@@ -523,23 +524,26 @@ impl Database {
         if let Some(domain) = domain {
             // Check the domain one.
             if let Some(is_spam_domain) = self.is_domain_spam(domain, false).await? {
-                if is_spam_domain.1 {
-                    return Ok(MarkSusResult::ManuallyReviewedNotSpam);
-                }
-                let result = match is_spam_domain.0 {
-                    IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
-                    IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
-                    IsSpam::No => {
-                        let mark_result = self.mark_domain_sus(domain, Some(url)).await?;
-                        if mark_result {
-                            MarkSusResult::Marked
-                        } else {
-                            MarkSusResult::ManuallyReviewedNotSpam
+                // Imagine a situation: t.me domain isn't marked as spam,
+                // and we're trying to mark t.me/joinchat/abcdef as suspicious.
+                // That *should* work, but doesn't without this check.
+                if is_spam_domain.1.as_ref() == Some(url) {
+                    let result = match is_spam_domain.0 {
+                        IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
+                        IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
+                        IsSpam::No => {
+                            let mark_result = !is_spam_domain.2
+                                && self.mark_domain_sus(domain, Some(url)).await?;
+                            if mark_result {
+                                MarkSusResult::Marked
+                            } else {
+                                MarkSusResult::ManuallyReviewedNotSpam
+                            }
                         }
-                    }
-                };
+                    };
 
-                return Ok(result);
+                    return Ok(result);
+                }
             }
         }
 

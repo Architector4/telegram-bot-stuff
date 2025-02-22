@@ -123,16 +123,15 @@ impl ReviewResponse {
             ReviewResponse::UrlSpam(_, url) => database
                 .is_url_spam(url, false)
                 .await?
-                .map_or(true, |x| x.0 != IsSpam::Yes || !x.1),
+                .is_none_or(|x| x.0 != IsSpam::Yes || !x.1),
             ReviewResponse::DomainSpam(domain, _url) => database
                 .is_domain_spam(domain, false)
                 .await?
-                .map_or(true, |x| x.0 != IsSpam::Yes || !x.1),
+                .is_none_or(|x| x.0 != IsSpam::Yes || !x.2),
             ReviewResponse::NotSpam(domain, url) => database
                 .is_spam(url, domain.as_ref(), true)
                 .await?
-                // `IsSpam::Maybe` case here is ignored too.
-                .map_or(true, |x| x.0 != IsSpam::No || !x.1),
+                .is_none_or(|x| x.0 != IsSpam::No || !x.1),
         })
     }
 
