@@ -459,7 +459,10 @@ impl Task {
                 })?;
                 Ok(())
             }
-            Task::Transcribe { temperature } => {
+            Task::Transcribe {
+                temperature,
+                translate_to_english,
+            } => {
                 let media = data.message.get_media_info();
 
                 let media = match media {
@@ -511,7 +514,13 @@ impl Task {
 
                 let _ = status_report.send("Transcribing...".to_string());
 
-                let mut text = match whisper::submit_and_infer(wav.into(), *temperature).await {
+                let mut text = match whisper::submit_and_infer(
+                    wav.into(),
+                    *temperature,
+                    *translate_to_english,
+                )
+                .await
+                {
                     Ok(text) => text,
                     Err(e) => {
                         log::error!("Whisper infer failed: {}", e);

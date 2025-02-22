@@ -284,6 +284,7 @@ pub enum Task {
     /// Transcribe speech in input media to text with Whisper AI
     Transcribe {
         temperature: f32,
+        translate_to_english: bool,
     },
     AmenBreak,
 }
@@ -400,8 +401,17 @@ impl Task {
             }
             Task::Ocr => Ok(()),
             Task::AmenBreak => Ok(()),
-            Task::Transcribe { temperature } => {
-                write_param!("Temperature", temperature)
+            Task::Transcribe {
+                temperature,
+                translate_to_english,
+            } => {
+                if *temperature == 0.0 {
+                    writeln!(output, "<b>Temperature</b>: Auto")?;
+                } else {
+                    writeln!(output, "<b>Temperature</b>: {}", temperature)?;
+                }
+                write_param!("Translate to English", translate_to_english)?;
+                Ok(())
             }
         }
     }
@@ -516,7 +526,10 @@ impl Task {
         Task::Ocr
     }
     pub fn default_transcribe() -> Task {
-        Task::Transcribe { temperature: 0.0 }
+        Task::Transcribe {
+            temperature: 0.0,
+            translate_to_english: false,
+        }
     }
     pub fn default_amenbreak() -> Task {
         Task::AmenBreak

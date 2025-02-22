@@ -238,11 +238,12 @@ impl Task {
             },
         Task::Ocr => "",
         Task::AmenBreak => "",
-            Task::Transcribe { temperature: _ } =>
+            Task::Transcribe { temperature: _, translate_to_english: _ } =>
                 concat!(
                     "<b>Possible parameters for this command:</b>\n",
                     "<code>t</code>: Temperature. the higher this is, the wilder the output can become. ",
-                    "Can only be between 0 and 1. 0 (default) means autodetect a good value.",
+                    "Can only be between 0 and 1. 0 (default) means autodetect a good value.\n",
+                    "<code>english</code>: Translate to English when transcribing.",
 
                 )
         }
@@ -621,15 +622,26 @@ impl Task {
             }
             Task::Ocr => Ok(Task::Ocr),
             Task::AmenBreak => Ok(Task::AmenBreak),
-            Task::Transcribe { temperature: _ } => {
+            Task::Transcribe {
+                temperature: _,
+                translate_to_english: _,
+            } => {
                 let mut t = 0.0f64;
+                let mut english = false;
                 for param in params {
+                    parse_plain_param_with_parser_optional!(
+                        param,
+                        english,
+                        |x| if x == "english" { Ok(true) } else { Err(()) }
+                    );
                     parse_keyval_param_with_parser!(param, t, sanitized_f64_parser(0.0, 1.0), help);
+                    parse_keyval_param!(param, english, help);
                     parse_stop!(param, help);
                 }
 
                 Ok(Task::Transcribe {
                     temperature: t as f32,
+                    translate_to_english: english,
                 })
             }
         }

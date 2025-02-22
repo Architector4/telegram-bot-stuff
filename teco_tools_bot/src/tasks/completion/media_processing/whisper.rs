@@ -18,6 +18,7 @@ pub async fn check_if_available() -> bool {
 pub async fn submit_and_infer(
     input_wav: Cow<'static, [u8]>,
     temperature: f32,
+    transcribe_to_english: bool,
 ) -> Result<String, Error> {
     let temperature = temperature.max(0.0).min(1.0);
     let mut form_data = reqwest::multipart::Form::new()
@@ -26,6 +27,10 @@ pub async fn submit_and_infer(
 
     if temperature != 0.0 {
         form_data = form_data.text("temperature", temperature.to_string());
+    }
+
+    if transcribe_to_english {
+        form_data = form_data.text("translate", "true");
     }
 
     let client = Client::new();
