@@ -3,7 +3,10 @@ use teloxide::{dptree::deps, prelude::*, RequestError};
 
 use crate::{
     handlers,
-    tasks::taskman::{database::Database, Taskman},
+    tasks::{
+        completion::media_processing::whisper,
+        taskman::{database::Database, Taskman},
+    },
     USE_LOCAL_API,
 };
 
@@ -26,6 +29,22 @@ pub async fn entry() {
     } else {
         bot
     };
+
+    if !whisper::check_if_available().await {
+        let _ = bot
+            .send_message(
+                crate::OWNER_ID,
+                "
+Whisper API broke. Not good!
+This bot is expected to run with whisper.cpp's \"server\" example running. See this:
+https://github.com/ggerganov/whisper.cpp/tree/master/examples/server
+Specifically, the expected parameters for the server are:
+<code>whisper-server -m ggml-small-q8_0.bin -l auto --host 127.0.0.1 --port 9447</code>
+        ",
+            )
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .await;
+    }
 
     let db = Arc::new(Database::new().await.expect("Could not init the database!"));
 

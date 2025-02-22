@@ -237,7 +237,14 @@ impl Task {
                 }
             },
         Task::Ocr => "",
-        Task::AmenBreak => ""
+        Task::AmenBreak => "",
+            Task::Transcribe { temperature: _ } =>
+                concat!(
+                    "<b>Possible parameters for this command:</b>\n",
+                    "<code>t</code>: Temperature. the higher this is, the wilder the output can become. ",
+                    "Can only be between 0 and 1. 0 (default) means autodetect a good value.",
+
+                )
         }
     }
 
@@ -264,6 +271,20 @@ impl Task {
                 encode_text(command)
             );
             help_inner.as_str()
+        };
+
+        // This closure returns a closure that parses a
+        // string to a float within specified range inclusively lol
+        let sanitized_f64_parser = |min: f64, max: f64| {
+            move |val: &str| -> Result<f64, ()> {
+                let result: f64 = val.parse().map_err(|_| ())?;
+
+                if result.is_finite() && (min..=max).contains(&result) {
+                    Ok(result)
+                } else {
+                    Err(())
+                }
+            }
         };
 
         let params = Tokenizer::new(params);
@@ -343,20 +364,6 @@ impl Task {
                 } = ResizeType::default_seam_carve()
                 else {
                     unreachable!();
-                };
-
-                // This closure returns a closure that parses a
-                // string to a float within specified range inclusively lol
-                let sanitized_f64_parser = |min: f64, max: f64| {
-                    move |val: &str| -> Result<f64, ()> {
-                        let result: f64 = val.parse().map_err(|_| ())?;
-
-                        if result.is_finite() && (min..=max).contains(&result) {
-                            Ok(result)
-                        } else {
-                            Err(())
-                        }
-                    }
                 };
 
                 let quality_parser = |input: &str| -> Result<NonZeroU8, ()> {
@@ -614,6 +621,17 @@ impl Task {
             }
             Task::Ocr => Ok(Task::Ocr),
             Task::AmenBreak => Ok(Task::AmenBreak),
+            Task::Transcribe { temperature: _ } => {
+                let mut t = 0.0f64;
+                for param in params {
+                    parse_keyval_param_with_parser!(param, t, sanitized_f64_parser(0.0, 1.0), help);
+                    parse_stop!(param, help);
+                }
+
+                Ok(Task::Transcribe {
+                    temperature: t as f32,
+                })
+            }
         }
     }
 }

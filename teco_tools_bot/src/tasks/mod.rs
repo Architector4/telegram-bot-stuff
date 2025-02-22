@@ -281,6 +281,10 @@ pub enum Task {
     },
     /// Optical Character Recognition, i.e. extracting text from an image
     Ocr,
+    /// Transcribe speech in input media to text with Whisper AI
+    Transcribe {
+        temperature: f32,
+    },
     AmenBreak,
 }
 
@@ -396,6 +400,9 @@ impl Task {
             }
             Task::Ocr => Ok(()),
             Task::AmenBreak => Ok(()),
+            Task::Transcribe { temperature } => {
+                write_param!("Temperature", temperature)
+            }
         }
     }
 
@@ -507,6 +514,9 @@ impl Task {
     }
     pub fn default_ocr() -> Task {
         Task::Ocr
+    }
+    pub fn default_transcribe() -> Task {
+        Task::Transcribe { temperature: 0.0 }
     }
     pub fn default_amenbreak() -> Task {
         Task::AmenBreak

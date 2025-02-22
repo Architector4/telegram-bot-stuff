@@ -25,6 +25,7 @@ pub const COMMANDS: &[Command] = &[
     AMOGUS,
     DISTORT,
     OCR,
+    TRANSCRIBE,
     AMENBREAK,
     RESIZE,
     REVERSE_TEXT,
@@ -812,6 +813,32 @@ async fn amenbreak(tp: TaskParams<'_>) -> Ret {
         }
         None => goodbye_cancel!(concat!(
             "can't find a video or a photo. ",
+            "This command needs to be used as either a reply or caption to one."
+        )),
+    };
+
+    Ok(Ok(temp_task))
+}
+pub const TRANSCRIBE: Command = Command {
+    callname: "/transcribe",
+    description: "Transcribe speech in input media to text with Whisper AI.",
+    function: wrap!(transcribe),
+    hidden: false,
+};
+async fn transcribe(tp: TaskParams<'_>) -> Ret {
+    let temp_task = Task::default_transcribe();
+    print_help!(tp, temp_task);
+    let media = tp.message.get_media_info();
+    let _media = match media {
+        Some(media) => {
+            if !(media.is_video || media.is_sound || media.is_voice_or_video_note) {
+                goodbye_cancel!("input media doesn't have sound.");
+            }
+            check_too_large!(media);
+            media
+        }
+        None => goodbye_cancel!(concat!(
+            "can't find a media with audio. ",
             "This command needs to be used as either a reply or caption to one."
         )),
     };

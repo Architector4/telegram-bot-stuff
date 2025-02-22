@@ -1,5 +1,7 @@
 #![allow(clippy::manual_clamp)] // It's better here since it also gets rid of NaN
 
+pub mod whisper;
+
 use std::{
     ffi::OsStr,
     io::{Read, Write},

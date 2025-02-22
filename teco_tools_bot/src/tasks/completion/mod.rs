@@ -1,6 +1,7 @@
 pub mod media_processing;
 use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use html_escape::encode_text;
+use media_processing::whisper;
 use teloxide::{
     payloads::{SendAnimationSetters, SendPhotoSetters, SendStickerSetters, SendVideoSetters},
     requests::Requester,
@@ -457,6 +458,74 @@ impl Task {
                         .await
                 })?;
                 Ok(())
+            }
+            Task::Transcribe { temperature } => {
+                let media = data.message.get_media_info();
+
+                let media = match media {
+                    Some(media) => {
+                        if !(media.is_video || media.is_sound || media.is_voice_or_video_note) {
+                            goodbye!("Error: input media doesn't have sound.");
+                        }
+                        if media.file.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
+                            goodbye!(format!(
+                                "Error: media is too large. The limit is {}MB.",
+                                MAX_DOWNLOAD_SIZE_MEGABYTES
+                            )
+                            .as_str());
+                        }
+                        media
+                    }
+                    None => goodbye!(concat!(
+                        "Error: can't find a media with audio. ",
+                        "This command needs to be used as either a reply or caption to one."
+                    )),
+                };
+
+                let _ = status_report.send("Downloading media...".to_string());
+
+                let download =
+                    unerror_download!(bot.download_file_to_temp_or_directly(media.file).await);
+                let path = download.0;
+                let file = download.1;
+
+                let _ = status_report.send("Extracting audio...".to_string());
+
+                let wav = match tokio::task::spawn_blocking(move || {
+                    let _file = file; // Drop at the end of this closure
+                    whisper::convert_to_suitable_wav(&path)
+                })
+                .await
+                .expect("Worker died!")
+                {
+                    Ok(wav) => wav,
+                    Err(e) => {
+                        log::error!("Error when converting to suitable wav: {}", e);
+                        goodbye!("Error: failed to extract audio. Does this media have any?");
+                    }
+                };
+
+                if wav.is_empty() {
+                    goodbye!("Error: the input media has no audio.");
+                }
+
+                let _ = status_report.send("Transcribing...".to_string());
+
+                let mut text = match whisper::submit_and_infer(wav.into(), *temperature).await {
+                    Ok(text) => text,
+                    Err(e) => {
+                        log::error!("Whisper infer failed: {}", e);
+                        goodbye!("Error: failed transcribing media.");
+                    }
+                };
+
+                if text.is_empty() {
+                    goodbye!("Sorry, could not transcribe anything.");
+                }
+
+                text.push_str("\n\n(automatically generated transcription)");
+
+                goodbye!(encode_text(&text).as_ref());
             }
         }
     }
