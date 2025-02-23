@@ -920,7 +920,7 @@ mod tests {
         assert_eq!(db.is_url_spam(&spamurl, false).await?, None);
         assert_eq!(
             db.is_domain_spam(&spamdomain, false).await?,
-            Some((IsSpam::Yes, false))
+            Some((IsSpam::Yes, Some(spamurl.clone()), false))
         );
         assert_eq!(
             db.is_spam(&spamurl, None, false).await?,
