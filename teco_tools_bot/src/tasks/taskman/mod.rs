@@ -249,7 +249,6 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
         };
 
         // Task done. Delete the "edit message", just in case.
-
         if let Some(new_task_data) = taskman
             .db
             .get_task_by_id(task_data.taskid)
@@ -269,6 +268,11 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
             .delete_task(task_data.taskid)
             .await
             .expect("Database died!");
+
+        // If it clobbers anything, poke notify for other workers to retry picking tasks.
+        if task_data.task.clobbers() != 0 {
+            taskman.notify.notify_waiters();
+        }
 
         sleep(Duration::from_secs(2)).await;
     }
