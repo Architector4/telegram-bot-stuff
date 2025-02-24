@@ -451,6 +451,20 @@ impl Task {
         response += "\n<a href=\"https://boosty.to/architector_4\">(Consider supporting? 👉👈)</a>";
         response
     }
+
+    /// Returns a bitmask of exclusive resources this task would clobber.
+    /// Those resources can only be used by a single task, and as such we don't
+    /// want to try to concurrently complete two tasks clobbering the same resource.
+    ///
+    /// The resources are:
+    /// 1 - Whisper server
+    pub fn clobbers(&self) -> u32 {
+        match &self {
+            Self::Transcribe { ..} => 1,
+            _ => 0
+        }
+    }
+
 }
 
 ////////////////////////////

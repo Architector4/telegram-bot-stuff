@@ -77,20 +77,21 @@ impl Database {
 
         // TASKS:
         // taskid (key, i64),
-        // userid (i64 because sqlite doesn't support u64; may be NULL)
-        // task (task object serialized in RON)
+        // userid (i64 because sqlite doesn't support u64; may be NULL),
+        // task (task object serialized in RON),
         // message (message that requested the task, serialized in RON;
         //          will also contain all the file hashes and stuff as well as
-        //          the replied-to message)
+        //          the replied-to message),
         // request_message_chat_id (i64),
         // request_message_id (i32 (because telegram bot api is just like that)),
         // queue_message_chat_id (i64),
         // queue_message_id (i32 (because telegram bot api is just like that)),
         // edit_response_chat_id (i64, may be NULL),
         // edit_response_message_id (i32 (because telegram bot api is just like that), may be NULL),
-        // in_progress (0 for no, 1 for yes)
+        // in_progress (0 for no, 1 for yes),
         // premium (0 for no, 1 for yes),
-        // delay_processing_until (date+time in UTC in RFC3339 format)
+        // delay_processing_until (date+time in UTC in RFC3339 format),
+        // clobbers (u32 bitmask, see Task::clobbers method for details)
         pool.execute(sqlx::query(
             "CREATE TABLE IF NOT EXISTS tasks (
                 taskid INTEGER PRIMARY KEY NOT NULL,
@@ -105,7 +106,8 @@ impl Database {
                 edit_response_message_id INTEGER NULL,
                 in_progress INTEGER NOT NULL,
                 premium INTEGER NOT NULL,
-                delay_processing_until TEXT NULL
+                delay_processing_until TEXT NULL,
+                clobbers INTEGER NOT NULL DEFAULT 0
             ) STRICT;",
         ))
         .await?;
@@ -141,6 +143,12 @@ impl Database {
             .execute(sqlx::query(
                 "ALTER TABLE tasks
                 ADD COLUMN delay_processing_until TEXT NULL;",
+            ))
+            .await;
+        let _ = pool
+            .execute(sqlx::query(
+                "ALTER TABLE tasks
+                ADD COLUMN clobbers INTEGER NOT NULL DEFAULT 0;",
             ))
             .await;
 
@@ -190,6 +198,8 @@ impl Database {
             false
         };
 
+        let clobbers = task.clobbers();
+
         let queue_size = self.get_queue_size_raw(premium).await?;
 
         sqlx::query(
@@ -203,8 +213,9 @@ impl Database {
                 queue_message_id,
                 in_progress,
                 premium,
-                delay_processing_until
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?);",
+                delay_processing_until,
+                clobbers
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?);",
         )
         .bind(user.map(|x| x.0 as i64))
         .bind(task_ser)
@@ -215,6 +226,7 @@ impl Database {
         .bind(queue_message_id)
         .bind(premium)
         .bind(delay_processing_until)
+        .bind(clobbers)
         .execute(&self.pool)
         .await?;
 
@@ -391,7 +403,15 @@ impl Database {
                 WHERE
                     in_progress=0 AND
                     premium=? AND
-                    COALESCE(delay_processing_until <= ?, 1)
+                    COALESCE(delay_processing_until <= ?, 1) AND
+                    ( -- Check if this won't clobber with any running task
+                        clobbers=0 OR
+                        NOT EXISTS
+                        (
+                            SELECT 1 FROM tasks t2
+                                WHERE t2.in_progress=1 AND t2.clobbers & clobbers != 0
+                        )
+                    )
             ) AS fitting_task
             WHERE
                 taskid=fitting_task.minid
