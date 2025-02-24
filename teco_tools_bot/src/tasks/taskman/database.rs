@@ -253,6 +253,11 @@ impl Database {
         if premium {
             let non_premium_count = self.get_queue_size_raw(false).await?;
             count = count.min(non_premium_count);
+            if non_premium_count > 0 {
+                // At least one non-premium task, which may be the one currently running.
+                // In this case, presume queue size is at least 1.
+                count = count.max(1);
+            }
         }
 
         Ok(count)
