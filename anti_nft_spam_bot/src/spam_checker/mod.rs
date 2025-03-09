@@ -221,7 +221,7 @@ async fn visit_and_check_if_spam(
 
     if (text.contains("<title>Just a moment...</title>")
         && text.contains("Enable JavaScript and cookies to continue"))
-        || text.contains("Attention Required! | Cloudflare")
+        || text.contains("<title>Attention Required! | Cloudflare</title>")
         || (text.contains("cloudflare") && text.contains("erify that you are a human"))
     {
         // Cloudflare captcha.
