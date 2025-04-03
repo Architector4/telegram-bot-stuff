@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 arch_bot_commons = { version = "0.6.5", path = "../arch_bot_commons" }
 chrono = "0.4.34"
+crc32fast = "1.4.2"
 html-escape = "0.2.13"
 log = "0.4.17"
 # This seems to depend on OpenSSL 3.3.0, but Fedora Server 40 only has 3.2.1.

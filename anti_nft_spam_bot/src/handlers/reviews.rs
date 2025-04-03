@@ -95,6 +95,10 @@ async fn edit_message_into_a_review(
     database: &Database,
     message: &Message,
 ) -> Result<(), RequestError> {
+    // Telegram's inline keyboards only support up to 128
+    // bytes long payload data. We can't hope to store the full
+    // URL in that, so we store a table name, row ID, and hash of the URL
+    // instead.
     let Some((url, table_name, rowid, is_spam)) =
         database.get_url_for_review().await.expect("Database died!")
     else {
@@ -109,6 +113,8 @@ async fn edit_message_into_a_review(
         .await?;
         return Ok(());
     };
+
+    let url_hash = crc32fast::hash(url.as_str().as_bytes());
 
     let title = match is_spam {
         IsSpam::Maybe => "<b>REVIEW:</b>\n\n",
@@ -138,17 +144,17 @@ async fn edit_message_into_a_review(
         vec![
             InlineKeyboardButton::callback(
                 "Just the URL".to_string(),
-                format!("URL_SPAM {} {}", table_name, rowid),
+                format!("URL_SPAM {} {} {}", table_name, rowid, url_hash),
             ),
             InlineKeyboardButton::callback(
                 "Entire DOMAIN".to_string(),
-                format!("DOMAIN_SPAM {} {}", table_name, rowid),
+                format!("DOMAIN_SPAM {} {} {}", table_name, rowid, url_hash),
             ),
         ],
         vec![
             InlineKeyboardButton::callback(
                 "Not spam".to_string(),
-                format!("NOT_SPAM {} {}", table_name, rowid),
+                format!("NOT_SPAM {} {} {}", table_name, rowid, url_hash),
             ),
             InlineKeyboardButton::callback("Skip".to_string(), "SKIP".to_string()),
         ],

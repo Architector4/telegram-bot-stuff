@@ -156,6 +156,12 @@ impl ReviewResponse {
             .parse()
             .map_err(|_| "Failed to parse rowid")?;
 
+        let crc32hash: u32 = iter
+            .next()
+            .ok_or("No hash")?
+            .parse()
+            .map_err(|_| "Failed to parse hash")?;
+
         if iter.next().is_some() {
             Err("Extraneous data in response")?;
         }
@@ -165,6 +171,10 @@ impl ReviewResponse {
         else {
             Err("Specified data is not in database")?
         };
+
+        if crc32fast::hash(url.as_str().as_bytes()) != crc32hash {
+            Err("Hash does not match! Please mark with a command instead and press Skip.")?;
+        }
 
         let domain = match domain_from_db {
             Some(d) => Ok(d),
