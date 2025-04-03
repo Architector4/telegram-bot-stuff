@@ -678,9 +678,9 @@ async fn handle_command(
             goodbye!(response);
         }
         "/mark_not_spam" | "/mark_url_spam" | "/mark_domain_spam" => {
-            // If it's not a private chat, or no sender,or they're not
+            // If it's not a private/control chat, or no sender, or they're not
             // in control chat, pretend we do not see it.
-            if !message.chat.is_private() {
+            if !(message.chat.is_private() || message.chat.id == CONTROL_CHAT_ID) {
                 return Ok(false);
             }
             let Some(sender) = message.from() else {
