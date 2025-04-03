@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use teloxide::types::Message;
 use url::Url;
 
 use crate::{
@@ -135,10 +136,16 @@ impl ReviewResponse {
         })
     }
 
+    /// Parse a string (callback query) into review responses,
+    /// with supplementary data.
+    ///
+    /// All responses returned from one call of this function
+    /// are guaranteed to be of the same type.
     pub async fn from_str(
         value: &str,
         database: &Database,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        message: Option<&Message>,
+    ) -> Result<Vec<Self>, Box<dyn std::error::Error + Send + Sync>> {
         let mut iter = value.split_ascii_whitespace();
         let action = iter.next().ok_or("Empty response")?;
 
@@ -146,10 +153,46 @@ impl ReviewResponse {
             if iter.next().is_some() {
                 Err("Extraneous data in response")?;
             }
-            return Ok(ReviewResponse::Skip);
+            return Ok(vec![ReviewResponse::Skip]);
         }
 
         let table = iter.next().ok_or("No table name")?;
+
+        // May be a "figure it out yourself" review response. Figure that out.
+        if table == "derive" {
+            let Some(message) = message else {
+                Err("Message too old")?
+            };
+
+            let Some(text) = message.text() else {
+                Err("Message has no text???")?
+            };
+
+            let mut responses = Vec::new();
+            for line in text.lines() {
+                if let Some(url_text) = line.strip_prefix("URL: ") {
+                    let url: Url = url_text.parse().map_err(|_| "Failed to parse URL")?;
+
+                    let response = match action {
+                        "URL_SPAM" => ReviewResponse::UrlSpam(None, url),
+                        "DOMAIN_SPAM" => {
+                            let domain = Domain::from_url(&url)
+                                .ok_or("Failed to extract domain from a URL")?;
+
+                            ReviewResponse::DomainSpam(domain, url)
+                        }
+                        "NOT_SPAM" => ReviewResponse::NotSpam(None, url),
+                        //"SKIP" => ReviewResponse::Skip, // Was handled above
+                        _ => Err("Unknown action type")?,
+                    };
+
+                    responses.push(response);
+                };
+            }
+
+            return Ok(responses);
+        }
+
         let rowid: i64 = iter
             .next()
             .ok_or("No rowid")?
@@ -189,7 +232,7 @@ impl ReviewResponse {
             _ => Err("Unknown action type")?,
         };
 
-        Ok(response)
+        Ok(vec![response])
     }
 }
 

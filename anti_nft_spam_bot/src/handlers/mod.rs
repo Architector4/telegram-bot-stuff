@@ -439,7 +439,7 @@ async fn gather_suspicion(
 
                     match result {
                         Marked => {
-                            let _ = writeln!(links_marked, "<code>{}</code>", $url);
+                            let _ = writeln!(links_marked, "URL: <code>{}</code>", $url);
                             marked_count += 1
                         }
                         AlreadyMarkedSus => already_marked_sus_count += 1,
@@ -568,9 +568,29 @@ async fn gather_suspicion(
                     format!("Unknown (chatid <code>{}</code>)", message.chat.id)
                 };
 
+                use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+
+                // Also create a keyboard for review buttons...
+                let keyboard = InlineKeyboardMarkup::new(vec![
+                    vec![
+                        InlineKeyboardButton::callback(
+                            "Just the URL".to_string(),
+                            "URL_SPAM derive".to_string(),
+                        ),
+                        InlineKeyboardButton::callback(
+                            "Entire DOMAIN".to_string(),
+                            "DOMAIN_SPAM derive".to_string(),
+                        ),
+                    ],
+                    vec![InlineKeyboardButton::callback(
+                        "Not spam".to_string(),
+                        "NOT_SPAM derive".to_string(),
+                    )],
+                ]);
+
                 // We don't care if this fails lmao
                 let _ = bot
-                    .archsendmsg(
+                    .send_message(
                         CONTROL_CHAT_ID,
                         format!(
                             concat!(
@@ -578,10 +598,10 @@ async fn gather_suspicion(
                                 "There are {} links to review."
                             ),
                             username, chatname, links_marked, to_review
-                        )
-                        .as_str(),
-                        None,
+                        ),
                     )
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .reply_markup(keyboard)
                     .await;
             }
         }

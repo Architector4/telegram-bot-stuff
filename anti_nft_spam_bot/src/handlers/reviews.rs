@@ -207,15 +207,22 @@ pub async fn parse_callback_query(
 
     let user = query.from;
 
-    let response = match ReviewResponse::from_str(query_data.as_str(), &db).await {
-        Ok(r) => r,
-        Err(e) => {
-            goodbye!(&format!("Invalid query data: {}", e));
-        }
-    };
+    let responses =
+        match ReviewResponse::from_str(query_data.as_str(), &db, query.message.as_ref()).await {
+            Ok(r) => r,
+            Err(e) => {
+                goodbye!(&format!("Invalid query data: {}", e));
+            }
+        };
 
-    if !apply_review(&bot, &user, &db, &response).await? {
-        goodbye!("Access denied.");
+    if responses.is_empty() {
+        goodbye!("Nothing to mark here...???");
+    }
+
+    for response in &responses {
+        if !apply_review(&bot, &user, &db, response).await? {
+            goodbye!("Access denied.");
+        }
     }
 
     let Some(message) = query.message else {
@@ -223,7 +230,29 @@ pub async fn parse_callback_query(
         goodbye!("Review taken. Please send /review to perform more reviews.");
     };
 
-    edit_message_into_a_review(&bot, &db, &message).await?;
+    // Avoid editing the message into reviews it's not in private i.e. in work chat
+    if message.chat.is_private() {
+        edit_message_into_a_review(&bot, &db, &message).await?;
+    } else {
+        // It's a notification about newly marked URLs that was just reviewed on.
+        // Edit it to get rid of the buttons and stuff.
+
+        let name = if let Some(username) = &user.username {
+            format!("@{}", username)
+        } else {
+            user.full_name()
+        };
+
+        let mut text = format!("Handled by {} (userid {}):\n", name, user.id);
+        for response in &responses {
+            use std::fmt::Write;
+            let _ = writeln!(&mut text, "{}", response);
+        }
+
+        bot.edit_message_text(message.chat.id, message.id, text)
+            .disable_web_page_preview(true)
+            .await?;
+    }
     goodbye!();
 }
 
