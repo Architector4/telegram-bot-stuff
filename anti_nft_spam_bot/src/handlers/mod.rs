@@ -439,7 +439,7 @@ async fn gather_suspicion(
 
                     match result {
                         Marked => {
-                            let _ = writeln!(links_marked, "URL: <code>{}</code>", $url);
+                            let _ = writeln!(links_marked, "URL: {}", $url);
                             marked_count += 1
                         }
                         AlreadyMarkedSus => already_marked_sus_count += 1,
@@ -602,6 +602,7 @@ async fn gather_suspicion(
                     )
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .reply_markup(keyboard)
+                    .disable_web_page_preview(true)
                     .await;
             }
         }
