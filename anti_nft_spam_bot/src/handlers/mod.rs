@@ -574,11 +574,11 @@ async fn gather_suspicion(
                 let keyboard = InlineKeyboardMarkup::new(vec![
                     vec![
                         InlineKeyboardButton::callback(
-                            "Just the URL".to_string(),
+                            "Mark URLs spam".to_string(),
                             "URL_SPAM derive".to_string(),
                         ),
                         InlineKeyboardButton::callback(
-                            "Entire DOMAIN".to_string(),
+                            "Mark DOMAINS spam".to_string(),
                             "DOMAIN_SPAM derive".to_string(),
                         ),
                     ],
