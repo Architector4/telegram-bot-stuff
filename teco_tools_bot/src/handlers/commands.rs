@@ -873,7 +873,7 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
                 // User likely intended to specify a count but it failed lol
                 goodbye_err!(concat!(
                     "Failed to parse count. ",
-                    "It needs to be more than -4294967297 but less than 4294967296."
+                    "It needs to be more than -2147483649 but less than 2147483648."
                 ));
             }
             13
