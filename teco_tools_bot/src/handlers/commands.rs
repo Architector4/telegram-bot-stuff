@@ -904,10 +904,20 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
 
     // Avoid typical message sending code,
     // because it sets parse mode as HTML, which breaks all lol
-    tp.bot
+    match tp
+        .bot
         .send_message(tp.message.chat.id, response)
         .reply_to_message_id(tp.message.id)
-        .await?;
+        .await
+    {
+        Ok(_) => (),
+        Err(teloxide::RequestError::Api(teloxide::ApiError::Unknown(x)))
+            if x == "Bad Request: text must be non-empty" =>
+        {
+            goodbye_err!("Sorry, resulting text is empty.");
+        }
+        Err(e) => Err(e)?,
+    };
     goodbye!();
 }
 
