@@ -851,7 +851,8 @@ async fn transcribe(tp: TaskParams<'_>) -> Ret {
 pub const ROT_TEXT: Command = Command {
     callname: "/rot &lt;count&gt; &lt;text&gt;",
     description:
-        "Shifts Unicode codepoint values in <code>text</code> by <code>count</code> times.",
+        concat!("Shifts Unicode codepoint values in <code>text</code> by <code>count</code> times. ",
+            "If <code>count</code> is not specified, it's defaulted to 13."),
     function: wrap!(rot_text),
     hidden: false,
 };
@@ -865,10 +866,10 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
             request_text = request_text[count_txt.len()..].trim_start();
             count
         } else {
-            1
+            13
         }
     } else {
-        1
+        13
     };
 
     let mut input = String::new();
