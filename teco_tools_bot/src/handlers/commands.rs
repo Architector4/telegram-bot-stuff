@@ -4,7 +4,7 @@ use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use html_escape::encode_text;
 
 use teloxide::{
-    payloads::{SendAnimationSetters, SendVideoSetters},
+    payloads::{SendAnimationSetters, SendMessageSetters, SendVideoSetters},
     requests::Requester,
     types::{BotCommand, InputFile, Me, Message, UserId},
     Bot, RequestError,
@@ -898,7 +898,13 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
         })
         .collect::<String>();
 
-    goodbye_desc!(response);
+    // Avoid typical message sending code,
+    // because it sets parse mode as HTML, which breaks all lol
+    tp.bot
+        .send_message(tp.message.chat.id, response)
+        .reply_to_message_id(tp.message.id)
+        .await?;
+    goodbye!();
 }
 
 #[cfg(test)]
