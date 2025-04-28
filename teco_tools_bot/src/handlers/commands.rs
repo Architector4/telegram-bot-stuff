@@ -29,6 +29,7 @@ pub const COMMANDS: &[Command] = &[
     AMENBREAK,
     RESIZE,
     REVERSE_TEXT,
+    ROT_TEXT,
     TO_CUSTOM_EMOJI,
     TO_STICKER,
     TO_VIDEO,
@@ -846,6 +847,56 @@ async fn transcribe(tp: TaskParams<'_>) -> Ret {
     let task = unfail!(temp_task.parse_params(&tp));
 
     Ok(Ok(task))
+}
+pub const ROT_TEXT: Command = Command {
+    callname: "/rot &lt;count&gt; &lt;text&gt;",
+    description:
+        "Shifts Unicode codepoint values in <code>text</code> by <code>count</code> times.",
+    function: wrap!(rot_text),
+    hidden: false,
+};
+async fn rot_text(tp: TaskParams<'_>) -> Ret {
+    let request_text = tp.message.text_full().unwrap();
+    // Exclude first word - the whole command invocation.
+    let mut request_text = request_text[tp.command_len..].trim();
+
+    let count = if let Some(count_txt) = request_text.split_whitespace().next() {
+        if let Ok(count) = count_txt.parse::<i32>() {
+            request_text = request_text[count_txt.len()..].trim_start();
+            count
+        } else {
+            1
+        }
+    } else {
+        1
+    };
+
+    let mut input = String::new();
+
+    // Check for replied-to message
+    if let Some(repliee_text) = tp.message.reply_to_message().and_then(|x| x.text_full()) {
+        input.reserve_exact(repliee_text.len() + 2 + tp.message.text_full().unwrap().len());
+        input.push_str(repliee_text);
+        input.push_str("\n\n");
+    }
+
+    input.push_str(request_text);
+
+    if input.is_empty() {
+        // Nothing to reverse...
+        // Include the command invocation then lol
+        input.push_str(tp.command());
+    }
+
+    let response = input
+        .chars()
+        .map(|x| {
+            let rotated = u32::from(x).wrapping_add_signed(count);
+            char::from_u32(rotated).unwrap_or('�')
+        })
+        .collect::<String>();
+
+    goodbye_desc!(response);
 }
 
 #[cfg(test)]
