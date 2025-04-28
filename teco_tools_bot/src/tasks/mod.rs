@@ -460,11 +460,10 @@ impl Task {
     /// 1 - Whisper server
     pub fn clobbers(&self) -> u32 {
         match &self {
-            Self::Transcribe { ..} => 1,
-            _ => 0
+            Self::Transcribe { .. } => 1,
+            _ => 0,
         }
     }
-
 }
 
 ////////////////////////////
