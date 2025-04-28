@@ -851,8 +851,8 @@ async fn transcribe(tp: TaskParams<'_>) -> Ret {
 pub const ROT_TEXT: Command = Command {
     callname: "/rot &lt;count&gt; &lt;text&gt;",
     description: concat!(
-        "Shifts Unicode codepoint values in <code>text</code> by <code>count</code> times. ",
-        "If <code>count</code> is not specified, it's defaulted to 13."
+        "Shifts Unicode codepoint values in &lt;text&gt; by &lt;count&gt; times. ",
+        "If &lt;count&gt; is not specified, it's defaulted to 13."
     ),
     function: wrap!(rot_text),
     hidden: false,
