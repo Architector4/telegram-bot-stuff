@@ -401,13 +401,15 @@ async fn reverse_text(tp: TaskParams<'_>) -> Ret {
     if let Some(repliee_text) = tp.message.reply_to_message().and_then(|x| x.text_full()) {
         input.reserve_exact(repliee_text.len() + 2 + tp.message.text_full().unwrap().len());
         input.push_str(repliee_text);
-        input.push_str("\n\n");
     }
 
     let request_text = tp.message.text_full().unwrap();
     // Exclude first word - the whole command invocation.
     let request_text = request_text[tp.command_len..].trim();
-    input.push_str(request_text);
+    if !request_text.is_empty() {
+        input.push_str("\n\n");
+        input.push_str(request_text);
+    }
 
     if input.is_empty() {
         // Nothing to reverse...
@@ -879,13 +881,15 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
     if let Some(repliee_text) = tp.message.reply_to_message().and_then(|x| x.text_full()) {
         input.reserve_exact(repliee_text.len() + 2 + tp.message.text_full().unwrap().len());
         input.push_str(repliee_text);
-        input.push_str("\n\n");
     }
 
-    input.push_str(request_text);
+    if !request_text.is_empty() {
+        input.push_str("\n\n");
+        input.push_str(request_text);
+    }
 
     if input.is_empty() {
-        // Nothing to reverse...
+        // Nothing to rotate...
         // Include the command invocation then lol
         input.push_str(tp.command());
     }
