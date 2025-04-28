@@ -869,6 +869,13 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
             request_text = request_text[count_txt.len()..].trim_start();
             count
         } else {
+            if count_txt.chars().all(|x| x.is_ascii_digit()) {
+                // User likely intended to specify a count but it failed lol
+                goodbye_err!(concat!(
+                    "Failed to parse count. ",
+                    "It needs to be more than -4294967297 but less than 4294967296."
+                ));
+            }
             13
         }
     } else {
@@ -905,7 +912,7 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
     let response = response.trim();
 
     if response.is_empty() {
-            goodbye_err!("Sorry, resulting text is empty.");
+        goodbye_err!("Sorry, resulting text is empty.");
     }
 
     // Avoid typical message sending code,
