@@ -902,6 +902,12 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
         })
         .collect::<String>();
 
+    let response = response.trim();
+
+    if response.is_empty() {
+            goodbye_err!("Sorry, resulting text is empty.");
+    }
+
     // Avoid typical message sending code,
     // because it sets parse mode as HTML, which breaks all lol
     match tp
