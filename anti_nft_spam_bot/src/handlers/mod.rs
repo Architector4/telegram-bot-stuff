@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use arch_bot_commons::useful_methods::BotArchSendMsg;
 use html_escape::encode_text;
@@ -193,9 +193,17 @@ async fn handle_message_inner(
         ($url: expr, $domain: expr, $loop_to_break: tt) => {
             log::debug!("Spotted URL with domain {}", $domain);
 
-            let Some(is_spam) = crate::spam_checker::check(database, $domain, $url).await else {
+            let Some((is_spam, from_db)) =
+                crate::spam_checker::check(database, $domain, $url).await
+            else {
                 continue;
             };
+
+            if is_spam == IsSpam::Maybe && !from_db {
+                // Checker above marked the URL as maybe spam. Notify the squad.
+
+                create_review_notify(bot, database, message, std::iter::once($url), true).await;
+            }
 
             if is_spam == IsSpam::Yes {
                 bad_links_present = true;
@@ -220,7 +228,7 @@ async fn handle_message_inner(
                     let Some((url, domain)) = get_button_url_domain(button) else {
                         continue;
                     };
-                    check_url!(&url, &domain, 'outer);
+                    check_url!(url, &domain, 'outer);
                 }
             }
         }
@@ -420,17 +428,17 @@ async fn gather_suspicion(
         let mut already_marked_spam_count = 0u32;
         let mut manually_reviewed_not_spam_count = 0u32;
 
-        use std::fmt::Write;
-        let mut links_marked = String::new();
+        let mut links_marked: Vec<Cow<Url>> = Vec::new();
 
         macro_rules! marksus {
-            ($url: expr, $domain: expr) => {
-                log::debug!("Marking {} and its domain as sus...", $url);
+            ($url: expr, $domain: expr) => {{
+                let woot: Cow<Url> = $url;
+                log::debug!("Marking {} and its domain as sus...", woot);
 
                 had_links = true;
 
                 let result = database
-                    .mark_sus($url, Some($domain))
+                    .mark_sus(woot.as_ref(), Some($domain))
                     .await
                     .expect("Database died!");
 
@@ -439,7 +447,7 @@ async fn gather_suspicion(
 
                     match result {
                         Marked => {
-                            let _ = writeln!(links_marked, "URL: {}", $url);
+                            links_marked.push(woot);
                             marked_count += 1
                         }
                         AlreadyMarkedSus => already_marked_sus_count += 1,
@@ -447,7 +455,7 @@ async fn gather_suspicion(
                         ManuallyReviewedNotSpam => manually_reviewed_not_spam_count += 1,
                     }
                 }
-            };
+            }};
         }
 
         if let Some(entities) = message
@@ -455,11 +463,17 @@ async fn gather_suspicion(
             .or_else(|| message.parse_caption_entities())
         {
             for entity in &entities {
-                let Some((url, domain)) = get_entity_url_domain(entity) else {
-                    continue;
-                };
-
-                marksus!(&url, &domain);
+                //let Some((url, domain)) = get_entity_url_domain(entity) else {
+                //    continue;
+                //};
+                match get_entity_url_domain(entity) {
+                    Some((url, domain)) => {
+                        marksus!(Cow::Owned(url), &domain);
+                    }
+                    None => {
+                        continue;
+                    }
+                }
             }
         };
 
@@ -474,7 +488,7 @@ async fn gather_suspicion(
                         continue;
                     };
 
-                    marksus!(&url, &domain);
+                    marksus!(Cow::Owned(url), &domain);
                 }
             }
 
@@ -485,7 +499,7 @@ async fn gather_suspicion(
                         let Some((url, domain)) = get_button_url_domain(button) else {
                             continue;
                         };
-                        marksus!(url, &domain);
+                        marksus!(Cow::Borrowed(url), &domain);
                     }
                 }
             }
@@ -546,65 +560,14 @@ async fn gather_suspicion(
 
         if marked {
             // We marked something. In this case, notify reviewers to review.
-
-            let to_review = database.get_review_count().await.expect("Database died!");
-            // Should always be true, considering context above, but eh.
-            if to_review > 0 {
-                let username = if let Some(user) = message.from() {
-                    if let Some(username) = &user.username {
-                        format!("@{} (userid <code>{}</code>)", username, user.id)
-                    } else {
-                        format!("{} (userid <code>{}</code>)", user.full_name(), user.id)
-                    }
-                } else {
-                    "Anonymous".to_string()
-                };
-
-                let chatname = if let Some(username) = message.chat.username() {
-                    format!("@{} (chatid <code>{}</code>)", username, message.chat.id)
-                } else if let Some(title) = message.chat.title() {
-                    format!("{} (chatid <code>{}</code>)", title, message.chat.id)
-                } else {
-                    format!("Unknown (chatid <code>{}</code>)", message.chat.id)
-                };
-
-                use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
-
-                // Also create a keyboard for review buttons...
-                let keyboard = InlineKeyboardMarkup::new(vec![
-                    vec![
-                        InlineKeyboardButton::callback(
-                            "Mark URLs spam".to_string(),
-                            "URL_SPAM derive".to_string(),
-                        ),
-                        InlineKeyboardButton::callback(
-                            "Mark DOMAINS spam".to_string(),
-                            "DOMAIN_SPAM derive".to_string(),
-                        ),
-                    ],
-                    vec![InlineKeyboardButton::callback(
-                        "Not spam".to_string(),
-                        "NOT_SPAM derive".to_string(),
-                    )],
-                ]);
-
-                // We don't care if this fails lmao
-                let _ = bot
-                    .send_message(
-                        CONTROL_CHAT_ID,
-                        format!(
-                            concat!(
-                                "New link(s) were added to review pool by {} in {}:\n{}",
-                                "There are {} links to review."
-                            ),
-                            username, chatname, links_marked, to_review
-                        ),
-                    )
-                    .parse_mode(teloxide::types::ParseMode::Html)
-                    .reply_markup(keyboard)
-                    .disable_web_page_preview(true)
-                    .await;
-            }
+            create_review_notify(
+                bot,
+                database,
+                message,
+                links_marked.iter().map(|x| x.as_ref()),
+                false,
+            )
+            .await;
         }
     }
 
@@ -819,4 +782,79 @@ If you're in the group for volunteers to manually review chats, you can also use
     )
     .await?;
     Ok(())
+}
+
+/// Set `automatic` to true if this review notify was automatically
+/// decided by the bot.
+pub async fn create_review_notify(
+    bot: &Bot,
+    database: &Database,
+    message: &Message,
+    links_marked: impl Iterator<Item = &Url>,
+    automatic: bool,
+) {
+    let to_review = database.get_review_count().await.expect("Database died!");
+    let username_string: String;
+    let username: &str = if automatic {
+        "automatic check"
+    } else if let Some(user) = message.from() {
+        if let Some(username) = &user.username {
+            username_string = format!("@{} (userid <code>{}</code>)", username, user.id);
+            &username_string
+        } else {
+            username_string = format!("{} (userid <code>{}</code>)", user.full_name(), user.id);
+            &username_string
+        }
+    } else {
+        "Anonymous"
+    };
+
+    let chatname = if let Some(username) = message.chat.username() {
+        format!("@{} (chatid <code>{}</code>)", username, message.chat.id)
+    } else if let Some(title) = message.chat.title() {
+        format!("{} (chatid <code>{}</code>)", title, message.chat.id)
+    } else {
+        format!("Unknown (chatid <code>{}</code>)", message.chat.id)
+    };
+
+    use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+
+    // Also create a keyboard for review buttons...
+    let keyboard = InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback(
+                "Mark URLs spam".to_string(),
+                "URL_SPAM derive".to_string(),
+            ),
+            InlineKeyboardButton::callback(
+                "Mark DOMAINS spam".to_string(),
+                "DOMAIN_SPAM derive".to_string(),
+            ),
+        ],
+        vec![InlineKeyboardButton::callback(
+            "Not spam".to_string(),
+            "NOT_SPAM derive".to_string(),
+        )],
+    ]);
+
+    let mut response = format!(
+        "New link(s) were added to review pool by {} in {}:\n",
+        username, chatname
+    );
+
+    use std::fmt::Write;
+
+    for url in links_marked {
+        let _ = writeln!(response, "URL: {}\n", url);
+    }
+
+    let _ = writeln!(response, "There are {} links to review.", to_review);
+
+    // We don't care if this fails lmao
+    let _ = bot
+        .send_message(CONTROL_CHAT_ID, response)
+        .parse_mode(teloxide::types::ParseMode::Html)
+        .reply_markup(keyboard)
+        .disable_web_page_preview(true)
+        .await;
 }

@@ -36,12 +36,14 @@ impl From<IsSpamCheckResult> for IsSpam {
 
 /// Check the link's domain against the database, or by visiting, as needed.
 ///
+/// Returns the check's result, and whether or not it's from a database.
+///
 /// Returns [`None`] if both checking methods failed.
 pub fn check<'a>(
     database: &'a Arc<Database>,
     domain: &'a Domain,
     url: &'a Url,
-) -> impl std::future::Future<Output = Option<IsSpam>> + 'a {
+) -> impl std::future::Future<Output = Option<(IsSpam, bool)>> + 'a {
     check_inner(database, domain, url, 0)
 }
 
@@ -50,7 +52,7 @@ async fn check_inner(
     domain: &Domain,
     url: &Url,
     recursion_depth: u8,
-) -> Option<IsSpam> {
+) -> Option<(IsSpam, bool)> {
     // Check the database...
     let db_result = database
         .is_spam(url, Some(domain), false)
@@ -74,7 +76,7 @@ async fn check_inner(
 
     if let Some((result, true)) = db_result {
         // Manually reviewed. Go ahead.
-        return Some(result);
+        return Some((result, true));
     };
 
     // We now know it's not manually reviewed. Discard that flag.
@@ -82,7 +84,7 @@ async fn check_inner(
 
     if let Some(IsSpam::Yes) = db_result {
         // Confirmed spam. Just return.
-        Some(IsSpam::Yes)
+        Some((IsSpam::Yes, true))
     } else {
         if let Some(db_result) = db_result {
             // It's marked as not spam or maybe spam.
@@ -99,7 +101,7 @@ async fn check_inner(
                     url,
                     db_result_for_url
                 );
-                return Some(db_result_for_url.0);
+                return Some((db_result_for_url.0, true));
             }
 
             // No result for the URL specifically, but we are in this branch.
@@ -112,7 +114,7 @@ async fn check_inner(
             // URL crate's "empty path" seems to be just the slash,
             // but also check for emptystring in case this isn't always true.
             if url.path() == "/" || url.path().is_empty() {
-                return Some(db_result);
+                return Some((db_result, true));
             }
         }
 
@@ -134,7 +136,7 @@ async fn check_inner(
                         .add_url(url, url_looks_like_spam, false, false)
                         .await
                         .expect("Database died!");
-                    return Some(url_looks_like_spam);
+                    return Some((url_looks_like_spam, false));
                 }
                 // In case it's maybe spam or not spam, still check it properly.
                 IsSpam::Maybe => url_maybe_spam = true,
@@ -160,7 +162,7 @@ async fn check_inner(
                 .is_spam(url, domain, false)
                 .await
                 .expect("Database died!")
-                .map(|x| x.0)
+                .map(|x| (x.0, true))
         } else if let Ok(mut is_spam_check) =
             visit_and_check_if_spam(database, domain, url, recursion_depth).await
         {
@@ -186,7 +188,7 @@ async fn check_inner(
                 }
             };
 
-            Some(is_spam_check.into())
+            Some((is_spam_check.into(), false))
         } else {
             // The visit probably timed out or something. Meh.
             log::debug!("{} timed out", url);
@@ -284,7 +286,8 @@ async fn visit_and_check_if_spam(
             let Some(match_domain) = Domain::from_url(a_match) else {
                 continue;
             };
-            if let Some(x) = Box::pin(check_inner(
+            // We don't care if this is from DB or not here lol
+            if let Some((x, _)) = Box::pin(check_inner(
                 database,
                 &match_domain,
                 a_match,
