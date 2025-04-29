@@ -84,116 +84,116 @@ async fn check_inner(
 
     if let Some(IsSpam::Yes) = db_result {
         // Confirmed spam. Just return.
-        Some((IsSpam::Yes, true))
-    } else {
-        if let Some(db_result) = db_result {
-            // It's marked as not spam or maybe spam.
-            // Was this manually reviewed?
+        return Some((IsSpam::Yes, true));
+    };
 
-            // Is this specifically for this URL, or just the general domain result?
-            if let Some(db_result_for_url) = database
-                .is_url_spam(url, false)
-                .await
-                .expect("Database died!")
-            {
-                log::debug!(
-                    "Checked {} URL specifically with database and got: {:?}",
-                    url,
-                    db_result_for_url
-                );
-                return Some((db_result_for_url.0, true));
-            }
+    if let Some(db_result) = db_result {
+        // It's marked as not spam or maybe spam.
+        // Was this manually reviewed?
 
-            // No result for the URL specifically, but we are in this branch.
-            // This means `db_result` contains the result for the domain.
-
-            // Assumption: if a domain is marked as not spam or maybe spam,
-            // and a URL is just the domain without a path, then the domain's
-            // result is accurate for that specific URL too.
-
-            // URL crate's "empty path" seems to be just the slash,
-            // but also check for emptystring in case this isn't always true.
-            if url.path() == "/" || url.path().is_empty() {
-                return Some((db_result, true));
-            }
-        }
-
-        let mut url_maybe_spam = false;
-
-        // All stuff above did not answer anything. Vibe check just the link...
-
-        if let Some(url_looks_like_spam) = check_url_by_its_looks(url) {
-            // Add it to the database.
+        // Is this specifically for this URL, or just the general domain result?
+        if let Some(db_result_for_url) = database
+            .is_url_spam(url, false)
+            .await
+            .expect("Database died!")
+        {
             log::debug!(
-                "Checked if URL {} looks like a spam URL and got: {:?}",
+                "Checked {} URL specifically with database and got: {:?}",
                 url,
-                url_looks_like_spam
+                db_result_for_url
             );
-
-            match url_looks_like_spam {
-                IsSpam::Yes => {
-                    database
-                        .add_url(url, url_looks_like_spam, false, false)
-                        .await
-                        .expect("Database died!");
-                    return Some((url_looks_like_spam, false));
-                }
-                // In case it's maybe spam or not spam, still check it properly.
-                IsSpam::Maybe => url_maybe_spam = true,
-                IsSpam::No => (),
-            }
+            return Some((db_result_for_url.0, true));
         }
 
-        log::debug!("{} Is not in the database. Debouncing...", url);
-        let mut visit_guard = None;
-        let has_visit_guard = if recursion_depth == 0 {
-            visit_guard = database.domain_visit_debounce(domain.clone()).await;
-            visit_guard.is_some()
-        } else {
-            true
+        // No result for the URL specifically, but we are in this branch.
+        // This means `db_result` contains the result for the domain.
+
+        // Assumption: if a domain is marked as not spam or maybe spam,
+        // and a URL is just the domain without a path, then the domain's
+        // result is accurate for that specific URL too.
+
+        // URL crate's "empty path" seems to be just the slash,
+        // but also check for emptystring in case this isn't always true.
+        if url.path() == "/" || url.path().is_empty() {
+            return Some((db_result, true));
+        }
+    }
+
+    let mut url_maybe_spam = false;
+
+    // All stuff above did not answer anything. Vibe check just the link...
+
+    if let Some(url_looks_like_spam) = check_url_by_its_looks(url) {
+        // Add it to the database.
+        log::debug!(
+            "Checked if URL {} looks like a spam URL and got: {:?}",
+            url,
+            url_looks_like_spam
+        );
+
+        match url_looks_like_spam {
+            IsSpam::Yes => {
+                database
+                    .add_url(url, url_looks_like_spam, false, false)
+                    .await
+                    .expect("Database died!");
+                return Some((url_looks_like_spam, false));
+            }
+            // In case it's maybe spam or not spam, still check it properly.
+            IsSpam::Maybe => url_maybe_spam = true,
+            IsSpam::No => (),
+        }
+    }
+
+    log::debug!("{} Is not in the database. Debouncing...", url);
+    let mut visit_guard = None;
+    let has_visit_guard = if recursion_depth == 0 {
+        visit_guard = database.domain_visit_debounce(domain.clone()).await;
+        visit_guard.is_some()
+    } else {
+        true
+    };
+
+    if !has_visit_guard {
+        log::debug!("{} was just visited. Trying the database.", url);
+        // Oh no nevermind, someone else visited it.
+        // Just get the database result.
+        drop(visit_guard);
+        database
+            .is_spam(url, domain, false)
+            .await
+            .expect("Database died!")
+            .map(|x| (x.0, true))
+    } else if let Ok(mut is_spam_check) =
+        visit_and_check_if_spam(database, domain, url, recursion_depth).await
+    {
+        // Add it to the database.
+        log::debug!("Visited {} and got: {:?}", url, is_spam_check);
+        match is_spam_check {
+            IsSpamCheckResult::YesUrl => {
+                database
+                    .add_url(url, IsSpam::Yes, false, false)
+                    .await
+                    .expect("Database died!");
+            }
+            // All the other cases effectively apply to the domains.
+            _ => {
+                if is_spam_check == IsSpamCheckResult::No && url_maybe_spam {
+                    is_spam_check = IsSpamCheckResult::Maybe;
+                }
+
+                database
+                    .add_domain(domain, url, is_spam_check.into(), false, false)
+                    .await
+                    .expect("Database died!");
+            }
         };
 
-        if !has_visit_guard {
-            log::debug!("{} was just visited. Trying the database.", url);
-            // Oh no nevermind, someone else visited it.
-            // Just get the database result.
-            drop(visit_guard);
-            database
-                .is_spam(url, domain, false)
-                .await
-                .expect("Database died!")
-                .map(|x| (x.0, true))
-        } else if let Ok(mut is_spam_check) =
-            visit_and_check_if_spam(database, domain, url, recursion_depth).await
-        {
-            // Add it to the database.
-            log::debug!("Visited {} and got: {:?}", url, is_spam_check);
-            match is_spam_check {
-                IsSpamCheckResult::YesUrl => {
-                    database
-                        .add_url(url, IsSpam::Yes, false, false)
-                        .await
-                        .expect("Database died!");
-                }
-                // All the other cases effectively apply to the domains.
-                _ => {
-                    if is_spam_check == IsSpamCheckResult::No && url_maybe_spam {
-                        is_spam_check = IsSpamCheckResult::Maybe;
-                    }
-
-                    database
-                        .add_domain(domain, url, is_spam_check.into(), false, false)
-                        .await
-                        .expect("Database died!");
-                }
-            };
-
-            Some((is_spam_check.into(), false))
-        } else {
-            // The visit probably timed out or something. Meh.
-            log::debug!("{} timed out", url);
-            None
-        }
+        Some((is_spam_check.into(), false))
+    } else {
+        // The visit probably timed out or something. Meh.
+        log::debug!("{} timed out", url);
+        None
     }
 }
 
