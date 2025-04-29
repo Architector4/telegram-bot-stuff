@@ -726,12 +726,18 @@ impl Database {
                 // Write the result about the URL unconditionally.
                 self.add_url(url, IsSpam::No, false, true).await?;
 
-                if let Some(domain) = domain {
-                    // But only write about the domain if it's already in the database lol
-                    if self.is_domain_spam(domain, true).await?.is_some() {
-                        self.add_domain(domain, Some(url), IsSpam::No, false, true)
-                            .await?;
-                    }
+                // If not provided, try to get it from the URL.
+                let mut domain = domain;
+                let domain_tmp;
+                if domain.is_none() {
+                    domain_tmp = Domain::from_url(url);
+                    domain = &domain_tmp;
+                }
+
+                if let Some(domain) = &domain {
+                    // Write about the domain even if there's no domain-specific record.
+                    self.add_domain(domain, Some(url), IsSpam::No, false, true)
+                        .await?;
                 }
             }
         }
