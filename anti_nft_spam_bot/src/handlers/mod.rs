@@ -1,6 +1,6 @@
 use std::{borrow::Cow, sync::Arc};
 
-use arch_bot_commons::useful_methods::BotArchSendMsg;
+use arch_bot_commons::{teloxide_retry, useful_methods::BotArchSendMsg};
 use html_escape::encode_text;
 use teloxide::{
     prelude::*,
@@ -837,7 +837,7 @@ pub async fn create_review_notify(
         )],
     ]);
 
-    let mut response = format!(
+    let mut notify_text = format!(
         "New link(s) were added to review pool by {} in {}:\n",
         username, chatname
     );
@@ -845,16 +845,23 @@ pub async fn create_review_notify(
     use std::fmt::Write;
 
     for url in links_marked {
-        let _ = writeln!(response, "URL: {}\n", url);
+        let _ = writeln!(notify_text, "URL: {}\n", url);
     }
 
-    let _ = writeln!(response, "There are {} links to review.", to_review);
+    let _ = writeln!(notify_text, "There are {} links to review.", to_review);
 
-    // We don't care if this fails lmao
-    let _ = bot
-        .send_message(CONTROL_CHAT_ID, response)
-        .parse_mode(teloxide::types::ParseMode::Html)
-        .reply_markup(keyboard)
-        .disable_web_page_preview(true)
-        .await;
+    if teloxide_retry!(
+        bot.send_message(CONTROL_CHAT_ID, &notify_text)
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .reply_markup(keyboard.clone())
+            .disable_web_page_preview(true)
+            .await
+    )
+    .is_err()
+    {
+        log::error!(
+            "Failed notifying control chat of new marked sus link!\n{}",
+            notify_text
+        );
+    };
 }
