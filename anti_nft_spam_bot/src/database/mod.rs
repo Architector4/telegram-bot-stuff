@@ -376,12 +376,14 @@ impl Database {
 
         // If we know for a fact that this URL and its domain is
         // spam, we don't need an entry in the `urls` table for it.
-        if let Some(url) = example_url {
-            sqlx::query("DELETE FROM urls WHERE url=? AND is_spam=?;")
-                .bind(url.as_str())
-                .bind::<u8>(is_spam.into())
-                .execute(&self.pool)
-                .await?;
+        if is_spam == IsSpam::Yes {
+            if let Some(url) = example_url {
+                sqlx::query("DELETE FROM urls WHERE url=? AND is_spam=?;")
+                    .bind(url.as_str())
+                    .bind::<u8>(is_spam.into())
+                    .execute(&self.pool)
+                    .await?;
+            }
         }
         Ok(())
     }

@@ -169,25 +169,22 @@ async fn check_inner(
     {
         // Add it to the database.
         log::debug!("Visited {} and got: {:?}", url, is_spam_check);
-        match is_spam_check {
-            IsSpamCheckResult::YesUrl => {
-                database
-                    .add_url(url, IsSpam::Yes, false, false)
-                    .await
-                    .expect("Database died!");
+        database
+            .add_url(url, is_spam_check.into(), false, false)
+            .await
+            .expect("Database died!");
+        // All the other cases effectively apply to the domains too...
+        if is_spam_check != IsSpamCheckResult::YesUrl {
+            if is_spam_check == IsSpamCheckResult::No && url_maybe_spam {
+                is_spam_check = IsSpamCheckResult::Maybe;
             }
-            // All the other cases effectively apply to the domains.
-            _ => {
-                if is_spam_check == IsSpamCheckResult::No && url_maybe_spam {
-                    is_spam_check = IsSpamCheckResult::Maybe;
-                }
 
-                database
-                    .add_domain(domain, url, is_spam_check.into(), false, false)
-                    .await
-                    .expect("Database died!");
+            database
+                .add_domain(domain, url, is_spam_check.into(), false, false)
+                .await
+                .expect("Database died!");
             }
-        };
+    };
 
         Some((is_spam_check.into(), false))
     } else {
