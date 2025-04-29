@@ -183,8 +183,7 @@ async fn check_inner(
                 .add_domain(domain, url, is_spam_check.into(), false, false)
                 .await
                 .expect("Database died!");
-            }
-    };
+        }
 
         Some((is_spam_check.into(), false))
     } else {
