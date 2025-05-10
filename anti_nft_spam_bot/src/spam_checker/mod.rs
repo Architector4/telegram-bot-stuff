@@ -226,8 +226,8 @@ async fn visit_and_check_if_spam(
 
         // Check validity of it being a *real* cloudflare captcha.
         if status_code_forbidden && !header_powered_by && !header_cache && header_cf_ray {
-            // It's a captcha. Bleh. If it's spam, users will let us know with /spam.
-            return Ok(IsSpamCheckResult::No);
+            // Good enough lol
+            return Ok(IsSpamCheckResult::Maybe);
         }
 
         // Fake cloudflare captcha.
