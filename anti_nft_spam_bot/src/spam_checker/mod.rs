@@ -193,12 +193,13 @@ async fn check_inner(
     }
 }
 
-fn get_reqwest_client() -> Result<reqwest::Client, reqwest::Error> {
+fn get_reqwest_client(use_proxy: bool) -> Result<reqwest::Client, reqwest::Error> {
     use reqwest::*;
     use std::fs::*;
     use std::io::{BufRead, BufReader};
     use std::net::*;
 
+    // Default policy is to follow up to 10 redirects.
     let mut client = Client::builder()
         .user_agent("GoogleOther")
         .timeout(Duration::from_secs(7))
@@ -207,13 +208,15 @@ fn get_reqwest_client() -> Result<reqwest::Client, reqwest::Error> {
         // https://github.com/seanmonstar/reqwest/issues/584
         .local_address(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)));
 
-    if let Ok(proxies) = File::open("proxies.txt").map(|x| BufReader::new(x).lines()) {
-        for line in proxies {
-            match line {
-                Ok(line) => {
-                    client = client.proxy(Proxy::all(line.trim())?);
+    if use_proxy {
+        if let Ok(proxies) = File::open("proxies.txt").map(|x| BufReader::new(x).lines()) {
+            for line in proxies {
+                match line {
+                    Ok(line) => {
+                        client = client.proxy(Proxy::all(line.trim())?);
+                    }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
         }
     }
@@ -228,10 +231,16 @@ async fn visit_and_check_if_spam(
     url: &Url,
     recursion_depth: u8,
 ) -> Result<IsSpamCheckResult, reqwest::Error> {
-    // Default policy is to follow up to 10 redirects.
-    let client = get_reqwest_client()?;
+    let mut client = get_reqwest_client(true)?;
 
-    let result = client.get(url.as_str()).send().await?;
+    let result = match client.get(url.as_str()).send().await {
+        Ok(x) => x,
+        Err(_) => {
+            // Try without proxy?
+            client = get_reqwest_client(false)?;
+            client.get(url.as_str()).send().await?
+        }
+    };
 
     // Gather some specifics relevant to cloudflare captchas...
     let header_powered_by = result.headers().get("x-powered-by").is_some();
