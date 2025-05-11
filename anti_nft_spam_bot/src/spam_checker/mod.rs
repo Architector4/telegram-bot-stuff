@@ -193,6 +193,34 @@ async fn check_inner(
     }
 }
 
+fn get_reqwest_client() -> Result<reqwest::Client, reqwest::Error> {
+    use reqwest::*;
+    use std::fs::*;
+    use std::io::{BufRead, BufReader};
+    use std::net::*;
+
+    let mut client = Client::builder()
+        .user_agent("GoogleOther")
+        .timeout(Duration::from_secs(7))
+        .connect_timeout(Duration::from_secs(7))
+        // Force IPv4 because a proxy of mine doesn't support it lol
+        // https://github.com/seanmonstar/reqwest/issues/584
+        .local_address(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)));
+
+    if let Ok(proxies) = File::open("proxies.txt").map(|x| BufReader::new(x).lines()) {
+        for line in proxies {
+            match line {
+                Ok(line) => {
+                    client = client.proxy(Proxy::all(line.trim())?);
+                }
+                Err(_) => break,
+            }
+        }
+    }
+
+    client.build()
+}
+
 /// Check if a website served by the given URL is spam or not by visiting it.
 async fn visit_and_check_if_spam(
     database: &Arc<Database>,
@@ -201,11 +229,7 @@ async fn visit_and_check_if_spam(
     recursion_depth: u8,
 ) -> Result<IsSpamCheckResult, reqwest::Error> {
     // Default policy is to follow up to 10 redirects.
-    let client = reqwest::Client::builder()
-        .user_agent("GoogleOther")
-        .timeout(Duration::from_secs(7))
-        .connect_timeout(Duration::from_secs(7))
-        .build()?;
+    let client = get_reqwest_client()?;
 
     let result = client.get(url.as_str()).send().await?;
 

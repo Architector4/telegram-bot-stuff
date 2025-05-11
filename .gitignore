@@ -3,5 +3,6 @@
 */key_debug
 */*sqlite*
 */deploy*.sh
+anti_nft_spam_bot/proxies.txt
 
 .DS_Store
