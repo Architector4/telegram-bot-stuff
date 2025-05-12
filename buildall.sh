@@ -2,7 +2,7 @@
 
 # Personal hacky script to get it all done and notify me about it lol
 
-for i in */; do
+for i in . */; do
 	(
 		cd "$i" || return
 		cargo clippy&
