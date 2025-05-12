@@ -239,10 +239,14 @@ async fn visit_and_check_if_spam(
     let result = match client.get(url.as_str()).send().await {
         Ok(x) => x,
         Err(e) => {
-            log::warn!("Connecting with a proxy failed:\n{:?}", e);
             // Try without proxy?
             client = get_reqwest_client(false)?;
-            client.get(url.as_str()).send().await?
+            let result = client.get(url.as_str()).send().await?;
+            // The ? in the line above is intentional.
+            // If we got here, that means connecting without proxy succeeded.
+            // Warn only in that case to not spam up logs due to generally invalid URLs.
+            log::warn!("Proxy failed, but normal request didn't:\n{:?}", e);
+            result
         }
     };
 
