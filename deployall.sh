@@ -1,5 +1,8 @@
 #!/bin/sh
 
-for i in */deploy.sh; do
-	"$i"
+for i in */; do
+	(
+		cd "$i" || return
+		./deploy.sh
+	)
 done
