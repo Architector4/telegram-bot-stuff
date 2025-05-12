@@ -201,7 +201,7 @@ fn get_reqwest_client(use_proxy: bool) -> Result<reqwest::Client, reqwest::Error
 
     // Default policy is to follow up to 10 redirects.
     let mut client = Client::builder()
-        .user_agent("GoogleOther")
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36")
         .timeout(Duration::from_secs(7))
         .connect_timeout(Duration::from_secs(7))
         // Force IPv4 because a proxy of mine doesn't support it lol
@@ -260,6 +260,8 @@ async fn visit_and_check_if_spam(
         // Check validity of it being a *real* cloudflare captcha.
         if status_code_forbidden && !header_powered_by && !header_cache && header_cf_ray {
             // It's a captcha. Bleh. If it's spam, users will let us know with /spam.
+
+            log::debug!("Got CloudFlare captcha on URL {}", url);
             return Ok(IsSpamCheckResult::No);
         }
 
