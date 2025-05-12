@@ -200,6 +200,9 @@ fn get_reqwest_client(use_proxy: bool) -> Result<reqwest::Client, reqwest::Error
     use std::net::*;
 
     // Default policy is to follow up to 10 redirects.
+    // And yeah, I'm using a "real browser" user agent. Sorgy. At least I'm not spamming
+    // requests like a scraper or something. Need this to get around some CloudFlare
+    // captchas lol
     let mut client = Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36")
         .timeout(Duration::from_secs(7))
