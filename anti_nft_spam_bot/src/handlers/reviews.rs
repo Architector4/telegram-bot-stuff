@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::sync::Arc;
 
 use teloxide::{
@@ -245,8 +246,11 @@ pub async fn parse_callback_query(
 
         let mut text = format!("Handled by {} (userid {}):\n", name, user.id);
         for response in &responses {
-            use std::fmt::Write;
             let _ = writeln!(&mut text, "{}", response);
+        }
+
+        if let Some(msgtext) = message.text() {
+            let _ = write!(&mut text, "\nOriginal message text:\n{}", msgtext);
         }
 
         bot.edit_message_text(message.chat.id, message.id, text)
