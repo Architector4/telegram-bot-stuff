@@ -555,7 +555,7 @@ async fn gather_suspicion(
                 concat!(
                     "Sorry, but I could not find any links in ",
                     "your message or the message you replied to, if any. ",
-                    "This bot only blocks messages with usernames, links and buttons with links."
+                    "This bot only blocks messages with usernames, links, and buttons with links."
                 )
             };
             bot.archsendmsg(message.chat.id, response, message.id)
