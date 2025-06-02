@@ -330,7 +330,9 @@ async fn handle_message_inner(
                 }
             }
         }
-    } else {
+    }
+
+    if !should_delete || message.chat.id == CONTROL_CHAT_ID {
         // It's not spam. Do the other things, if it's not an edit nor a replied-to message
         if !is_replied_to && !is_edited {
             gather_suspicion(bot, message, database).await?;
