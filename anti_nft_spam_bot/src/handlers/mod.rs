@@ -257,79 +257,7 @@ async fn handle_message_inner(
     };
 
     if should_delete {
-        // Try up to 3 times in case a fail happens lol
-        for _ in 0..3 {
-            match bot.delete_message(message.chat.id, message.id).await {
-                Ok(_) => {
-                    // Make a string, either a @username or full name,
-                    // describing the offending user.
-                    let offending_user_name = {
-                        if let Some(user) = message.from() {
-                            if let Some(username) = &user.username {
-                                format!("@{}", username)
-                            } else {
-                                user.full_name()
-                            }
-                        } else if let Some(chat) = message.sender_chat() {
-                            if let Some(username) = chat.username() {
-                                format!("@{}", username)
-                            } else if let Some(title) = chat.title() {
-                                title.to_string()
-                            } else {
-                                // Shouldn't happen, but eh.
-                                "a private user".to_string()
-                            }
-                        } else {
-                            // Shouldn't happen either, but eh.
-                            "a private user".to_string()
-                        }
-                    };
-
-                    if !database
-                        .get_hide_deletes(message.chat.id)
-                        .await
-                        .expect("Database died!")
-                    {
-                        bot.archsendmsg(
-                            message.chat.id,
-                            format!(
-                                "Removed a message from <code>{}</code> containing a spam link.",
-                                encode_text(&offending_user_name)
-                            )
-                            .as_str(),
-                            None,
-                        )
-                        .await?;
-                    }
-                    break;
-                }
-                Err(RequestError::Api(
-                    ApiError::MessageIdInvalid | ApiError::MessageToDeleteNotFound,
-                )) => {
-                    // Someone else probably has already deleted it. That's fine.
-                    break;
-                }
-                Err(RequestError::Api(ApiError::MessageCantBeDeleted)) => {
-                    // No rights?
-                    bot.archsendmsg(
-                        message.chat.id,
-                        concat!(
-                            "Tried to remove a message containing a spam link, but failed. ",
-                            "Is this bot an admin with ability to remove messages?\n\n",
-                            "If so, this may also be a Telegram bug, and an admin ",
-                            "has to remove the message manually."
-                        ),
-                        None,
-                    )
-                    .await?;
-                    break;
-                }
-                Err(_) => {
-                    // Random network error or whatever, possibly.
-                    // Try again by letting the loop roll.
-                }
-            }
-        }
+        delete_spam_message(bot, message, database).await?;
     }
 
     if !should_delete || message.chat.id == CONTROL_CHAT_ID {
@@ -339,6 +267,90 @@ async fn handle_message_inner(
 
             if handle_command(bot, me, message, database, sent_by_admin).await? {
                 return Ok(());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub fn sender_name_prettyprint(message: &Message) -> String {
+    if let Some(user) = message.from() {
+        if let Some(username) = &user.username {
+            format!("@{}", username)
+        } else {
+            user.full_name()
+        }
+    } else if let Some(chat) = message.sender_chat() {
+        if let Some(username) = chat.username() {
+            format!("@{}", username)
+        } else if let Some(title) = chat.title() {
+            title.to_string()
+        } else {
+            // Shouldn't happen, but eh.
+            "a private user".to_string()
+        }
+    } else {
+        // Shouldn't happen either, but eh.
+        "a private user".to_string()
+    }
+}
+
+pub async fn delete_spam_message(
+    bot: &Bot,
+    message: &Message,
+    database: &Database,
+) -> Result<(), RequestError> {
+    // Try up to 3 times in case a fail happens lol
+    for _ in 0..3 {
+        match bot.delete_message(message.chat.id, message.id).await {
+            Ok(_) => {
+                // Make a string, either a @username or full name,
+                // describing the offending user.
+                let offending_user_name = sender_name_prettyprint(message);
+
+                if !database
+                    .get_hide_deletes(message.chat.id)
+                    .await
+                    .expect("Database died!")
+                {
+                    bot.archsendmsg(
+                        message.chat.id,
+                        format!(
+                            "Removed a message from <code>{}</code> containing a spam link.",
+                            encode_text(&offending_user_name)
+                        )
+                        .as_str(),
+                        None,
+                    )
+                    .await?;
+                }
+                break;
+            }
+            Err(RequestError::Api(
+                ApiError::MessageIdInvalid | ApiError::MessageToDeleteNotFound,
+            )) => {
+                // Someone else probably has already deleted it. That's fine.
+                break;
+            }
+            Err(RequestError::Api(ApiError::MessageCantBeDeleted)) => {
+                // No rights?
+                bot.archsendmsg(
+                    message.chat.id,
+                    concat!(
+                        "Tried to remove a message containing a spam link, but failed. ",
+                        "Is this bot an admin with ability to remove messages?\n\n",
+                        "If so, this may also be a Telegram bug, and an admin ",
+                        "has to remove the message manually."
+                    ),
+                    None,
+                )
+                .await?;
+                break;
+            }
+            Err(_) => {
+                // Random network error or whatever, possibly.
+                // Try again by letting the loop roll.
             }
         }
     }
@@ -803,16 +815,9 @@ pub async fn create_review_notify(
     let username_string: String;
     let username: &str = if automatic {
         "automatic check"
-    } else if let Some(user) = message.from() {
-        if let Some(username) = &user.username {
-            username_string = format!("@{} (userid <code>{}</code>)", username, user.id);
-            &username_string
-        } else {
-            username_string = format!("{} (userid <code>{}</code>)", user.full_name(), user.id);
-            &username_string
-        }
     } else {
-        "Anonymous"
+        username_string = sender_name_prettyprint(message);
+        &username_string
     };
 
     let chatname = if let Some(username) = message.chat.username() {
