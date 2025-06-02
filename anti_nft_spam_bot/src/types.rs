@@ -107,6 +107,16 @@ impl ReviewResponse {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn as_ref_url_domain(&self) -> Option<(Option<&Domain>, &Url)> {
+        match self {
+            ReviewResponse::Skip => None,
+            ReviewResponse::UrlSpam(d, u) => Some((d.as_ref(), u)),
+            ReviewResponse::DomainSpam(d, u) => Some((Some(d), u)),
+            ReviewResponse::NotSpam(d, u) => Some((d.as_ref(), u)),
+        }
+    }
+
     pub fn deconstruct(self) -> Option<(Option<Domain>, Url)> {
         match self {
             ReviewResponse::Skip => None,

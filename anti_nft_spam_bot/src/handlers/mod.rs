@@ -11,7 +11,7 @@ use url::Url;
 
 use crate::{
     database::Database,
-    parse_url_like_telegram,
+    parse_url_like_telegram, sender_name_prettyprint,
     types::{Domain, IsSpam, ReviewResponse},
     CONTROL_CHAT_ID,
 };
@@ -183,6 +183,8 @@ async fn handle_message_inner(
 
     let mut bad_links_present = false;
 
+    let mut sus_links_present: Vec<Url> = Vec::new();
+
     // Two loops below iterate over links, but need to do the same thing.
     // Rather than duplicate the code inside the loops, I'm defining a macro
     // that would do this for me.
@@ -199,10 +201,13 @@ async fn handle_message_inner(
                 continue;
             };
 
-            if is_spam == IsSpam::Maybe && !from_db {
-                // Checker above marked the URL as maybe spam. Notify the squad.
+            if is_spam == IsSpam::Maybe {
+                sus_links_present.push($url.clone());
 
-                create_review_notify(bot, database, message, std::iter::once($url), true).await;
+                if !from_db {
+                    // Checker above marked the URL as maybe spam. Notify the squad.
+                    create_review_notify(bot, database, message, std::iter::once($url), true).await;
+                }
             }
 
             if is_spam == IsSpam::Yes {
@@ -234,16 +239,20 @@ async fn handle_message_inner(
         }
     }
 
+    let is_in_control_chat = message.chat.id == CONTROL_CHAT_ID;
+
     // We may need to check if the sender is an admin in two different places in this function.
     // If that happens, store the result determined first and reuse.
-    let mut sent_by_admin: Option<bool> = None;
+    // Check the result now, though.
+    let sent_by_admin: Option<bool> =
+        if !is_in_control_chat && (bad_links_present || !sus_links_present.is_empty()) {
+            Some(is_sender_admin(bot, message).await?)
+        } else {
+            None
+        };
 
-    let should_delete = if bad_links_present {
+    let should_delete = if bad_links_present && !is_in_control_chat {
         // oh no!
-        // Check if this is an admin of the chat or not.
-
-        sent_by_admin = Some(is_sender_admin(bot, message).await?);
-
         if sent_by_admin == Some(true) {
             log::debug!("Skipping deleting message from an admin.");
             false
@@ -256,47 +265,44 @@ async fn handle_message_inner(
         false
     };
 
+    let sender = sender_name_prettyprint(message, false);
+
     if should_delete {
         let chatid = message.chat.id;
         let messageid = message.id;
-        let sender = sender_name_prettyprint(message);
         delete_spam_message(bot, chatid, messageid, &sender, database).await?;
-    }
-
-    if !should_delete || message.chat.id == CONTROL_CHAT_ID {
-        // It's not spam. Do the other things, if it's not an edit nor a replied-to message
+    } else {
+        // It's (maybe?) not spam. Do the other things, if it's not an edit nor a replied-to message
         if !is_replied_to && !is_edited {
-            gather_suspicion(bot, message, database).await?;
+            if sent_by_admin != Some(true) {
+                // Deal with known sus links...
+                for url in sus_links_present {
+                    let _ = database
+                        .sus_link_sighted(message, Some(&sender), &url)
+                        .await;
+                }
+            }
+
+            // Deal with unknown sus links...
+            gather_suspicion(bot, message, sent_by_admin, database).await?;
 
             if handle_command(bot, me, message, database, sent_by_admin).await? {
                 return Ok(());
+            }
+
+            // And, for convenience sake...
+            if is_in_control_chat && bad_links_present {
+                bot.archsendmsg(
+                    message.chat.id,
+                    "Noticed a spam link in this message.",
+                    message.id,
+                )
+                .await?;
             }
         }
     }
 
     Ok(())
-}
-
-pub fn sender_name_prettyprint(message: &Message) -> String {
-    if let Some(user) = message.from() {
-        if let Some(username) = &user.username {
-            format!("@{}", username)
-        } else {
-            user.full_name()
-        }
-    } else if let Some(chat) = message.sender_chat() {
-        if let Some(username) = chat.username() {
-            format!("@{}", username)
-        } else if let Some(title) = chat.title() {
-            title.to_string()
-        } else {
-            // Shouldn't happen, but eh.
-            "a private user".to_string()
-        }
-    } else {
-        // Shouldn't happen either, but eh.
-        "a private user".to_string()
-    }
 }
 
 pub async fn delete_spam_message(
@@ -367,6 +373,7 @@ pub async fn delete_spam_message(
 async fn gather_suspicion(
     bot: &Bot,
     message: &Message,
+    mut sent_by_admin: Option<bool>,
     database: &Database,
 ) -> Result<(), RequestError> {
     let Some(text) = message.text() else {
@@ -374,6 +381,8 @@ async fn gather_suspicion(
     };
 
     let text = text.to_lowercase();
+
+    let mut replied_to_sent_by_admin = None;
 
     // Old check that captured links in a wider net.
     // Now our review queue is too big, so this is scaled
@@ -412,12 +421,19 @@ async fn gather_suspicion(
                 break 'reject_from_admin;
             }
 
-            let Ok(true) = is_sender_admin(bot, reply_to).await else {
+            if replied_to_sent_by_admin.is_none() {
+                replied_to_sent_by_admin = Some(is_sender_admin(bot, reply_to).await?);
+            }
+            if replied_to_sent_by_admin != Some(true) {
                 // The sender of the replied-to message isn't an admin.
                 break 'reject_from_admin;
             };
 
-            let Ok(false) = is_sender_admin(bot, message).await else {
+            if sent_by_admin.is_none() {
+                sent_by_admin = Some(is_sender_admin(bot, message).await?);
+            };
+
+            if sent_by_admin == Some(true) {
                 // The sender of this message *is* an admin.
                 break 'reject_from_admin;
             };
@@ -440,15 +456,16 @@ async fn gather_suspicion(
 
         let mut had_links = false;
 
-        let mut marked_count = 0u32;
         let mut already_marked_sus_count = 0u32;
         let mut already_marked_spam_count = 0u32;
         let mut manually_reviewed_not_spam_count = 0u32;
 
         let mut links_marked: Vec<Cow<Url>> = Vec::new();
 
+        let sendername = sender_name_prettyprint(message, false);
+
         macro_rules! marksus {
-            ($url: expr, $domain: expr) => {{
+            ($offending_message: expr, $sent_by_admin: expr, $sendername: expr, $url: expr, $domain: expr) => {{
                 let woot: Cow<Url> = $url;
                 log::debug!("Marking {} and its domain as sus...", woot);
 
@@ -464,8 +481,14 @@ async fn gather_suspicion(
 
                     match result {
                         Marked => {
+                            // Log it, if need be...
+                            if $sent_by_admin != Some(true) {
+                                database
+                                    .sus_link_sighted($offending_message, Some($sendername), &woot)
+                                    .await
+                                    .expect("Database died!");
+                            }
                             links_marked.push(woot);
-                            marked_count += 1
                         }
                         AlreadyMarkedSus => already_marked_sus_count += 1,
                         AlreadyMarkedSpam => already_marked_spam_count += 1,
@@ -485,7 +508,16 @@ async fn gather_suspicion(
                 //};
                 match get_entity_url_domain(entity) {
                     Some((url, domain)) => {
-                        marksus!(Cow::Owned(url), &domain);
+                        if sent_by_admin.is_none() {
+                            sent_by_admin = Some(is_sender_admin(bot, message).await?);
+                        }
+                        marksus!(
+                            &message,
+                            sent_by_admin,
+                            &sendername,
+                            Cow::Owned(url),
+                            &domain
+                        );
                     }
                     None => {
                         continue;
@@ -496,6 +528,7 @@ async fn gather_suspicion(
 
         // Get replied-to message "entities", if any.
         if let Some(replied_message) = message.reply_to_message() {
+            let replied_to_sender_name = sender_name_prettyprint(replied_message, false);
             if let Some(replied_entities) = replied_message
                 .parse_entities()
                 .or_else(|| replied_message.parse_caption_entities())
@@ -505,7 +538,18 @@ async fn gather_suspicion(
                         continue;
                     };
 
-                    marksus!(Cow::Owned(url), &domain);
+                    if replied_to_sent_by_admin.is_none() {
+                        replied_to_sent_by_admin =
+                            Some(is_sender_admin(bot, replied_message).await?);
+                    }
+
+                    marksus!(
+                        &replied_message,
+                        replied_to_sent_by_admin,
+                        &replied_to_sender_name,
+                        Cow::Owned(url),
+                        &domain
+                    );
                 }
             }
 
@@ -516,7 +560,18 @@ async fn gather_suspicion(
                         let Some((url, domain)) = get_button_url_domain(button) else {
                             continue;
                         };
-                        marksus!(Cow::Borrowed(url), &domain);
+
+                        if replied_to_sent_by_admin.is_none() {
+                            replied_to_sent_by_admin =
+                                Some(is_sender_admin(bot, replied_message).await?);
+                        }
+                        marksus!(
+                            &replied_message,
+                            replied_to_sent_by_admin,
+                            &replied_to_sender_name,
+                            Cow::Borrowed(url),
+                            &domain
+                        );
                     }
                 }
             }
@@ -526,7 +581,7 @@ async fn gather_suspicion(
         // working for that we need to check. That'd be kind of ridiculous lol
 
         let mut response;
-        let marked = marked_count > 0;
+        let marked = !links_marked.is_empty();
         let already_marked_sus = already_marked_sus_count > 0;
         let already_marked_spam = already_marked_spam_count > 0;
         let manually_reviewed_not_spam = manually_reviewed_not_spam_count > 0;
@@ -600,7 +655,7 @@ async fn handle_command(
     bot: &Bot,
     me: &Me,
     message: &Message,
-    database: &Database,
+    database: &Arc<Database>,
     mut sent_by_admin: Option<bool>,
 ) -> Result<bool, RequestError> {
     if message.edit_date().is_some() {
@@ -654,7 +709,7 @@ async fn handle_command(
         "/spam" | "/scam" if is_private => {
             // This is a private messages only handler. This is already run for public messages
             // differently, to catch non-command suspicions, so running it here would run it twice.
-            gather_suspicion(bot, message, database).await?;
+            gather_suspicion(bot, message, sent_by_admin, database).await?;
             true
         }
         "/hide_deletes" | "/show_deletes" => {
@@ -819,7 +874,7 @@ pub async fn create_review_notify(
     let username: &str = if automatic {
         "automatic check"
     } else {
-        username_string = sender_name_prettyprint(message);
+        username_string = sender_name_prettyprint(message, true);
         &username_string
     };
 

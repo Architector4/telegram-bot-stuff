@@ -14,6 +14,8 @@ use crate::{
     CONTROL_CHAT_ID, REVIEW_LOG_CHANNEL_ID,
 };
 
+use super::delete_spam_message;
+
 /// Check if this user is in the control chat and can do reviews, and
 /// delay their requests if appropriate.
 pub async fn authenticate_control(bot: &Bot, user: &User) -> Result<bool, RequestError> {
@@ -268,7 +270,7 @@ pub async fn parse_callback_query(
 pub async fn apply_review(
     bot: &Bot,
     user: &User,
-    db: &Database,
+    db: &Arc<Database>,
     response: &ReviewResponse,
 ) -> Result<bool, RequestError> {
     if !authenticate_control(bot, user).await? {
@@ -285,7 +287,7 @@ pub async fn apply_review(
 pub async fn apply_review_unverified(
     bot: &Bot,
     user: &User,
-    db: &Database,
+    db: &Arc<Database>,
     response: &ReviewResponse,
 ) -> Result<(), RequestError> {
     // See if it should be written into the log...
@@ -293,6 +295,29 @@ pub async fn apply_review_unverified(
         .conflicts_with_db(db)
         .await
         .expect("Database died!");
+
+    // Before we apply it to the database, deal with sightings of this link
+    // (and potentially other bad links lol)
+    if let Some((_, url)) = response.as_ref_url_domain() {
+        if response.marks_as_spam() {
+            let sightings = db
+                .drain_all_sightings_of_spam(url)
+                .await
+                .expect("Database died!");
+            let db = db.clone();
+            let bot = bot.clone();
+            tokio::spawn(async move {
+                for (chatid, messageid, offending_user_name) in sightings {
+                    let _ = delete_spam_message(&bot, chatid, messageid, &offending_user_name, &db)
+                        .await;
+                }
+            });
+        } else {
+            db.delete_all_sightings_of(url)
+                .await
+                .expect("Database died!");
+        }
+    }
 
     // Ingest it into the database...
     db.read_review_response(response)
@@ -316,5 +341,6 @@ pub async fn apply_review_unverified(
             .disable_web_page_preview(true)
             .await?;
     }
+
     Ok(())
 }

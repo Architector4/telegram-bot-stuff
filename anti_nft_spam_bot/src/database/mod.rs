@@ -9,16 +9,20 @@ use std::{
 use chrono::Utc;
 pub use sqlx::Error;
 use sqlx::{
+    error::ErrorKind,
     migrate::MigrateDatabase,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
     Executor, Row, Sqlite,
 };
-use teloxide::{types::ChatId, Bot};
+use teloxide::{
+    types::{ChatId, Message, MessageId},
+    Bot,
+};
 use tokio::sync::{watch, Mutex, Notify};
 use url::Url;
 
 use crate::{
-    parse_url_like_telegram,
+    parse_url_like_telegram, sender_name_prettyprint,
     spam_checker::SPAM_CHECKER_VERSION,
     types::{MarkSusResult, ReviewResponse},
 };
@@ -130,6 +134,25 @@ impl Database {
             "
                 CREATE TABLE IF NOT EXISTS hide_deletes (
                     chatid INTEGER PRIMARY KEY NOT NULL
+                ) STRICT;",
+        ))
+        .await?;
+
+        // SUS_LINK_SIGHTINGS:
+        //      List of messages where a link marked as sus was sighted.
+        //      Used to delete all of them if the link is marked as spam.
+        // chatid (i64)
+        // messageid (i32 (because telegram bot api is just like that))
+        // sendername (text)
+        // urlid (i64, references rowid of table `urls`)
+        pool.execute(sqlx::query(
+            "
+                CREATE TABLE IF NOT EXISTS sus_link_sightings (
+                    chatid INTEGER NOT NULL,
+                    messageid INTEGER NOT NULL,
+                    sendername TEXT NOT NULL,
+                    urlid INTEGER NOT NULL,
+                    UNIQUE (chatid, messageid)
                 ) STRICT;",
         ))
         .await?;
@@ -374,17 +397,23 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        // If we know for a fact that this URL and its domain is
-        // spam, we don't need an entry in the `urls` table for it.
-        if is_spam == IsSpam::Yes {
-            if let Some(url) = example_url {
+        if let Some(url) = example_url {
+            // If we know for a fact that this URL and its domain is
+            // spam, we don't need an entry in the `urls` table for it.
+            if is_spam == IsSpam::Yes {
                 sqlx::query("DELETE FROM urls WHERE url=? AND is_spam=?;")
                     .bind(url.as_str())
                     .bind::<u8>(is_spam.into())
                     .execute(&self.pool)
                     .await?;
             }
+            // And delete all sightings.
+            // If this was marked as spam, the sightings would have already been processed.
+            // This here is mostly just to catch stragglers that could have gotten
+            // in after they were, but before the link was marked here.
+            self.delete_all_sightings_of(url).await?;
         }
+
         Ok(())
     }
 
@@ -422,6 +451,7 @@ impl Database {
         .await?
         .rows_affected()
             > 0;
+
         Ok(result)
     }
 
@@ -460,6 +490,13 @@ impl Database {
         .bind(SPAM_CHECKER_VERSION)
         .execute(&self.pool)
         .await?;
+
+        // And delete all sightings.
+        // If this was marked as spam, the sightings would have already been processed.
+        // This here is mostly just to catch stragglers that could have gotten
+        // in after they were, but before the link was marked here.
+        self.delete_all_sightings_of(url).await?;
+
         Ok(())
     }
 
@@ -786,6 +823,87 @@ impl Database {
         }
 
         Ok(old_state)
+    }
+
+    pub async fn sus_link_sighted(
+        &self,
+        message: &Message,
+        sendername: Option<&str>,
+        link: &Url,
+    ) -> Result<(), Error> {
+        let sendername_string;
+
+        let sendername = if let Some(sendername) = sendername {
+            sendername
+        } else {
+            sendername_string = sender_name_prettyprint(message, false);
+            &sendername_string
+        };
+
+        // First, if it's so sus, find it in the database.
+        let Some(rowid) = sqlx::query("SELECT rowid FROM urls WHERE is_spam=2 AND url=?")
+            .bind(link.as_str())
+            .map(|row: SqliteRow| row.get::<i64, _>(0))
+            .fetch_optional(&self.pool)
+            .await?
+        else {
+            // It's not in the database marked as sus? Huh. Whatever.
+            return Ok(());
+        };
+
+        let err = sqlx::query(
+            "INSERT INTO sus_link_sightings (chatid, messageid, sendername, urlid)
+            VALUES (?, ?, ?, ?)",
+        )
+        .bind(message.chat.id.0)
+        .bind(message.id.0)
+        .bind(sendername)
+        .bind(rowid)
+        .execute(&self.pool)
+        .await;
+
+        match err {
+            Err(Error::Database(dbe)) if dbe.kind() == ErrorKind::UniqueViolation => {
+                // That means we already have this. Good!
+            }
+            _ => {
+                err?;
+            }
+        };
+
+        Ok(())
+    }
+
+    /// Deletes from database and returns all sightings of this URL,
+    /// plus all sightings of other spam URLs, if any.
+    pub async fn drain_all_sightings_of_spam(
+        &self,
+        link: &Url,
+    ) -> Result<Vec<(ChatId, MessageId, String)>, Error> {
+        sqlx::query(
+            "DELETE FROM sus_link_sightings
+        WHERE urlid IN (
+            SELECT rowid FROM urls WHERE url=? OR is_spam=1
+        )
+        RETURNING chatid, messageid, sendername;",
+        )
+        .bind(link.as_str())
+        .map(|row: SqliteRow| (ChatId(row.get(0)), MessageId(row.get(1)), row.get(2)))
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn delete_all_sightings_of(&self, link: &Url) -> Result<(), Error> {
+        sqlx::query(
+            "DELETE FROM sus_link_sightings
+        WHERE urlid IN (
+            SELECT rowid FROM urls WHERE url=?
+        );",
+        )
+        .bind(link.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }
 
