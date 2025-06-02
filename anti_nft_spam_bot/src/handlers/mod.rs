@@ -4,7 +4,7 @@ use arch_bot_commons::{teloxide_retry, useful_methods::BotArchSendMsg};
 use html_escape::encode_text;
 use teloxide::{
     prelude::*,
-    types::{BotCommand, ChatMember, Me, MessageEntityKind, MessageEntityRef},
+    types::{BotCommand, ChatMember, Me, MessageEntityKind, MessageEntityRef, MessageId},
     ApiError, RequestError,
 };
 use url::Url;
@@ -257,7 +257,10 @@ async fn handle_message_inner(
     };
 
     if should_delete {
-        delete_spam_message(bot, message, database).await?;
+        let chatid = message.chat.id;
+        let messageid = message.id;
+        let sender = sender_name_prettyprint(message);
+        delete_spam_message(bot, chatid, messageid, &sender, database).await?;
     }
 
     if !should_delete || message.chat.id == CONTROL_CHAT_ID {
@@ -298,24 +301,24 @@ pub fn sender_name_prettyprint(message: &Message) -> String {
 
 pub async fn delete_spam_message(
     bot: &Bot,
-    message: &Message,
+    chatid: ChatId,
+    messageid: MessageId,
+    offending_user_name: &str,
     database: &Database,
 ) -> Result<(), RequestError> {
     // Try up to 3 times in case a fail happens lol
     for _ in 0..3 {
-        match bot.delete_message(message.chat.id, message.id).await {
+        match bot.delete_message(chatid, messageid).await {
             Ok(_) => {
                 // Make a string, either a @username or full name,
                 // describing the offending user.
-                let offending_user_name = sender_name_prettyprint(message);
-
                 if !database
-                    .get_hide_deletes(message.chat.id)
+                    .get_hide_deletes(chatid)
                     .await
                     .expect("Database died!")
                 {
                     bot.archsendmsg(
-                        message.chat.id,
+                        chatid,
                         format!(
                             "Removed a message from <code>{}</code> containing a spam link.",
                             encode_text(&offending_user_name)
@@ -336,7 +339,7 @@ pub async fn delete_spam_message(
             Err(RequestError::Api(ApiError::MessageCantBeDeleted)) => {
                 // No rights?
                 bot.archsendmsg(
-                    message.chat.id,
+                    chatid,
                     concat!(
                         "Tried to remove a message containing a spam link, but failed. ",
                         "Is this bot an admin with ability to remove messages?\n\n",
