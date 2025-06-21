@@ -250,6 +250,27 @@ async fn visit_and_check_if_spam(
         }
     };
 
+    if result.url() != url {
+        // We have been redirected. Check where we ended up with the database.
+        if let Some(db_result) = database
+            .is_spam(result.url(), None, false)
+            .await
+            .expect("Database died!")
+        {
+            let response = match db_result.0 {
+                IsSpam::No => IsSpamCheckResult::No,
+                IsSpam::Yes => {
+                    // The "Yes" answer may be for the domain of the new URL as a whole.
+                    // However, this does not necessarily villify *this* whole domain.
+                    IsSpamCheckResult::YesUrl
+                }
+                IsSpam::Maybe => IsSpamCheckResult::Maybe,
+            };
+
+            return Ok(response);
+        }
+    }
+
     // Gather some specifics relevant to cloudflare captchas...
     let header_powered_by = result.headers().get("x-powered-by").is_some();
     let header_cf_ray = result.headers().get("cf-ray").is_some();
