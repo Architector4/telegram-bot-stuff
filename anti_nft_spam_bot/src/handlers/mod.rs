@@ -40,7 +40,7 @@ fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
             // Text will be like "@amogus"
             // Convert it into "https://t.me/amogus"
             let username = entity.text().trim_start_matches('@');
-            let url_text = format!("https://t.me/{}", username);
+            let url_text = format!("https://t.me/{username}");
 
             if let Ok(url) = Url::parse(&url_text) {
                 url
@@ -91,7 +91,7 @@ fn get_button_url_domain(button: &teloxide::types::InlineKeyboardButton) -> Opti
 
     let Some(domain) = Domain::from_url(url) else {
         // Does not have a domain. An IP address link?
-        log::warn!("Received a URL in a button without a domain: {}", url);
+        log::warn!("Received a URL in a button without a domain: {url}");
         return None;
     };
 
@@ -907,17 +907,16 @@ pub async fn create_review_notify(
     ]);
 
     let mut notify_text = format!(
-        "New link(s) were added to review pool by {} in {}:\n",
-        username, chatname
+        "New link(s) were added to review pool by {username} in {chatname}:\n"
     );
 
     use std::fmt::Write;
 
     for url in links_marked {
-        let _ = writeln!(notify_text, "URL: {}\n", url);
+        let _ = writeln!(notify_text, "URL: {url}\n");
     }
 
-    let _ = writeln!(notify_text, "There are {} links to review.", to_review);
+    let _ = writeln!(notify_text, "There are {to_review} links to review.");
 
     if teloxide_retry!(
         bot.send_message(CONTROL_CHAT_ID, &notify_text)
@@ -929,8 +928,7 @@ pub async fn create_review_notify(
     .is_err()
     {
         log::error!(
-            "Failed notifying control chat of new marked sus link!\n{}",
-            notify_text
+            "Failed notifying control chat of new marked sus link!\n{notify_text}"
         );
     };
 }

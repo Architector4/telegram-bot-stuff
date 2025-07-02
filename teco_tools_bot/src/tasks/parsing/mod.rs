@@ -40,13 +40,13 @@ impl std::fmt::Display for TaskError {
         } else {
             match self {
                 Self::Error(e) => {
-                    writeln!(f, "Error: {}", e)
+                    writeln!(f, "Error: {e}")
                 }
                 Self::Cancel(c) => {
-                    writeln!(f, "Cancelling task: {}", c)
+                    writeln!(f, "Cancelling task: {c}")
                 }
                 Self::Descriptory(d) => {
-                    writeln!(f, "{}", d)
+                    writeln!(f, "{d}")
                 }
             }
         }
@@ -582,8 +582,7 @@ impl Task {
                         (new_width, new_height, Some(default_percentage))
                     } else {
                         panic!(
-                            "computed bad default percentage {} from dimensions {:?}",
-                            default_percentage, original_dimensions
+                            "computed bad default percentage {default_percentage} from dimensions {original_dimensions:?}"
                         );
                     }
                 };

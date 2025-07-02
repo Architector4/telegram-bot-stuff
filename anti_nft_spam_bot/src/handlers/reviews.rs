@@ -25,7 +25,7 @@ pub async fn authenticate_control(bot: &Bot, user: &User) -> Result<bool, Reques
         .is_present();
     if !control {
         let name = if let Some(username) = &user.username {
-            format!("@{}", username)
+            format!("@{username}")
         } else {
             user.full_name()
         };
@@ -141,23 +141,23 @@ async fn edit_message_into_a_review(
         IsSpam::Maybe => "",
     };
 
-    let text = format!("{}{}{}\n\nWhat is spam here?", title, considered, url);
+    let text = format!("{title}{considered}{url}\n\nWhat is spam here?");
 
     let keyboard = InlineKeyboardMarkup::new(vec![
         vec![
             InlineKeyboardButton::callback(
                 "Just the URL".to_string(),
-                format!("URL_SPAM {} {} {}", table_name, rowid, url_hash),
+                format!("URL_SPAM {table_name} {rowid} {url_hash}"),
             ),
             InlineKeyboardButton::callback(
                 "Entire DOMAIN".to_string(),
-                format!("DOMAIN_SPAM {} {} {}", table_name, rowid, url_hash),
+                format!("DOMAIN_SPAM {table_name} {rowid} {url_hash}"),
             ),
         ],
         vec![
             InlineKeyboardButton::callback(
                 "Not spam".to_string(),
-                format!("NOT_SPAM {} {} {}", table_name, rowid, url_hash),
+                format!("NOT_SPAM {table_name} {rowid} {url_hash}"),
             ),
             InlineKeyboardButton::callback("Skip".to_string(), "SKIP".to_string()),
         ],
@@ -214,7 +214,7 @@ pub async fn parse_callback_query(
         match ReviewResponse::from_str(query_data.as_str(), &db, query.message.as_ref()).await {
             Ok(r) => r,
             Err(e) => {
-                goodbye!(&format!("Invalid query data: {}", e));
+                goodbye!(&format!("Invalid query data: {e}"));
             }
         };
 
@@ -241,18 +241,18 @@ pub async fn parse_callback_query(
         // Edit it to get rid of the buttons and stuff.
 
         let name = if let Some(username) = &user.username {
-            format!("@{}", username)
+            format!("@{username}")
         } else {
             user.full_name()
         };
 
         let mut text = format!("Handled by {} (userid {}):\n", name, user.id);
         for response in &responses {
-            let _ = writeln!(&mut text, "{}", response);
+            let _ = writeln!(&mut text, "{response}");
         }
 
         if let Some(msgtext) = message.text() {
-            let _ = write!(&mut text, "\nOriginal message text:\n{}", msgtext);
+            let _ = write!(&mut text, "\nOriginal message text:\n{msgtext}");
         }
 
         bot.edit_message_text(message.chat.id, message.id, text)
@@ -330,7 +330,7 @@ pub async fn apply_review_unverified(
         // This warrants logging.
 
         let name = if let Some(username) = &user.username {
-            format!("@{}", username)
+            format!("@{username}")
         } else {
             user.full_name()
         };

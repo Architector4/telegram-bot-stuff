@@ -28,7 +28,7 @@ pub fn parse_url_like_telegram(string: &str) -> Result<Url, url::ParseError> {
         Ok(url) => Ok(url),
         Err(e) => {
             // We want to return this original error if the next step fails.
-            if let Ok(url) = Url::parse(&format!("http://{}", string)) {
+            if let Ok(url) = Url::parse(&format!("http://{string}")) {
                 Ok(url)
             } else {
                 Err(e)
@@ -43,7 +43,7 @@ pub fn sender_name_prettyprint(message: &Message, with_id: bool) -> String {
     let mut name = if let Some(user) = message.from() {
         userid = Some(user.id);
         if let Some(username) = &user.username {
-            format!("@{}", username)
+            format!("@{username}")
         } else {
             user.full_name().to_string()
         }
@@ -65,10 +65,10 @@ pub fn sender_name_prettyprint(message: &Message, with_id: bool) -> String {
     if with_id {
         use std::fmt::Write;
         if let Some(userid) = userid {
-            let _ = write!(name, " (userid {})", userid);
+            let _ = write!(name, " (userid {userid})");
         }
         if let Some(chatid) = chatid {
-            let _ = write!(name, " (chatid {})", chatid);
+            let _ = write!(name, " (chatid {chatid})");
         }
     }
 

@@ -362,8 +362,7 @@ async fn help(tp: TaskParams<'_>) -> Ret {
 
             write!(
                 &mut output,
-                "\n\nSend <code>/{} help</code> for more info on parameters, if any.",
-                cmdname
+                "\n\nSend <code>/{cmdname} help</code> for more info on parameters, if any."
             )
             .unwrap();
 
@@ -700,7 +699,7 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
                         .bot
                         .archsendmsg(
                             OWNER_ID,
-                            format!("Failed directly uploading a video: {:#?}", e).as_str(),
+                            format!("Failed directly uploading a video: {e:#?}").as_str(),
                             None,
                         )
                         .await;
@@ -756,19 +755,19 @@ async fn premium_inner(tp: TaskParams<'_>, premium: bool) -> Ret {
     for thing in tp.get_params().split_whitespace() {
         use std::fmt::Write;
         let Ok(woot): Result<u64, _> = thing.parse() else {
-            writeln!(response, "wtf is {}", thing).expect("no");
+            writeln!(response, "wtf is {thing}").expect("no");
             continue;
         };
 
         if let Err(e) = tp.taskman.db.set_premium(UserId(woot), premium).await {
-            writeln!(response, "OH SHIT: {:#?}", e).expect("no");
+            writeln!(response, "OH SHIT: {e:#?}").expect("no");
             break;
         }
 
         if premium {
-            writeln!(response, "{} is premium now", thing).expect("no");
+            writeln!(response, "{thing} is premium now").expect("no");
         } else {
-            writeln!(response, "{} is not premium now", thing).expect("no");
+            writeln!(response, "{thing} is not premium now").expect("no");
         }
     }
 

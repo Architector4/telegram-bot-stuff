@@ -38,7 +38,7 @@ impl From<u8> for IsSpam {
             value if value == No as u8 => No,
             value if value == Yes as u8 => Yes,
             value if value == Maybe as u8 => Maybe,
-            _ => panic!("Unknown value: {}", value),
+            _ => panic!("Unknown value: {value}"),
         }
     }
 }
@@ -250,9 +250,9 @@ impl Display for ReviewResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ReviewResponse::Skip => write!(f, "Skip"),
-            ReviewResponse::UrlSpam(_, url) => write!(f, "URL is spam: {}", url),
-            ReviewResponse::DomainSpam(_, url) => write!(f, "Domain and URL is spam: {}", url),
-            ReviewResponse::NotSpam(_, url) => write!(f, "Neither domain nor URL is spam: {}", url),
+            ReviewResponse::UrlSpam(_, url) => write!(f, "URL is spam: {url}"),
+            ReviewResponse::DomainSpam(_, url) => write!(f, "Domain and URL is spam: {url}"),
+            ReviewResponse::NotSpam(_, url) => write!(f, "Neither domain nor URL is spam: {url}"),
         }
     }
 }

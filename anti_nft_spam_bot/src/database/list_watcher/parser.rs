@@ -158,7 +158,7 @@ mod tests {
 
         while let Some(line) = parser.next_line() {
             if let Some(line) = line.unwrap() {
-                println!("{:?}", line);
+                println!("{line:?}");
             }
         }
     }

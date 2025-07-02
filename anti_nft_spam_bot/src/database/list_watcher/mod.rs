@@ -90,8 +90,8 @@ async fn ingest_list_to_database(bot: &Bot, database: &super::Database) -> std::
             Ok(Some(line)) => line,
             Ok(None) => continue,
             Err(e) => {
-                let mut error_message = format!("Error while parsing scam website list:\n{}", e);
-                log::warn!("{}", error_message);
+                let mut error_message = format!("Error while parsing scam website list:\n{e}");
+                log::warn!("{error_message}");
                 if error_counter < 3 {
                     error_counter += 1;
 
@@ -134,8 +134,8 @@ async fn ingest_list_to_database(bot: &Bot, database: &super::Database) -> std::
         }
 
         if let Err(e) = database_result {
-            let error_message = format!("Failed to ingest spam list to database:\n{}", e);
-            log::warn!("{}", error_message);
+            let error_message = format!("Failed to ingest spam list to database:\n{e}");
+            log::warn!("{error_message}");
             // Don't care if this fails. What can we do, log it?
             // The error above will show up in the log anyway lol
             let _ = bot

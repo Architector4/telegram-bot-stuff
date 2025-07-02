@@ -768,9 +768,9 @@ pub fn resize_video(
 
             if input_frame_count != 0 {
                 let _ = status_report
-                    .send(format!("Frame {} / {}", frames_received, input_frame_count));
+                    .send(format!("Frame {frames_received} / {input_frame_count}"));
             } else {
-                let _ = status_report.send(format!("Frame {}", frames_received));
+                let _ = status_report.send(format!("Frame {frames_received}"));
             }
         }
 
@@ -863,7 +863,7 @@ pub fn resize_video(
         // Specifically, map quality of 100 to 145k,
         // and quality of 0 to 20k.
         let bitrate = 20 + quality.saturating_add(quality / 4).min(125);
-        let bitrate_str = format!("{}k", bitrate);
+        let bitrate_str = format!("{bitrate}k");
 
         args.extend_from_slice(&[
             OsStr::new("-b:a"),

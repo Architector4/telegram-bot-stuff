@@ -217,9 +217,7 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
 
             if !request_deleted {
                 log::error!(
-                    "ERROR when processing task: {:#?}\nTask data: {:#?}",
-                    e,
-                    task_data
+                    "ERROR when processing task: {e:#?}\nTask data: {task_data:#?}"
                 );
                 let _ = taskman
                     .bot
@@ -237,13 +235,13 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
                     .bot
                     .archsendmsg(
                         OWNER_ID,
-                        encode_text(&format!("ERROR: {:#?}\n\nTask data: {:#?}", e, task_data))
+                        encode_text(&format!("ERROR: {e:#?}\n\nTask data: {task_data:#?}"))
                             .as_ref(),
                         None,
                     )
                     .await
                 {
-                    log::error!("ERROR when sending the info above to the owner:\n{:#?}", e);
+                    log::error!("ERROR when sending the info above to the owner:\n{e:#?}");
                 }
             }
         };

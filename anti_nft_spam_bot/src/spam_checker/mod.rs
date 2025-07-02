@@ -98,9 +98,7 @@ async fn check_inner(
             .expect("Database died!")
         {
             log::debug!(
-                "Checked {} URL specifically with database and got: {:?}",
-                url,
-                db_result_for_url
+                "Checked {url} URL specifically with database and got: {db_result_for_url:?}"
             );
             return Some((db_result_for_url.0, true));
         }
@@ -126,9 +124,7 @@ async fn check_inner(
     if let Some(url_looks_like_spam) = check_url_by_its_looks(url) {
         // Add it to the database.
         log::debug!(
-            "Checked if URL {} looks like a spam URL and got: {:?}",
-            url,
-            url_looks_like_spam
+            "Checked if URL {url} looks like a spam URL and got: {url_looks_like_spam:?}"
         );
 
         match url_looks_like_spam {
@@ -145,7 +141,7 @@ async fn check_inner(
         }
     }
 
-    log::debug!("{} Is not in the database. Debouncing...", url);
+    log::debug!("{url} Is not in the database. Debouncing...");
     let mut visit_guard = None;
     let has_visit_guard = if recursion_depth == 0 {
         visit_guard = database.domain_visit_debounce(domain.clone()).await;
@@ -155,7 +151,7 @@ async fn check_inner(
     };
 
     if !has_visit_guard {
-        log::debug!("{} was just visited. Trying the database.", url);
+        log::debug!("{url} was just visited. Trying the database.");
         // Oh no nevermind, someone else visited it.
         // Just get the database result.
         drop(visit_guard);
@@ -168,7 +164,7 @@ async fn check_inner(
         visit_and_check_if_spam(database, domain, url, recursion_depth).await
     {
         // Add it to the database.
-        log::debug!("Visited {} and got: {:?}", url, is_spam_check);
+        log::debug!("Visited {url} and got: {is_spam_check:?}");
         database
             .add_url(url, is_spam_check.into(), false, false)
             .await
@@ -188,7 +184,7 @@ async fn check_inner(
         Some((is_spam_check.into(), false))
     } else {
         // The visit probably timed out or something. Meh.
-        log::debug!("{} timed out", url);
+        log::debug!("{url} timed out");
         None
     }
 }
@@ -245,7 +241,7 @@ async fn visit_and_check_if_spam(
             // The ? in the line above is intentional.
             // If we got here, that means connecting without proxy succeeded.
             // Warn only in that case to not spam up logs due to generally invalid URLs.
-            log::warn!("Proxy failed, but normal request didn't:\n{:?}", e);
+            log::warn!("Proxy failed, but normal request didn't:\n{e:?}");
             result
         }
     };
@@ -290,7 +286,7 @@ async fn visit_and_check_if_spam(
         if status_code_forbidden && !header_powered_by && !header_cache && header_cf_ray {
             // It's a captcha. Bleh. If it's spam, users will let us know with /spam.
 
-            log::debug!("Got CloudFlare captcha on URL {}", url);
+            log::debug!("Got CloudFlare captcha on URL {url}");
             return Ok(IsSpamCheckResult::No);
         }
 

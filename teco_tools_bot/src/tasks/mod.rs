@@ -128,8 +128,8 @@ impl Display for ResizeType {
             Self::Crop => write!(f, "Crop"),
             Self::SeamCarve { delta_x, rigidity } => {
                 writeln!(f, "Seam Carving")?;
-                writeln!(f, "<b>delta_x</b>: {}", delta_x)?;
-                write!(f, "<b>rigidity</b>: {}", rigidity)
+                writeln!(f, "<b>delta_x</b>: {delta_x}")?;
+                write!(f, "<b>rigidity</b>: {rigidity}")
             }
             Self::ToSticker => write!(f, "To sticker"),
             Self::ToCustomEmoji => write!(f, "To custom emoji"),
@@ -377,10 +377,10 @@ impl Task {
                     )?;
                 }
                 if let Some(percentage) = percentage {
-                    write!(output, ", or {}%", percentage)?;
+                    write!(output, ", or {percentage}%")?;
                 }
                 writeln!(output)?;
-                writeln!(output, "<b>Rotation</b>: {}°", rotation)?;
+                writeln!(output, "<b>Rotation</b>: {rotation}°")?;
                 write_param!("Resize method", resize_type)?;
 
                 if let Task::VideoResize {
@@ -397,7 +397,7 @@ impl Task {
                     write_param!("Resize curve", resize_curve)?;
                 };
 
-                writeln!(output, "<b>Quality</b>: {}%", quality)
+                writeln!(output, "<b>Quality</b>: {quality}%")
             }
             Task::Ocr => Ok(()),
             Task::AmenBreak => Ok(()),
@@ -408,7 +408,7 @@ impl Task {
                 if *temperature == 0.0 {
                     writeln!(output, "<b>Temperature</b>: Auto")?;
                 } else {
-                    writeln!(output, "<b>Temperature</b>: {}", temperature)?;
+                    writeln!(output, "<b>Temperature</b>: {temperature}")?;
                 }
                 write_param!("Translate to English", translate_to_english)?;
                 Ok(())
@@ -436,12 +436,12 @@ impl Task {
         let mut response = match queue_size {
             Some(0) => {
                 if let Some(progress) = progress_info {
-                    format!("Working on your task now... {}\n", progress)
+                    format!("Working on your task now... {progress}\n")
                 } else {
                     String::from("Working on your task now...\n")
                 }
             }
-            Some(s) => format!("Task accepted. Position in queue: {}\n", s),
+            Some(s) => format!("Task accepted. Position in queue: {s}\n"),
             None => "Task accepted. Waiting for this chat's slow mode...\n".to_string(),
         };
 

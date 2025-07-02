@@ -144,8 +144,7 @@ impl Task {
                         }
                         if media.file.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
                             goodbye!(format!(
-                                "Error: media is too large. The limit is {}MB.",
-                                MAX_DOWNLOAD_SIZE_MEGABYTES
+                                "Error: media is too large. The limit is {MAX_DOWNLOAD_SIZE_MEGABYTES}MB."
                             )
                             .as_str());
                         }
@@ -259,7 +258,7 @@ impl Task {
                 let media_data = match woot {
                     Ok(m) => m,
                     Err(e) => {
-                        log::error!("Error when resizing media: {}", e);
+                        log::error!("Error when resizing media: {e}");
                         goodbye!("Error: failed to process the media");
                     }
                 };
@@ -344,8 +343,7 @@ impl Task {
                         }
                         if photo.file.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
                             goodbye!(format!(
-                                "Error: image is too large. The limit is {}MB.",
-                                MAX_DOWNLOAD_SIZE_MEGABYTES
+                                "Error: image is too large. The limit is {MAX_DOWNLOAD_SIZE_MEGABYTES}MB."
                             )
                             .as_str());
                         }
@@ -367,7 +365,7 @@ impl Task {
                 let mut text = match woot {
                     Ok(t) => t,
                     Err(e) => {
-                        log::error!("Failed when OCRing: {}", e);
+                        log::error!("Failed when OCRing: {e}");
                         goodbye!("Error: failed to process the media.");
                     }
                 };
@@ -394,8 +392,7 @@ impl Task {
                         }
                         if media.file.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
                             goodbye!(format!(
-                                "Error: media is too large. The limit is {}MB.",
-                                MAX_DOWNLOAD_SIZE_MEGABYTES
+                                "Error: media is too large. The limit is {MAX_DOWNLOAD_SIZE_MEGABYTES}MB."
                             )
                             .as_str());
                         }
@@ -428,7 +425,7 @@ impl Task {
                 let video_data = match result {
                     Ok(m) => m,
                     Err(e) => {
-                        log::error!("Error when amen breaking video: {}", e);
+                        log::error!("Error when amen breaking video: {e}");
                         goodbye!("Error: failed to amen break the video");
                     }
                 };
@@ -472,8 +469,7 @@ impl Task {
                         }
                         if media.file.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
                             goodbye!(format!(
-                                "Error: media is too large. The limit is {}MB.",
-                                MAX_DOWNLOAD_SIZE_MEGABYTES
+                                "Error: media is too large. The limit is {MAX_DOWNLOAD_SIZE_MEGABYTES}MB."
                             )
                             .as_str());
                         }
@@ -502,7 +498,7 @@ impl Task {
                 {
                     Ok(wav) => wav,
                     Err(e) => {
-                        log::error!("Error when converting to suitable wav: {}", e);
+                        log::error!("Error when converting to suitable wav: {e}");
                         goodbye!("Error: failed to extract audio. Does this media have any?");
                     }
                 };
@@ -524,7 +520,7 @@ impl Task {
                 {
                     Ok(text) => text,
                     Err(e) => {
-                        log::error!("Whisper infer failed: {}", e);
+                        log::error!("Whisper infer failed: {e}");
                         goodbye!("Error: failed transcribing media.");
                     }
                 };
