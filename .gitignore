@@ -4,5 +4,6 @@
 */*sqlite*
 */deploy*.sh
 anti_nft_spam_bot/proxies.txt
+.cache
 
 .DS_Store
