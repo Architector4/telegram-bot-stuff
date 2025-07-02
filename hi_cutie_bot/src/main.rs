@@ -1,4 +1,4 @@
-use rand::{seq::SliceRandom, Rng};
+use rand::{seq::IndexedRandom, Rng};
 use regex::Regex;
 use std::fs;
 use teloxide::{
@@ -15,8 +15,6 @@ use once_cell::sync::Lazy;
 use tokio::time::{sleep, Duration};
 
 fn gen_password() -> String {
-    static ALPHABET: Lazy<Vec<char>> =
-        Lazy::new(|| (b'a'..=b'z').map(|c| c as char).collect::<Vec<_>>());
     static RESPONSES: &[&str] = &[
         " hi",
         " hhi",
@@ -28,14 +26,14 @@ fn gen_password() -> String {
         " aaaaaaaaaaaaaaaa",
         " pls 🥺",
     ];
-    let mut rng = rand::thread_rng();
-    let length = rng.gen_range(8..69);
+    let mut rng = rand::rng();
+    let length = rng.random_range(8..69);
 
     let mut password = (0..length)
-        .map(|_| ALPHABET.choose(&mut rng).unwrap())
+        .map(|_| rng.random_range('a'..='z'))
         .collect::<String>();
 
-    if rng.gen::<f64>() < 0.45 {
+    if rng.random_range(0.0..1.0) < 0.45 {
         let response = RESPONSES.choose(&mut rng).unwrap();
         password.push_str(response);
     }

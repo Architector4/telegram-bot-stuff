@@ -1014,9 +1014,9 @@ pub fn amen_break_media(
 
     let _ = status_report.send("Choosing an amen break...".to_string());
     let count = unfail!(std::fs::read_dir("amen-breaks")).count();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     use rand::Rng;
-    let which_to_pick = rng.gen_range(0..count);
+    let which_to_pick = rng.random_range(0..count);
     let Some(the_break) = unfail!(std::fs::read_dir("amen-breaks")).nth(which_to_pick) else {
         return Err("Failed to pick an amen break!".to_string());
     };
