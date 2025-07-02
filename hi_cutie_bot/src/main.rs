@@ -1,6 +1,6 @@
 use rand::{seq::IndexedRandom, Rng};
 use regex::Regex;
-use std::fs;
+use std::{fs, sync::LazyLock};
 use teloxide::{
     prelude::*,
     types::{
@@ -11,7 +11,6 @@ use teloxide::{
 use url::Url;
 
 use arch_bot_commons::*;
-use once_cell::sync::Lazy;
 use tokio::time::{sleep, Duration};
 
 fn gen_password() -> String {
@@ -34,7 +33,9 @@ fn gen_password() -> String {
         .collect::<String>();
 
     if rng.random_range(0.0..1.0) < 0.45 {
-        let response = RESPONSES.choose(&mut rng).unwrap();
+        let response = RESPONSES
+            .choose(&mut rng)
+            .expect("There is always multiple possible responses");
         password.push_str(response);
     }
 
@@ -51,13 +52,15 @@ async fn lol() {
 
     let bot = Bot::new(key);
 
-    static REGEXMOMENT: Lazy<regex::Regex> =
-        Lazy::new(|| Regex::new("(hi|hey)+,? +cutie.*").unwrap());
-    static REGEXMOMENT_HERBERT: Lazy<regex::Regex> =
-        Lazy::new(|| Regex::new("hi+,? +herbert.*").unwrap());
+    static REGEXMOMENT: LazyLock<regex::Regex> =
+        LazyLock::new(|| Regex::new("(hi|hey)+,? +cutie.*").expect("Regex will always be valid"));
+    static REGEXMOMENT_HERBERT: LazyLock<regex::Regex> =
+        LazyLock::new(|| Regex::new("hi+,? +herbert.*").expect("Regex will always be valid"));
     // Hardcoded file ID
-    static MOW_URL: Lazy<Url> =
-        Lazy::new(|| Url::parse("https://architector4.tilde.team/stuff/mow.ogg").unwrap());
+    static MOW_URL: LazyLock<Url> = LazyLock::new(|| {
+        Url::parse("https://architector4.tilde.team/stuff/mow.ogg")
+            .expect("URL will always be valid")
+    });
 
     log::info!("Creating the handler...");
 
