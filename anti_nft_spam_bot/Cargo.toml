@@ -15,7 +15,7 @@ log = "0.4.17"
 # Use "vendored" feature to work around that lmao
 native-tls = { version = "0.2.12", features = ["vendored"] }
 notify = { version = "8.0.0", default-features = false, features = ["macos_kqueue"] }
-reqwest = { version = "0.11.24", features = ["socks"] }
+reqwest = { version = "0.12.22", features = ["socks"] }
 sqlx = { version = "0.8.2", features = [
 	"sqlite",
 	"chrono",
