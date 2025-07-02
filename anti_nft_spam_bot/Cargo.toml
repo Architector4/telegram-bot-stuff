@@ -14,7 +14,7 @@ log = "0.4.17"
 # This seems to depend on OpenSSL 3.3.0, but Fedora Server 40 only has 3.2.1.
 # Use "vendored" feature to work around that lmao
 native-tls = { version = "0.2.12", features = ["vendored"] }
-notify = { version = "6.1.1", default-features = false, features = ["macos_kqueue"] }
+notify = { version = "8.0.0", default-features = false, features = ["macos_kqueue"] }
 reqwest = { version = "0.11.24", features = ["socks"] }
 sqlx = { version = "0.8.2", features = [
 	"sqlite",
