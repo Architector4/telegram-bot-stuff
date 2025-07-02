@@ -906,9 +906,8 @@ pub async fn create_review_notify(
         )],
     ]);
 
-    let mut notify_text = format!(
-        "New link(s) were added to review pool by {username} in {chatname}:\n"
-    );
+    let mut notify_text =
+        format!("New link(s) were added to review pool by {username} in {chatname}:\n");
 
     use std::fmt::Write;
 
@@ -927,8 +926,6 @@ pub async fn create_review_notify(
     )
     .is_err()
     {
-        log::error!(
-            "Failed notifying control chat of new marked sus link!\n{notify_text}"
-        );
+        log::error!("Failed notifying control chat of new marked sus link!\n{notify_text}");
     };
 }

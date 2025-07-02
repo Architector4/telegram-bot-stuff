@@ -216,9 +216,7 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
             };
 
             if !request_deleted {
-                log::error!(
-                    "ERROR when processing task: {e:#?}\nTask data: {task_data:#?}"
-                );
+                log::error!("ERROR when processing task: {e:#?}\nTask data: {task_data:#?}");
                 let _ = taskman
                     .bot
                     .archsendmsg(

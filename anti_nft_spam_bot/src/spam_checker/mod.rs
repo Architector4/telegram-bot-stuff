@@ -123,9 +123,7 @@ async fn check_inner(
 
     if let Some(url_looks_like_spam) = check_url_by_its_looks(url) {
         // Add it to the database.
-        log::debug!(
-            "Checked if URL {url} looks like a spam URL and got: {url_looks_like_spam:?}"
-        );
+        log::debug!("Checked if URL {url} looks like a spam URL and got: {url_looks_like_spam:?}");
 
         match url_looks_like_spam {
             IsSpam::Yes => {

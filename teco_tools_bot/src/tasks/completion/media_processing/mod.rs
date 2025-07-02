@@ -767,8 +767,8 @@ pub fn resize_video(
             frames_received += 1;
 
             if input_frame_count != 0 {
-                let _ = status_report
-                    .send(format!("Frame {frames_received} / {input_frame_count}"));
+                let _ =
+                    status_report.send(format!("Frame {frames_received} / {input_frame_count}"));
             } else {
                 let _ = status_report.send(format!("Frame {frames_received}"));
             }
