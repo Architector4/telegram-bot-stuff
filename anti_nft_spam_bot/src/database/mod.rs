@@ -88,6 +88,7 @@ impl Database {
         // domain (unique primary key, string)
         // example_url (string)
         // is_spam (0 for no, 1 for yes, 2 for unknown and needs review)
+        //          (2 should NOT usually happen here, but eh)
         // last_sent_to_review (date+time in UTC timezone in ISO 8601 format)
         // manually_reviewed (0 for no, 1 for yes)
         // from_spam_list (0 for no, 1 for yes)
@@ -417,44 +418,6 @@ impl Database {
         Ok(())
     }
 
-    /// Mark a domain as maybe spam, if it's not already marked as spam
-    /// and wasn't manually reviewed. Returns true if anything is actually done.
-    ///
-    /// Note that this adds a URL entry if one doesn't exist,
-    /// even if there's a meaningful domain entry.
-    async fn mark_domain_sus(
-        &self,
-        domain: &Domain,
-        example_url: Option<&Url>,
-    ) -> Result<bool, Error> {
-        let result = sqlx::query(
-            "
-            INSERT INTO domains(
-                domain,
-                example_url,
-                is_spam,
-                spam_checker_version
-            ) VALUES (?, ?, 2, ?)
-            ON CONFLICT DO
-            UPDATE SET
-                example_url=COALESCE(?, example_url),
-                is_spam=2,
-                spam_checker_version=?
-            WHERE is_spam=0 AND manually_reviewed=0;",
-        )
-        .bind(domain.as_str())
-        .bind(example_url.map(Url::as_str))
-        .bind(SPAM_CHECKER_VERSION)
-        .bind(example_url.map(Url::as_str))
-        .bind(SPAM_CHECKER_VERSION)
-        .execute(&self.pool)
-        .await?
-        .rows_affected()
-            > 0;
-
-        Ok(result)
-    }
-
     /// Inserts a URL into the database and tags it as spam or not.
     /// Overwrites the URL if it already exists.
     pub async fn add_url(
@@ -562,27 +525,21 @@ impl Database {
         }
         if let Some(domain) = domain {
             // Check the domain one.
-            if let Some(is_spam_domain) = self.is_domain_spam(domain, false).await? {
-                // Imagine a situation: t.me domain isn't marked as spam,
-                // and we're trying to mark t.me/joinchat/abcdef as suspicious.
-                // That *should* work, but doesn't without this check.
-                if is_spam_domain.1.as_ref() == Some(url) {
-                    let result = match is_spam_domain.0 {
-                        IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
-                        IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
-                        IsSpam::No => {
-                            let mark_result = !is_spam_domain.2
-                                && self.mark_domain_sus(domain, Some(url)).await?;
-                            if mark_result {
-                                MarkSusResult::Marked
-                            } else {
-                                MarkSusResult::ManuallyReviewedNotSpam
-                            }
+            if let Some(is_spam_domain) = dbg!(self.is_domain_spam(domain, false).await?) {
+                let result = match is_spam_domain.0 {
+                    IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
+                    IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
+                    IsSpam::No => {
+                        let mark_result = self.mark_url_sus(url).await?;
+                        if mark_result {
+                            MarkSusResult::Marked
+                        } else {
+                            MarkSusResult::ManuallyReviewedNotSpam
                         }
-                    };
+                    }
+                };
 
-                    return Ok(result);
-                }
+                return Ok(result);
             }
         }
 
@@ -1334,6 +1291,35 @@ mod tests {
             db.is_spam(&spam, None, false).await.unwrap(),
             Some((IsSpam::Yes, true))
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mark_url_sus_if_domain_marked() -> Ret {
+        // Scenario:
+        // 1. A domain example.org is marked as spam.
+        // 2. Someone tries to mark example.org/12345 as sus.
+        //
+        // They should get the "is already marked as spam" response.
+
+        let db = new_temp().await?;
+
+        let spam_url = parse_url_like_telegram("example.org/12345").unwrap();
+        let spam_domain = Domain::from_url(&spam_url).unwrap();
+
+        db.add_domain(&spam_domain, None, IsSpam::Yes, false, true)
+            .await?;
+        let sus_result = db.mark_sus(&spam_url, None).await?;
+        assert_eq!(sus_result, MarkSusResult::AlreadyMarkedSpam);
+
+        // However, if it's marked as *not* spam,
+        // then trying to mark sus *should* succeed.
+
+        db.add_domain(&spam_domain, None, IsSpam::No, false, true)
+            .await?;
+        let sus_result = db.mark_sus(&spam_url, None).await?;
+        assert_eq!(sus_result, MarkSusResult::Marked);
 
         Ok(())
     }
