@@ -127,6 +127,7 @@ async fn lol() {
     log::info!("Dispatching the dispatcher!");
 
     Dispatcher::builder(bot, handler)
+        .default_handler(|_| async {})
         .enable_ctrlc_handler()
         .build()
         .dispatch()

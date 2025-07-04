@@ -39,6 +39,7 @@ pub async fn entry() {
     log::info!("Dispatching the dispatcher!");
 
     Dispatcher::builder(bot, handler)
+        .default_handler(|_| async {})
         .dependencies(deps![db])
         .enable_ctrlc_handler()
         .build()

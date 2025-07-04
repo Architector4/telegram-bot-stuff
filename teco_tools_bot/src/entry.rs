@@ -65,6 +65,7 @@ Specifically, the expected parameters for the server are:
     log::info!("Dispatching the dispatcher!");
 
     Dispatcher::builder(bot, handler)
+        .default_handler(|_| async {})
         .dependencies(deps![taskman])
         .enable_ctrlc_handler()
         .build()
