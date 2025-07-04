@@ -2,6 +2,7 @@ use futures::Future;
 use teloxide::{
     payloads::SendMessageSetters,
     requests::Requester,
+    sugar::request::RequestReplyExt,
     types::{Message, MessageId, Recipient},
     Bot, RequestError,
 };
@@ -41,7 +42,7 @@ impl BotArchSendMsg for Bot {
                     .send_message(to_where.clone(), text)
                     .parse_mode(teloxide::types::ParseMode::Html);
                 if let Some(reply_to) = reply_to {
-                    request = request.reply_to_message_id(reply_to);
+                    request = request.reply_to(reply_to);
                 }
                 request.await
             });

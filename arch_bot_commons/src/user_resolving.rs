@@ -1,6 +1,6 @@
 use teloxide::{
     requests::Requester,
-    types::{ChatId, Message, Update, UpdateKind, User, UserId},
+    types::{ChatId, Message, Update, User, UserId},
     Bot, RequestError,
 };
 
@@ -22,7 +22,7 @@ fn get_potential_userids(message: &Message) -> Vec<UserId> {
 #[must_use]
 pub fn get_linkable_mentioned_users(message: &Message) -> Vec<&User> {
     let mut output = vec![];
-    if let Some(repliee) = message.reply_to_message().and_then(|m| m.from()) {
+    if let Some(repliee) = message.reply_to_message().and_then(|m| m.from.as_ref()) {
         output.push(repliee);
     }
 
@@ -140,7 +140,7 @@ pub trait MentionResolver {
     fn get_mentioned_users(&self, message: &Message) -> Vec<UserLike> {
         let mut output = vec![];
 
-        for user in get_linkable_mentioned_users(message) {
+        for user in message.mentioned_users() {
             output.push(UserLike::User(user.to_owned()));
         }
         for uid in get_potential_userids(message) {
@@ -154,41 +154,14 @@ pub trait MentionResolver {
                 output.push(UserLike::UnresolvedUsername(String::from(username)));
             }
         }
+
         output
     }
 
     /// See and log all users an update event has.
     fn see_users_from_update(&mut self, update: &Update) {
-        // Single user extraction
-        if let Some(u) = update.user() {
-            self.see_user(u);
-        }
-
-        match &update.kind {
-            UpdateKind::Message(message) | UpdateKind::EditedMessage(message) => {
-                // A message has multiple sources of User objects:
-                // The one it's from (was already handled);
-                // The one it's forwarded from;
-                if let Some(u) = message.forward_from_user() {
-                    self.see_user(u);
-                }
-                // The one it's replying to;
-                // The ones it mentions by link mentions;
-                for u in get_linkable_mentioned_users(message) {
-                    self.see_user(u);
-                }
-                // The ones mentioned by user IDs;
-                //get_potential_userids(message)
-                // It's possible to resolve those here and log
-                // users we find, but that would be too greedy.
-
-                // The ones it mentions by username mentions like `@Architector_4`.
-                //get_text_mentioned_users(message);
-                // The last one does not give us any new user objects, so it's useless here.
-            }
-            // The other kinds can only contain a single user and thus were handled by
-            // Update::user(&self) call above
-            _ => (),
+        for user in update.mentioned_users() {
+            self.see_user(user);
         }
     }
 }

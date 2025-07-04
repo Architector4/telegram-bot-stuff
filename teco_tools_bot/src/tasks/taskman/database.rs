@@ -192,7 +192,7 @@ impl Database {
         let queue_message_chat_id = queue_message.chat.id.0;
         let queue_message_id = queue_message.id.0;
 
-        let premium = if let Some(user) = request_message.from() {
+        let premium = if let Some(user) = &request_message.from {
             self.is_user_premium(user.id).await?
         } else {
             false

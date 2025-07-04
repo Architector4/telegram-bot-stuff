@@ -4,8 +4,8 @@ use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use html_escape::encode_text;
 
 use teloxide::{
-    payloads::{SendAnimationSetters, SendMessageSetters, SendVideoSetters},
     requests::Requester,
+    sugar::request::RequestReplyExt,
     types::{BotCommand, InputFile, Me, Message, UserId},
     Bot, RequestError,
 };
@@ -228,7 +228,7 @@ macro_rules! respond {
         $stuff
             .bot
             .send_message($stuff.message.chat.id, $text)
-            .reply_to_message_id($stuff.message.id)
+            .reply_to($stuff.message.id)
             .parse_mode(teloxide::types::ParseMode::Html)
             .await?
     };
@@ -680,14 +680,14 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
                 teloxide_retry!(
                     tp.bot
                         .send_animation(tp.message.chat.id, file.clone(),)
-                        .reply_to_message_id(tp.message.id)
+                        .reply_to(tp.message.id)
                         .await
                 )
             } else {
                 teloxide_retry!(
                     tp.bot
                         .send_video(tp.message.chat.id, file.clone())
-                        .reply_to_message_id(tp.message.id)
+                        .reply_to(tp.message.id)
                         .await
                 )
             };
@@ -745,7 +745,7 @@ fn to_gif(tp: TaskParams<'_>) -> impl Future<Output = Ret> + '_ {
 }
 
 async fn premium_inner(tp: TaskParams<'_>, premium: bool) -> Ret {
-    if tp.message.from().map(|x| x.id) != Some(OWNER_ID) {
+    if tp.message.from.as_ref().map(|x| x.id) != Some(OWNER_ID) {
         goodbye_desc!("");
     }
     let params = tp.get_params();
@@ -919,7 +919,7 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
     match tp
         .bot
         .send_message(tp.message.chat.id, response)
-        .reply_to_message_id(tp.message.id)
+        .reply_to(tp.message.id)
         .await
     {
         Ok(_) => (),

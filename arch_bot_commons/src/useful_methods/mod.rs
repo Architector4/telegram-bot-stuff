@@ -1,5 +1,5 @@
 mod split_msg;
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 pub use split_msg::*;
 
@@ -112,7 +112,7 @@ impl MessageStuff for Message {
         }
 
         if let Some(video_note) = self.video_note() {
-            if let Some(thumb) = &video_note.thumb {
+            if let Some(thumb) = &video_note.thumbnail {
                 return Some(MessageMediaInfo {
                     width: thumb.width,
                     height: thumb.height,
@@ -189,14 +189,14 @@ impl BotStuff for Bot {
         file: &FileMeta,
         to: &mut Vec<u8>,
     ) -> Result<(), RequestError> {
-        let file = self.get_file(&file.id).await?;
+        let file = self.get_file(file.id.clone()).await?;
         to.reserve_exact(file.size as usize);
         if file.is_local() {
             // From local bot API. Just read it as vec lmao
-            let mut file = std::fs::File::open(&file.path)?;
+            let mut file = std::fs::File::open(&file.path).map_err(Arc::new)?;
 
             use std::io::Read;
-            file.read_to_end(to)?;
+            file.read_to_end(to).map_err(Arc::new)?;
         } else {
             let mut stream = self.download_file_stream(&file.path);
 
@@ -212,15 +212,15 @@ impl BotStuff for Bot {
         &self,
         file: &FileMeta,
     ) -> Result<(PathBuf, Option<NamedTempFile>), RequestError> {
-        let file = self.get_file(&file.id).await?;
+        let file = self.get_file(file.id.clone()).await?;
         if file.is_local() {
             // If file is local, just return that.
             Ok((std::path::PathBuf::from(file.path), None))
         } else {
             // If the file is remote, make a tempfile and use that.
-            let tempfile = tempfile::NamedTempFile::new()?;
+            let tempfile = tempfile::NamedTempFile::new().map_err(Arc::new)?;
 
-            let reopened = tempfile.reopen()?;
+            let reopened = tempfile.reopen().map_err(Arc::new)?;
             let mut tokio_file = tokio::fs::File::from_std(reopened);
             self.download_file(&file.path, &mut tokio_file).await?;
 

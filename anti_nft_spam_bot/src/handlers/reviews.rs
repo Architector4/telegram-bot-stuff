@@ -2,9 +2,13 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use teloxide::{
-    payloads::{AnswerCallbackQuerySetters, EditMessageTextSetters, SendMessageSetters},
+    payloads::{AnswerCallbackQuerySetters, EditMessageTextSetters},
     requests::Requester,
-    types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, User},
+    sugar::request::{RequestLinkPreviewExt, RequestReplyExt},
+    types::{
+        CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, MaybeInaccessibleMessage,
+        Message, User,
+    },
     ApiError, Bot, RequestError,
 };
 
@@ -71,7 +75,7 @@ pub async fn handle_review_command(
     database: &Database,
 ) -> Result<bool, RequestError> {
     // Check if it's sent by a user. Otherwise, we don't care.
-    let Some(user) = message.from() else {
+    let Some(user) = &message.from else {
         return Ok(false);
     };
 
@@ -85,7 +89,7 @@ pub async fn handle_review_command(
 
     let message = bot
         .send_message(message.chat.id, "Loading review keyboard...")
-        .reply_to_message_id(message.id)
+        .reply_to(message.id)
         .await?;
 
     edit_message_into_a_review(bot, database, &message).await?;
@@ -208,15 +212,19 @@ pub async fn parse_callback_query(
         goodbye!("No query data.");
     };
 
+    let message = match &query.message {
+        Some(MaybeInaccessibleMessage::Regular(message)) => Some(message.as_ref()),
+        Some(MaybeInaccessibleMessage::Inaccessible(_)) | None => None,
+    };
+
     let user = query.from;
 
-    let responses =
-        match ReviewResponse::from_str(query_data.as_str(), &db, query.message.as_ref()).await {
-            Ok(r) => r,
-            Err(e) => {
-                goodbye!(&format!("Invalid query data: {e}"));
-            }
-        };
+    let responses = match ReviewResponse::from_str(query_data.as_str(), &db, message).await {
+        Ok(r) => r,
+        Err(e) => {
+            goodbye!(&format!("Invalid query data: {e}"));
+        }
+    };
 
     if responses.is_empty() {
         goodbye!("Nothing to mark here...???");
@@ -228,14 +236,14 @@ pub async fn parse_callback_query(
         }
     }
 
-    let Some(message) = query.message else {
+    let Some(message) = message else {
         // May happen if the message is too old
         goodbye!("Review taken. Please send /review to perform more reviews.");
     };
 
     // Avoid editing the message into reviews it's not in private i.e. in work chat
     if message.chat.is_private() {
-        edit_message_into_a_review(&bot, &db, &message).await?;
+        edit_message_into_a_review(&bot, &db, message).await?;
     } else {
         // It's a notification about newly marked URLs that was just reviewed on.
         // Edit it to get rid of the buttons and stuff.
@@ -256,7 +264,7 @@ pub async fn parse_callback_query(
         }
 
         bot.edit_message_text(message.chat.id, message.id, text)
-            .disable_web_page_preview(true)
+            .disable_link_preview(true)
             .await?;
     }
     goodbye!();
@@ -338,7 +346,7 @@ pub async fn apply_review_unverified(
         let log_message = format!("{} (userid {})\n{}", name, user.id, response);
 
         bot.send_message(REVIEW_LOG_CHANNEL_ID, log_message)
-            .disable_web_page_preview(true)
+            .disable_link_preview(true)
             .await?;
     }
 

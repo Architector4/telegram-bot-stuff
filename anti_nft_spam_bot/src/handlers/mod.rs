@@ -4,7 +4,11 @@ use arch_bot_commons::{teloxide_retry, useful_methods::BotArchSendMsg};
 use html_escape::encode_text;
 use teloxide::{
     prelude::*,
-    types::{BotCommand, ChatMember, Me, MessageEntityKind, MessageEntityRef, MessageId},
+    sugar::request::RequestLinkPreviewExt,
+    types::{
+        BotCommand, ChatMember, CopyTextButton, Me, MessageEntityKind, MessageEntityRef, MessageId,
+        SwitchInlineQueryChosenChat,
+    },
     ApiError, RequestError,
 };
 use url::Url;
@@ -75,21 +79,29 @@ fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
 }
 
 /// Get a domain and a URL from this button, if available.
-fn get_button_url_domain(button: &teloxide::types::InlineKeyboardButton) -> Option<(&Url, Domain)> {
+fn get_button_url_domain(
+    button: &teloxide::types::InlineKeyboardButton,
+) -> Option<(Cow<Url>, Domain)> {
     use teloxide::types::InlineKeyboardButtonKind as Kind;
     use teloxide::types::{LoginUrl, WebAppInfo};
     let url = match &button.kind {
         Kind::Url(url)
         | Kind::LoginUrl(LoginUrl { url, .. })
-        | Kind::WebApp(WebAppInfo { url }) => url,
+        | Kind::WebApp(WebAppInfo { url }) => Cow::Borrowed(url),
+        Kind::SwitchInlineQuery(string) | Kind::CopyText(CopyTextButton { text: string }) => {
+            Cow::Owned(parse_url_like_telegram(string).ok()?)
+        }
+        Kind::SwitchInlineQueryChosenChat(SwitchInlineQueryChosenChat {
+            query: opt_string,
+            ..
+        }) => Cow::Owned(parse_url_like_telegram(opt_string.as_ref()?).ok()?),
         Kind::CallbackData(..)
-        | Kind::SwitchInlineQuery(..)
         | Kind::Pay(..)
         | Kind::SwitchInlineQueryCurrentChat(..)
         | Kind::CallbackGame(..) => return None,
     };
 
-    let Some(domain) = Domain::from_url(url) else {
+    let Some(domain) = Domain::from_url(&url) else {
         // Does not have a domain. An IP address link?
         log::warn!("Received a URL in a button without a domain: {url}");
         return None;
@@ -106,7 +118,7 @@ async fn is_sender_admin(bot: &Bot, message: &Message) -> Result<bool, RequestEr
 
     // First check if a chat sent this, i.e. an anonymous admin.
     // In such a case, "from()" returns @GroupAnonymousBot for backwards compatibility.
-    let is_admin = if let Some(sender_chat) = message.sender_chat() {
+    let is_admin = if let Some(sender_chat) = &message.sender_chat {
         if sender_chat.id == message.chat.id {
             // If it's posted by the chat itself, it's probably an anonymous admin.
             true
@@ -117,7 +129,7 @@ async fn is_sender_admin(bot: &Bot, message: &Message) -> Result<bool, RequestEr
 
             chat_full.linked_chat_id() == Some(sender_chat.id.0)
         }
-    } else if let Some(user) = message.from() {
+    } else if let Some(user) = &message.from {
         let ChatMember { kind, .. } = bot.get_chat_member(message.chat.id, user.id).await?;
         kind.is_privileged()
     } else {
@@ -153,7 +165,7 @@ async fn handle_message_inner(
     database: &Arc<Database>,
     is_replied_to: bool,
 ) -> Result<(), RequestError> {
-    if let Some(sender) = message.from() {
+    if let Some(sender) = &message.from {
         if sender.id == me.id {
             // Ignore messages sent by ourselves.
             return Ok(());
@@ -233,7 +245,7 @@ async fn handle_message_inner(
                     let Some((url, domain)) = get_button_url_domain(button) else {
                         continue;
                     };
-                    check_url!(url, &domain, 'outer);
+                    check_url!(url.as_ref(), &domain, 'outer);
                 }
             }
         }
@@ -411,11 +423,13 @@ async fn gather_suspicion(
             };
 
             if message
-                .from()
-                .is_some_and(|x| Some(x.id) == reply_to.from().map(|x| x.id))
+                .from
+                .as_ref()
+                .is_some_and(|x| Some(x.id) == reply_to.from.as_ref().map(|x| x.id))
                 || message
-                    .sender_chat()
-                    .is_some_and(|x| Some(x.id) == reply_to.sender_chat().map(|x| x.id))
+                    .sender_chat
+                    .as_ref()
+                    .is_some_and(|x| Some(x.id) == reply_to.sender_chat.as_ref().map(|x| x.id))
             {
                 // The sender is replying to themselves and knows what they're doing.
                 break 'reject_from_admin;
@@ -569,7 +583,7 @@ async fn gather_suspicion(
                             &replied_message,
                             replied_to_sent_by_admin,
                             &replied_to_sender_name,
-                            Cow::Borrowed(url),
+                            url,
                             &domain
                         );
                     }
@@ -743,7 +757,7 @@ async fn handle_command(
             if !(message.chat.is_private() || message.chat.id == CONTROL_CHAT_ID) {
                 return Ok(false);
             }
-            let Some(sender) = message.from() else {
+            let Some(sender) = &message.from else {
                 return Ok(false);
             };
             if !reviews::authenticate_control(bot, sender).await? {
@@ -921,7 +935,7 @@ pub async fn create_review_notify(
         bot.send_message(CONTROL_CHAT_ID, &notify_text)
             .parse_mode(teloxide::types::ParseMode::Html)
             .reply_markup(keyboard.clone())
-            .disable_web_page_preview(true)
+            .disable_link_preview(true)
             .await
     )
     .is_err()

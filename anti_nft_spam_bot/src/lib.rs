@@ -40,14 +40,14 @@ pub fn parse_url_like_telegram(string: &str) -> Result<Url, url::ParseError> {
 pub fn sender_name_prettyprint(message: &Message, with_id: bool) -> String {
     let mut userid = None;
     let mut chatid = None;
-    let mut name = if let Some(user) = message.from() {
+    let mut name = if let Some(user) = &message.from {
         userid = Some(user.id);
         if let Some(username) = &user.username {
             format!("@{username}")
         } else {
             user.full_name().to_string()
         }
-    } else if let Some(chat) = message.sender_chat() {
+    } else if let Some(chat) = &message.sender_chat {
         chatid = Some(chat.id);
         if let Some(username) = chat.username() {
             format!("@{} (chatid {})", username, chat.id)

@@ -3,6 +3,7 @@ use regex::Regex;
 use std::{fs, sync::LazyLock};
 use teloxide::{
     prelude::*,
+    sugar::request::RequestReplyExt,
     types::{
         InlineQueryResult, InlineQueryResultArticle, InlineQueryResultVoice, InputFile,
         InputMessageContent, InputMessageContentText, Me,
@@ -67,7 +68,7 @@ async fn lol() {
     let handler = dptree::entry()
         .branch(
             Update::filter_inline_query().endpoint(|bot: Bot, q: InlineQuery| async move {
-                bot.answer_inline_query(&q.id, {
+                bot.answer_inline_query(q.id, {
                     let mut results = (0..10)
                         .map(|i| {
                             let p = gen_password();
@@ -97,9 +98,7 @@ async fn lol() {
                     "(this bot answers to \"hi, cutie!\" messages in DMs and group chats)";
                 if let Some(text) = msg.text() {
                     if msg.chat.is_private() && text == "/start" {
-                        bot.send_message(msg.chat.id, HELP)
-                            .reply_to_message_id(msg.id)
-                            .await?;
+                        bot.send_message(msg.chat.id, HELP).reply_to(msg.id).await?;
                     } else {
                         let username = String::from("@") + me.username();
                         let text = text.to_lowercase().replace(username.as_str(), "");
@@ -112,11 +111,11 @@ async fn lol() {
                             sleep(Duration::from_secs_f64(rand::random::<f64>() * 3.0 + 2.0)).await;
 
                             bot.send_message(msg.chat.id, gen_password())
-                                .reply_to_message_id(msg.id)
+                                .reply_to(msg.id)
                                 .await?;
                         } else if REGEXMOMENT_HERBERT.is_match(text) {
-                            bot.send_voice(msg.chat.id, InputFile::file_id(MOW_URL.to_owned()))
-                                .reply_to_message_id(msg.id)
+                            bot.send_voice(msg.chat.id, InputFile::url(MOW_URL.to_owned()))
+                                .reply_to(msg.id)
                                 .await?;
                         }
                     }

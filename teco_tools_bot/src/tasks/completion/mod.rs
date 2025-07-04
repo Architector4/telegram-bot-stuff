@@ -3,10 +3,8 @@ use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use html_escape::encode_text;
 use media_processing::whisper;
 use teloxide::{
-    payloads::{SendAnimationSetters, SendPhotoSetters, SendStickerSetters, SendVideoSetters},
-    requests::Requester,
-    types::InputFile,
-    ApiError, Bot, RequestError,
+    requests::Requester, sugar::request::RequestReplyExt, types::InputFile, ApiError, Bot,
+    RequestError,
 };
 use tokio::sync::watch::Sender;
 
@@ -292,20 +290,20 @@ impl Task {
                                 data.message.chat.id,
                                 InputFile::memory(send).file_name("amogus.mp4"),
                             )
-                            .reply_to_message_id(data.message.id)
+                            .reply_to(data.message.id)
                             .await
                         } else {
                             bot.send_video(data.message.chat.id, InputFile::memory(send))
-                                .reply_to_message_id(data.message.id)
+                                .reply_to(data.message.id)
                                 .await
                         }
                     } else if should_be_sticker {
                         bot.send_sticker(data.message.chat.id, InputFile::memory(send))
-                            .reply_to_message_id(data.message.id.0)
+                            .reply_to(data.message.id)
                             .await
                     } else {
                         bot.send_photo(data.message.chat.id, InputFile::memory(send))
-                            .reply_to_message_id(data.message.id)
+                            .reply_to(data.message.id)
                             .await
                     };
 
@@ -451,7 +449,7 @@ impl Task {
                     let send = video_data.clone();
 
                     bot.send_video(data.message.chat.id, InputFile::memory(send))
-                        .reply_to_message_id(data.message.id)
+                        .reply_to(data.message.id)
                         .await
                 })?;
                 Ok(())

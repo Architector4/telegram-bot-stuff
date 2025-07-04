@@ -117,13 +117,13 @@ pub fn print_chat(chat: &Chat) -> Option<String> {
 /// are posting anonymously or as a channel.
 #[must_use]
 pub fn print_sender(message: &Message) -> (String, Option<MessageEntity>) {
-    match message.from() {
+    match &message.from {
         Some(user) => print_user(user),
         None => (
             {
                 static ANONYMOUS_ADMIN: &str = "Anonymous admin";
                 match message.author_signature() {
-                    None => match message.sender_chat() {
+                    None => match &message.sender_chat {
                         None => ANONYMOUS_ADMIN.into(),
                         Some(chat) => {
                             if chat.id == message.chat.id {
@@ -168,7 +168,7 @@ macro_rules! teloxide_retry {
             let result = $what;
             if let Err(e) = &result {
                 if let teloxide::RequestError::RetryAfter(x) = e {
-                    tokio::time::sleep(*x).await;
+                    tokio::time::sleep(x.duration()).await;
                 } else {
                     let teloxide::RequestError::Network(_) = e else {
                         break result;

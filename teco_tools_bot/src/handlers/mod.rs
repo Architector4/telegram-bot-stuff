@@ -7,6 +7,7 @@ use std::sync::Arc;
 use teloxide::{
     payloads::{EditMessageTextSetters, SendMessageSetters},
     requests::Requester,
+    sugar::request::{RequestLinkPreviewExt, RequestReplyExt},
     types::{Me, Message},
     Bot, RequestError,
 };
@@ -32,7 +33,7 @@ pub async fn handle_new_message(
     message: Message,
     taskman: Arc<Taskman>,
 ) -> Result<(), RequestError> {
-    let sender_id = message.from().map(|from| from.id);
+    let sender_id = message.from.as_ref().map(|from| from.id);
     // Bot ignores messages made by itself.
     if sender_id == Some(me.id) {
         return Ok(());
@@ -43,8 +44,8 @@ pub async fn handle_new_message(
         Err(e) => {
             if !e.is_empty() {
                 bot.send_message(message.chat.id, e.cancel_to_error().to_string())
-                    .disable_web_page_preview(true)
-                    .reply_to_message_id(message.id)
+                    .disable_link_preview(true)
+                    .reply_to(message.id)
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .await?;
             }
@@ -85,7 +86,7 @@ pub async fn handle_new_message(
                 )
             },
         )
-        .reply_to_message_id(message.id)
+        .reply_to(message.id)
         .await?;
 
         return Ok(());
@@ -110,7 +111,7 @@ pub async fn handle_new_message(
     // The additional seconds should end up with the bot prioritizing new task request messages
     // over completing tasks.
     let slow_mode_delay =
-        slow_mode_delay.map(|x| chrono::Duration::seconds(x.saturating_add(3).into()));
+        slow_mode_delay.map(|x| chrono::Duration::seconds(x.seconds().saturating_add(3).into()));
     // Convert that into a datetime when that duration expires.
     let delay_processing_until = slow_mode_delay.map(|x| chrono::Utc::now() + x);
 
@@ -125,8 +126,8 @@ pub async fn handle_new_message(
 
     let queue_response_message = teloxide_retry!(
         bot.send_message(message.chat.id, &response)
-            .reply_to_message_id(message.id)
-            .disable_web_page_preview(true)
+            .reply_to(message.id)
+            .disable_link_preview(true)
             .parse_mode(teloxide::types::ParseMode::Html)
             .await
     )?;
@@ -139,7 +140,7 @@ pub async fn handle_new_message(
                 "Please reply with the command to each media separately."
             ),
         )
-        .reply_to_message_id(message.id)
+        .reply_to(message.id)
         .parse_mode(teloxide::types::ParseMode::Html)
         .await?;
     }
@@ -198,7 +199,7 @@ pub async fn handle_edited_message(
                     "Canceling or editing parameters is not possible at the moment."
                 ),
             )
-            .reply_to_message_id(message.id)
+            .reply_to(message.id)
             .parse_mode(teloxide::types::ParseMode::Html)
             .await?;
 
@@ -218,7 +219,7 @@ pub async fn handle_edited_message(
             if cancelling {
                 if let TaskError::Cancel(_) = e {
                     bot.send_message(message.chat.id, e.to_string())
-                        .reply_to_message_id(message.id)
+                        .reply_to(message.id)
                         .parse_mode(teloxide::types::ParseMode::Html)
                         .await?;
                 }
@@ -246,7 +247,7 @@ pub async fn handle_edited_message(
                 ));
                 let edit_response = bot
                     .send_message(message.chat.id, e_txt)
-                    .reply_to_message_id(message.id)
+                    .reply_to(message.id)
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .await?;
 
@@ -287,7 +288,7 @@ pub async fn handle_edited_message(
             taskdata.queue_message_id,
             response,
         )
-        .disable_web_page_preview(true)
+        .disable_link_preview(true)
         .parse_mode(teloxide::types::ParseMode::Html)
         .await;
 
