@@ -139,6 +139,72 @@ async fn is_sender_admin(bot: &Bot, message: &Message) -> Result<bool, RequestEr
     Ok(is_admin)
 }
 
+/// Returns whether or not bad links were present,
+/// and any sus links spotted along the way.
+pub async fn does_message_have_bad_links(
+    bot: &Bot,
+    message: &Message,
+    database: &Arc<Database>,
+) -> Result<(bool, Vec<Url>), RequestError> {
+    // Get message "entities".
+    let entities = message
+        .parse_entities()
+        .or_else(|| message.parse_caption_entities())
+        .unwrap_or_default();
+
+    let inline_kb = message.reply_markup().map(|x| &x.inline_keyboard);
+    let the_unholy_links_iterator = entities
+        .iter()
+        .filter_map(get_entity_url_domain)
+        .map(|x| (Cow::Owned(x.0), x.1))
+        .chain(
+            inline_kb
+                .iter()
+                .flat_map(|x| x.iter())
+                .flat_map(|x| x.iter())
+                .filter_map(get_button_url_domain),
+        );
+
+    let mut sus_links_present: Vec<Url> = Vec::new();
+
+    for (url, domain) in the_unholy_links_iterator {
+        log::debug!("Spotted URL with domain {domain}");
+
+        let Some((is_spam, from_db)) = crate::spam_checker::check(database, &domain, &url).await
+        else {
+            continue;
+        };
+
+        if is_spam == IsSpam::Maybe {
+            sus_links_present.push(url.as_ref().clone());
+
+            if !from_db {
+                // Checker above marked the URL as maybe spam. Notify the squad.
+                create_review_notify(bot, database, message, std::iter::once(url.as_ref()), true)
+                    .await;
+            }
+        }
+
+        if is_spam == IsSpam::Yes {
+            return Ok((true, sus_links_present));
+        }
+    }
+
+    // This message *itself* might not have bad links, but it may be a reply across chats
+    // to a message that does, with a plea to click on the reply. Handle that too.
+    if let Some(reply_to) = message.reply_to_message() {
+        if reply_to.chat.id != message.chat.id {
+            let result = Box::pin(does_message_have_bad_links(bot, reply_to, database)).await?;
+            sus_links_present.extend_from_slice(&result.1);
+            if result.0 {
+                return Ok((true, sus_links_present));
+            }
+        }
+    }
+
+    Ok((false, sus_links_present))
+}
+
 pub async fn handle_message(
     bot: Bot,
     me: Me,
@@ -186,70 +252,8 @@ async fn handle_message_inner(
     }
 
     // Check if it has any links we want to ban.
-
-    // Get message "entities".
-    let entities = message
-        .parse_entities()
-        .or_else(|| message.parse_caption_entities())
-        .unwrap_or_default();
-
-    let mut bad_links_present = false;
-
-    let mut sus_links_present: Vec<Url> = Vec::new();
-
-    // Two loops below iterate over links, but need to do the same thing.
-    // Rather than duplicate the code inside the loops, I'm defining a macro
-    // that would do this for me.
-    //
-    // Ideally I'd just make an iterator over all entities and then inline keyboard
-    // buttons that would do this for me, but ehhhhhhhhhhhhhhhhhh
-    macro_rules! check_url {
-        ($url: expr, $domain: expr, $loop_to_break: tt) => {
-            log::debug!("Spotted URL with domain {}", $domain);
-
-            let Some((is_spam, from_db)) =
-                crate::spam_checker::check(database, $domain, $url).await
-            else {
-                continue;
-            };
-
-            if is_spam == IsSpam::Maybe {
-                sus_links_present.push($url.clone());
-
-                if !from_db {
-                    // Checker above marked the URL as maybe spam. Notify the squad.
-                    create_review_notify(bot, database, message, std::iter::once($url), true).await;
-                }
-            }
-
-            if is_spam == IsSpam::Yes {
-                bad_links_present = true;
-                break $loop_to_break;
-            }
-        };
-    }
-
-    // Scan all URLs in a message...
-    'thaloop: for entity in &entities {
-        let Some((url, domain)) = get_entity_url_domain(entity) else {
-            continue;
-        };
-        check_url!(&url, &domain, 'thaloop);
-    }
-
-    // If didn't find anything, also check all the buttons on the message for links.
-    if !bad_links_present {
-        if let Some(markup) = message.reply_markup() {
-            'outer: for row in &markup.inline_keyboard {
-                for button in row {
-                    let Some((url, domain)) = get_button_url_domain(button) else {
-                        continue;
-                    };
-                    check_url!(url.as_ref(), &domain, 'outer);
-                }
-            }
-        }
-    }
+    let (bad_links_present, sus_links_present) =
+        does_message_have_bad_links(bot, message, database).await?;
 
     let is_in_control_chat = message.chat.id == CONTROL_CHAT_ID;
 
