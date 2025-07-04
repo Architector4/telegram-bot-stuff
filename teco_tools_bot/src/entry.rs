@@ -25,7 +25,7 @@ pub async fn entry() {
     let bot = Bot::new(key);
 
     let bot = if USE_LOCAL_API {
-        bot.set_api_url(url::Url::parse("http://127.0.0.1:8081/tbas").unwrap())
+        bot.set_api_url(url::Url::parse("http://127.0.0.1:8081/").unwrap())
     } else {
         bot
     };
