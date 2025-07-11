@@ -21,6 +21,6 @@ sqlx = { version = "0.8.2", features = [
 	"chrono",
 	"runtime-tokio-rustls",
 ] }
-teloxide = "0.16.0"
+teloxide = "0.17.0"
 tokio = { version = "1.21.2", features = ["full"] }
 url = "2.3.1"
