@@ -907,14 +907,7 @@ fn single_dimension_parser_test() {
 /// parse and compute the percentage of those dimensions
 /// and return result.
 fn percentage_parser(data: &str, starting_dimensions: (i32, i32)) -> Option<(i32, i32, f32)> {
-    let percent = data.find('%')?;
-
-    // Check for garbage after the % sign.
-    if (data.len() - '%'.len_utf8()) != percent {
-        return None;
-    }
-
-    let percentage: f32 = data[0..percent].parse().ok()?;
+    let percentage: f32 = data.trim_end_matches('%').parse().ok()?;
     let width = perc_calc(percentage, starting_dimensions.0)?;
     let height = perc_calc(percentage, starting_dimensions.1)?;
 
@@ -933,7 +926,7 @@ fn percentage_parser_test() {
     );
     assert_eq!(percentage_parser("50%", (100, 150)), Some((50, 75, 50.0)));
     assert_eq!(percentage_parser("50%woidahjsod", (100, 150)), None);
-    assert_eq!(percentage_parser("6", (100, 150)), None);
+    assert_eq!(percentage_parser("50", (100, 150)), Some((50, 75, 50.0)));
 
     assert_eq!(
         percentage_parser("-50%", (100, 150)),
