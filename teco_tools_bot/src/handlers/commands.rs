@@ -972,6 +972,10 @@ async fn spoiler(tp: TaskParams<'_>) -> Ret {
             goodbye_err!("Audio messages are unsupported.");
         }
 
+        if message.document().is_some() {
+            goodbye_err!("Files are unsupported.");
+        }
+
         if let Some(video) = message
             .video()
             .map(|x| &x.file)
