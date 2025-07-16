@@ -1,9 +1,15 @@
-use std::{future::Future, io::Write, pin::Pin};
+use std::{
+    future::Future,
+    io::Write,
+    pin::Pin,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use html_escape::encode_text;
 
 use teloxide::{
+    payloads::{SendAnimationSetters, SendPhotoSetters, SendVideoSetters},
     requests::Requester,
     sugar::request::RequestReplyExt,
     types::{BotCommand, InputFile, Me, Message, UserId},
@@ -22,18 +28,19 @@ use crate::{
 pub const COMMANDS: &[Command] = &[
     START,
     HELP,
+    AMENBREAK,
     AMOGUS,
     DISTORT,
     OCR,
-    TRANSCRIBE,
-    AMENBREAK,
     RESIZE,
     REVERSE_TEXT,
     ROT_TEXT,
+    SPOILER,
     TO_CUSTOM_EMOJI,
+    TO_GIF,
     TO_STICKER,
     TO_VIDEO,
-    TO_GIF,
+    TRANSCRIBE,
     ____SEPARATOR,
     PREMIUM,
     UNPREMIUM,
@@ -821,6 +828,7 @@ async fn amenbreak(tp: TaskParams<'_>) -> Ret {
 
     Ok(Ok(temp_task))
 }
+
 pub const TRANSCRIBE: Command = Command {
     callname: "/transcribe",
     description: "Transcribe speech in input media to text with Whisper AI.",
@@ -931,6 +939,79 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
         Err(e) => Err(e)?,
     };
     goodbye!();
+}
+
+pub const SPOILER: Command = Command {
+    callname: "/spoiler <caption>",
+    description: "Hide a media within a spoiler with a specified caption, if any.",
+    function: wrap!(spoiler),
+    hidden: false,
+};
+async fn spoiler(tp: TaskParams<'_>) -> Ret {
+    let found_nothing = AtomicBool::new(false);
+    // Try to find and spoiler a media in this message.
+    let spoiler_for_message = async |message: &Message| -> Ret {
+        if let Some(photo) = message.find_biggest_photo() {
+            tp.bot
+                .send_photo(
+                    tp.message.chat.id,
+                    InputFile::file_id(photo.file.id.clone()),
+                )
+                .reply_to(tp.message.id)
+                .has_spoiler(true)
+                .caption(tp.get_params())
+                .await?;
+            goodbye!();
+        }
+
+        if message.sticker().is_some() {
+            goodbye_err!("Stickers are unsupported.");
+        }
+
+        if message.voice().is_some() || message.audio().is_some() {
+            goodbye_err!("Audio messages are unsupported.");
+        }
+
+        if let Some(video) = message
+            .video()
+            .map(|x| &x.file)
+            .or_else(|| message.video_note().map(|x| &x.file))
+        {
+            tp.bot
+                .send_video(tp.message.chat.id, InputFile::file_id(video.id.clone()))
+                .reply_to(tp.message.id)
+                .has_spoiler(true)
+                .caption(tp.get_params())
+                .await?;
+            goodbye!();
+        }
+
+        if let Some(gif) = message.animation() {
+            tp.bot
+                .send_animation(tp.message.chat.id, InputFile::file_id(gif.file.id.clone()))
+                .reply_to(tp.message.id)
+                .has_spoiler(true)
+                .caption(tp.get_params())
+                .await?;
+            goodbye!();
+        }
+
+        found_nothing.store(true, Ordering::Relaxed);
+        goodbye_err!(concat!(
+            "can't find a video or an image. ",
+            "This command needs to be used as either a reply or caption to one."
+        ));
+    };
+
+    let result = spoiler_for_message(tp.message).await;
+
+    if found_nothing.load(Ordering::Relaxed) {
+        if let Some(reply_to) = tp.message.reply_to_message() {
+            return spoiler_for_message(reply_to).await;
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]
