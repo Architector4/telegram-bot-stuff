@@ -447,7 +447,7 @@ async fn amogus(tp: TaskParams<'_>) -> Ret {
 
 async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
     // Image and video resize should have the same help.
-    let temp_task = Task::default_image_resize(1, 1, resize_type, ImageFormat::Preserve);
+    let temp_task = Task::default_image_resize(1, 1, resize_type.clone(), ImageFormat::Preserve);
     print_help!(tp, temp_task);
 
     let media = tp.message.get_media_info();
@@ -964,8 +964,23 @@ async fn spoiler(tp: TaskParams<'_>) -> Ret {
             goodbye!();
         }
 
-        if message.sticker().is_some() {
-            goodbye_err!("Stickers are unsupported.");
+        if let Some(sticker) = message.sticker() {
+            if sticker.is_animated() {
+                goodbye_err!("Cannot work with animated stickers.");
+            }
+            if sticker.is_video() {
+                return Ok(Ok(Task::default_to_spoilered_video(
+                    sticker.width.into(),
+                    sticker.height.into(),
+                    tp.get_params().to_string(),
+                )));
+            } else {
+                return Ok(Ok(Task::default_to_spoilered_image(
+                    sticker.width.into(),
+                    sticker.height.into(),
+                    tp.get_params().to_string(),
+                )));
+            }
         }
 
         if message.voice().is_some() || message.audio().is_some() {

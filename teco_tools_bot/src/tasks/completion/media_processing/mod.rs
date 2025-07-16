@@ -116,7 +116,7 @@ pub fn resize_image(
         ResizeType::Stretch => {
             wand.resize_image(width, height, FilterType::Lagrange)?;
         }
-        ResizeType::Fit | ResizeType::ToSticker => {
+        ResizeType::Fit | ResizeType::ToSticker | ResizeType::ToSpoileredMedia { .. } => {
             wand.fit(width, height);
         }
         ResizeType::Crop | ResizeType::ToCustomEmoji => {
@@ -499,7 +499,7 @@ pub fn resize_video(
     inputfile: &Path,
     (width, height): (isize, isize),
     rotation: f64,
-    resize_type: ResizeType,
+    mut resize_type: ResizeType,
     strip_audio: bool,
     vibrato_hz: f64,
     vibrato_depth: f64,
@@ -515,6 +515,8 @@ pub fn resize_video(
             }
         };
     }
+
+    resize_type.strip_caption();
 
     // First, compute some stuff that will be in use during resizing.
 
@@ -584,63 +586,65 @@ pub fn resize_video(
         count_video_frames_and_framerate_and_audio_and_length(inputfile, false)
     );
 
-    let converting_function = move |(count, frame): (_, Result<Vec<u8>, _>)| match frame {
-        Ok(frame) => {
-            let curved_width = resize_curve.apply_resize_for(
-                count,
-                input_frame_count,
-                input_dimensions.0 as f64,
-                width as f64,
-            );
-            let curved_height = resize_curve.apply_resize_for(
-                count,
-                input_frame_count,
-                input_dimensions.1 as f64,
-                height as f64,
-            );
-            let curved_rotation =
-                resize_curve.apply_resize_for(count, input_frame_count, 0.0, rotation);
+    let converting_function =
+        move |(count, frame): (_, Result<Vec<u8>, _>), resize_type: ResizeType| match frame {
+            Ok(frame) => {
+                let curved_width = resize_curve.apply_resize_for(
+                    count,
+                    input_frame_count,
+                    input_dimensions.0 as f64,
+                    width as f64,
+                );
+                let curved_height = resize_curve.apply_resize_for(
+                    count,
+                    input_frame_count,
+                    input_dimensions.1 as f64,
+                    height as f64,
+                );
+                let curved_rotation =
+                    resize_curve.apply_resize_for(count, input_frame_count, 0.0, rotation);
 
-            let curved_quality_f64 = resize_curve.apply_resize_for(
-                count,
-                input_frame_count,
-                100.0,
-                quality.get().into(),
-            );
-            let curved_quality = NonZeroU8::new(curved_quality_f64 as u8).unwrap_or(NonZeroU8::MIN);
+                let curved_quality_f64 = resize_curve.apply_resize_for(
+                    count,
+                    input_frame_count,
+                    100.0,
+                    quality.get().into(),
+                );
+                let curved_quality =
+                    NonZeroU8::new(curved_quality_f64 as u8).unwrap_or(NonZeroU8::MIN);
 
-            // Check if this operation changes the image at all.
-            // If the dimensions (both target and output) and rotation
-            // are the same, it doesn't.
-            let input_dimensions = get_bmp_width_height(&frame);
-            let resize_result = if rotation.abs() == 0.0
-                && input_dimensions == Some((output_width as isize, output_height as isize))
-                && input_dimensions == Some((curved_width as isize, curved_height as isize))
-                && quality.get() >= 100
-            {
-                // It doesn't. Just return the same buffer directly.
-                Ok(frame)
-            } else {
-                resize_image(
-                    &frame,
-                    curved_width as isize,
-                    curved_height as isize,
-                    curved_rotation,
-                    resize_type,
-                    format,
-                    Some((output_width, output_height, stretch_to_output_size)),
-                    is_curved, // Prevent bounds bouncing.
-                    curved_quality,
-                )
-            };
+                // Check if this operation changes the image at all.
+                // If the dimensions (both target and output) and rotation
+                // are the same, it doesn't.
+                let input_dimensions = get_bmp_width_height(&frame);
+                let resize_result = if rotation.abs() == 0.0
+                    && input_dimensions == Some((output_width as isize, output_height as isize))
+                    && input_dimensions == Some((curved_width as isize, curved_height as isize))
+                    && quality.get() >= 100
+                {
+                    // It doesn't. Just return the same buffer directly.
+                    Ok(frame)
+                } else {
+                    resize_image(
+                        &frame,
+                        curved_width as isize,
+                        curved_height as isize,
+                        curved_rotation,
+                        resize_type,
+                        format,
+                        Some((output_width, output_height, stretch_to_output_size)),
+                        is_curved, // Prevent bounds bouncing.
+                        curved_quality,
+                    )
+                };
 
-            match resize_result {
-                Ok(resize) => Ok((count, resize)),
-                Err(e) => Err(std::io::Error::other(e)),
+                match resize_result {
+                    Ok(resize) => Ok((count, resize)),
+                    Err(e) => Err(std::io::Error::other(e)),
+                }
             }
-        }
-        Err(e) => Err(e),
-    };
+            Err(e) => Err(e),
+        };
 
     // We computed all the internal stuff. Now to actually do something useful.
     let decoder = Command::new("ffmpeg")
@@ -684,9 +688,11 @@ pub fn resize_video(
     for _ in 0..parallelisms {
         let decoded_receiver = decoded_receiver.clone();
         let resized_sender = resized_sender.clone();
+        let resize_type = resize_type.clone();
         converting_thread_handles.push(std::thread::spawn(move || {
+            let resize_type = resize_type;
             while let Ok(frame) = decoded_receiver.recv() {
-                let result = converting_function(frame);
+                let result = converting_function(frame, resize_type.clone());
                 if resized_sender.send(result).is_err() {
                     return;
                 }

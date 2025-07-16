@@ -3,13 +3,16 @@ use arch_bot_commons::{teloxide_retry, useful_methods::*};
 use html_escape::encode_text;
 use media_processing::whisper;
 use teloxide::{
-    requests::Requester, sugar::request::RequestReplyExt, types::InputFile, ApiError, Bot,
-    RequestError,
+    payloads::{SendAnimationSetters, SendPhotoSetters, SendVideoSetters},
+    requests::Requester,
+    sugar::request::RequestReplyExt,
+    types::InputFile,
+    ApiError, Bot, RequestError,
 };
 use tokio::sync::watch::Sender;
 
 use crate::{
-    tasks::{ResizeCurve, VideoTypePreference},
+    tasks::{ResizeCurve, ResizeType, VideoTypePreference},
     MAX_DOWNLOAD_SIZE_MEGABYTES, MAX_UPLOAD_SIZE_MEGABYTES,
 };
 
@@ -175,7 +178,7 @@ impl Task {
                 let input_dimensions = (media.width, media.height);
 
                 let dimensions = (new_dimensions.0 as isize, new_dimensions.1 as isize);
-                let resize_type = *resize_type;
+                let mut resize_type = resize_type.clone();
                 let rotation = *rotation;
                 let quality = *quality;
 
@@ -201,6 +204,13 @@ impl Task {
                     // Not a video lol
                     false
                 };
+
+                let (should_be_spoilered, caption) =
+                    if let ResizeType::ToSpoileredMedia { caption } = &mut resize_type {
+                        (true, std::mem::take(caption))
+                    } else {
+                        (false, String::new())
+                    };
 
                 let status_report_for_processing = status_report.clone();
 
@@ -291,10 +301,14 @@ impl Task {
                                 InputFile::memory(send).file_name("amogus.mp4"),
                             )
                             .reply_to(data.message.id)
+                            .caption(&caption)
+                            .has_spoiler(should_be_spoilered)
                             .await
                         } else {
                             bot.send_video(data.message.chat.id, InputFile::memory(send))
                                 .reply_to(data.message.id)
+                                .caption(&caption)
+                                .has_spoiler(should_be_spoilered)
                                 .await
                         }
                     } else if should_be_sticker {
@@ -304,6 +318,8 @@ impl Task {
                     } else {
                         bot.send_photo(data.message.chat.id, InputFile::memory(send))
                             .reply_to(data.message.id)
+                            .caption(&caption)
+                            .has_spoiler(should_be_spoilered)
                             .await
                     };
 

@@ -83,13 +83,14 @@ impl Display for ResizeCurve {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum ResizeType {
     Stretch,
     Fit,
     Crop,
     ToSticker,
     ToCustomEmoji,
+    ToSpoileredMedia { caption: String },
     SeamCarve { delta_x: f64, rigidity: f64 },
 }
 
@@ -102,6 +103,11 @@ impl ResizeType {
     }
     pub fn is_seam_carve(&self) -> bool {
         matches!(self, Self::SeamCarve { .. })
+    }
+    pub fn strip_caption(&mut self) {
+        if let ResizeType::ToSpoileredMedia { caption } = self {
+            *caption = String::new();
+        }
     }
 }
 
@@ -133,6 +139,7 @@ impl Display for ResizeType {
             }
             Self::ToSticker => write!(f, "To sticker"),
             Self::ToCustomEmoji => write!(f, "To custom emoji"),
+            Self::ToSpoileredMedia { .. } => write!(f, "To a spoilered media"),
         }
     }
 }
@@ -354,7 +361,10 @@ impl Task {
                 resize_type,
                 quality,
             } => {
-                if let ResizeType::ToSticker | ResizeType::ToCustomEmoji = resize_type {
+                if let ResizeType::ToSticker
+                | ResizeType::ToCustomEmoji
+                | ResizeType::ToSpoileredMedia { .. } = resize_type
+                {
                     return Ok(());
                 }
 
@@ -491,6 +501,24 @@ impl Task {
             quality: NonZeroU8::new(92).unwrap(),
         }
     }
+    pub fn default_to_spoilered_image(width: i32, height: i32, caption: String) -> Task {
+        Task::ImageResize {
+            new_dimensions: (width, height),
+            rotation: 0.0,
+            percentage: None,
+            format: ImageFormat::Jpeg,
+            resize_type: ResizeType::ToSpoileredMedia { caption },
+            quality: NonZeroU8::new(92).unwrap(),
+        }
+    }
+    pub fn default_to_spoilered_video(width: i32, height: i32, caption: String) -> Task {
+        Task::default_video_resize(
+            width,
+            height,
+            ResizeType::ToSpoileredMedia { caption },
+            VideoTypePreference::Preserve,
+        )
+    }
     pub fn default_amogus() -> Task {
         Task::Amogus { amogus: 1 }
     }
@@ -519,7 +547,6 @@ impl Task {
             new_dimensions: (width, height),
             rotation: 0.0,
             percentage: Some(100.0),
-            resize_type,
             vibrato_hz: if resize_type.is_seam_carve() {
                 7.0
             } else {
@@ -530,6 +557,7 @@ impl Task {
             } else {
                 0.0
             },
+            resize_type,
             resize_curve: ResizeCurve::default(),
             type_pref,
             quality: NonZeroU8::new(100).unwrap(),

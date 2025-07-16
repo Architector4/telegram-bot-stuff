@@ -160,7 +160,7 @@ impl Task {
             }
             Task::ImageResize { resize_type, ..} | Task::VideoResize { resize_type, ..}=> {
                 match resize_type {
-                    ResizeType::ToSticker | ResizeType::ToCustomEmoji => "",
+                    ResizeType::ToSticker | ResizeType::ToCustomEmoji | ResizeType::ToSpoileredMedia { .. } => "",
                     ResizeType::SeamCarve { .. } =>
                         concat!(
                             "<b>Possible parameters for this command:</b>\n",
@@ -311,24 +311,28 @@ impl Task {
                 rotation,
                 percentage: _,
                 format: _,
-                mut resize_type,
+                ref resize_type,
                 mut quality,
             }
             | Task::VideoResize {
                 new_dimensions: original_dimensions,
                 rotation,
                 percentage: _,
-                mut resize_type,
+                ref resize_type,
                 vibrato_hz: _,
                 vibrato_depth: _,
                 resize_curve: _,
                 type_pref: _,
                 mut quality,
             } => {
-                if let ResizeType::ToSticker | ResizeType::ToCustomEmoji = resize_type {
+                if let ResizeType::ToSticker
+                | ResizeType::ToCustomEmoji
+                | ResizeType::ToSpoileredMedia { .. } = resize_type
+                {
                     return Ok(self.clone());
                 }
 
+                let mut resize_type = resize_type.clone();
                 let mut old_dimensions = (original_dimensions.0, original_dimensions.1);
 
                 let (is_video, mut format, video_type_pref, mut curve) =
