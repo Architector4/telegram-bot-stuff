@@ -143,6 +143,21 @@ impl MessageStuff for Message {
             });
         }
 
+        if let Some(audio) = self.audio() {
+            return Some(MessageMediaInfo {
+                width: 0,
+                height: 0,
+                is_sticker: false,
+                is_video: false,
+                is_gif: false,
+                is_image: false,
+                is_sound: true,
+                is_voice_or_video_note: false,
+                is_vector_sticker: false,
+                file: &audio.file,
+            });
+        }
+
         if let Some(reply_to) = self.reply_to_message() {
             return reply_to.get_media_info();
         }
