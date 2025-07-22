@@ -1283,7 +1283,11 @@ pub fn reencode(
                                     OsStr::new("-i"),
                                     inputfile.as_ref(),
                                     OsStr::new("-vf"), // Pad uneven pixels with black.
-                                    OsStr::new("pad=ceil(iw/2)*2:ceil(ih/2)*2"),
+                                    OsStr::new(concat!(
+                                        "scale='min(2048,iw)':min'(2048,ih)':",
+                                        "force_original_aspect_ratio=decrease",
+                                        ",pad=ceil(iw/2)*2:ceil(ih/2)*2",
+                                    )),
                                     OsStr::new("-pix_fmt"),
                                     OsStr::new("yuv420p"),
                                     OsStr::new("-f"),
