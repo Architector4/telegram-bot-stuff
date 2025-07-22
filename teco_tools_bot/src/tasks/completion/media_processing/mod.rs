@@ -1211,6 +1211,38 @@ fn reencode_video(inputfile: &Path) -> Result<Vec<u8>, std::io::Error> {
 
     Ok(output)
 }
+fn reencode_audio(inputfile: &Path) -> Result<Vec<u8>, std::io::Error> {
+    // This is an audio.
+    let mut outputfile = NamedTempFile::new()?;
+
+    let converter = Command::new("ffmpeg")
+        .args([
+            OsStr::new("-y"),
+            OsStr::new("-loglevel"),
+            OsStr::new("error"),
+            OsStr::new("-i"),
+            inputfile.as_ref(),
+            OsStr::new("-b:a"),
+            OsStr::new("192k"),
+            OsStr::new("-f"),
+            OsStr::new("mp3"),
+            outputfile.path().as_ref(),
+        ])
+        .spawn();
+
+    let converter_result = converter?.wait()?;
+    if !converter_result.success() {
+        return Err(std::io::Error::from_raw_os_error(
+            converter_result.code().unwrap_or(0),
+        ));
+    }
+
+    outputfile.reopen()?;
+    let mut output = Vec::new();
+    outputfile.read_to_end(&mut output)?;
+
+    Ok(output)
+}
 
 #[derive(Clone)]
 pub enum ReencodeMedia {
@@ -1264,88 +1296,56 @@ pub fn reencode(
 
     let (has_video, has_audio) = unfail!(check_if_has_video_audio(inputfile));
 
-    match (has_video, has_audio) {
-        (false, false) => Err("Unknown file type.".into()),
-        (false, true) => {
-            // This is an audio.
-            let _ = status_report.send("Converting audio...".to_string());
-            let mut outputfile = unfail!(NamedTempFile::new());
+    if has_video {
+        // It could still be an audio with a thumbnail. Check if there's only one frame or not.
 
-            let converter = Command::new("ffmpeg")
-                .args([
-                    OsStr::new("-y"),
-                    OsStr::new("-loglevel"),
-                    OsStr::new("error"),
-                    OsStr::new("-i"),
-                    inputfile.as_ref(),
-                    OsStr::new("-b:a"),
-                    OsStr::new("192k"),
-                    OsStr::new("-f"),
-                    OsStr::new("mp3"),
-                    outputfile.path().as_ref(),
-                ])
-                .spawn();
+        let (mut decoder, mut decoded_image_stream) = unfail!(SplitIntoBmps::from_file(inputfile));
 
-            let converter_result = unfail!(converter).wait();
-            let converter_result = unfail!(converter_result);
-            if !converter_result.success() {
-                return Err("Converter returned an error.".to_string());
-            }
+        let Some(Ok(first_frame)) = decoded_image_stream.next() else {
+            // huh???????
+            unfail!(decoder.kill());
+            return Err("Failed to decode image/video in input stream".to_string());
+        };
 
-            unfail!(outputfile.reopen());
-            let mut output = Vec::new();
-            unfail!(outputfile.read_to_end(&mut output));
+        let second_frame = decoded_image_stream.next();
+        unfail!(decoder.kill());
 
-            Ok(ReencodeMedia::Audio(output))
-        }
+        match second_frame {
+            Some(Ok(_second_frame)) => {
+                // There's at least two frames. Then this is, presumably, a video or a gif.
+                let _ = status_report.send("Reencoding video...".to_string());
+                let video = unfail!(reencode_video(inputfile));
 
-        (true, _) => {
-            // There is imagery.
-
-            // Check if it's a single image.
-            if !has_audio {
-                let (mut decoder, mut decoded_image_stream) =
-                    unfail!(SplitIntoBmps::from_file(inputfile));
-                match decoded_image_stream.next() {
-                    Some(Ok(first_frame)) => {
-                        // We have at least one frame. Cool beans!
-                        // Do we have more frames, though?
-                        match decoded_image_stream.next() {
-                            Some(second_frame) => {
-                                unfail!(decoder.kill());
-                                let _second_frame = unfail!(second_frame);
-                                // We have a second frame. This is a video.
-                            }
-                            None => {
-                                unfail!(decoder.kill());
-                                // Only one frame. This is an image. Sanitize size and throw out as a jpeg.
-                                let _ = status_report.send("Converting image...".to_string());
-                                return Ok(ReencodeMedia::Jpeg(unfail!(reencode_image(
-                                    &first_frame
-                                ))));
-                            }
-                        }
-                    }
-                    Some(Err(e)) => {
-                        unfail!(decoder.kill());
-                        return Err(format!("Failed to decode media: {e}"));
-                    }
-                    None => {
-                        unfail!(decoder.kill());
-                        // ...So no imagery? Huh.
-                        return Err("Failed to decode video in this media.".into());
-                    }
+                if has_audio {
+                    return Ok(ReencodeMedia::Video(video));
+                } else {
+                    return Ok(ReencodeMedia::Gif(video));
                 }
-            };
-
-            // Above has passed, meaning it's not a single image. Assume this is a video.
-            let video = unfail!(reencode_video(inputfile));
-
-            if has_audio {
-                Ok(ReencodeMedia::Video(video))
-            } else {
-                Ok(ReencodeMedia::Gif(video))
+            }
+            Some(Err(e)) => {
+                return Err(format!(
+                    "Failed to decode second image/video in input stream: {e}"
+                ));
+            }
+            None => {
+                // There is only one frame. Then this is, presumably, an image or a music with
+                // album art.
+                if has_audio {
+                    // Music with album art. Pretend we don't have video and fall through.
+                } else {
+                    // Image. We already got it; let's use it.
+                    let _ = status_report.send("Reencoding image...".to_string());
+                    return Ok(ReencodeMedia::Jpeg(unfail!(reencode_image(&first_frame))));
+                }
             }
         }
     }
+
+    // Above did not return. Presumably, we have no video. Therefore, this is music or unknown.
+    if has_audio {
+        let _ = status_report.send("Reencoding audio...".to_string());
+        return Ok(ReencodeMedia::Audio(unfail!(reencode_audio(inputfile))));
+    }
+
+    Err("Unknown file type.".to_string())
 }
