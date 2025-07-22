@@ -1170,6 +1170,48 @@ pub fn amen_break_media(
     Ok(output)
 }
 
+fn reencode_video(inputfile: &Path) -> Result<Vec<u8>, std::io::Error> {
+    let mut outputfile = NamedTempFile::new()?;
+
+    let converter = Command::new("ffmpeg")
+        .args([
+            OsStr::new("-y"),
+            OsStr::new("-loglevel"),
+            OsStr::new("error"),
+            OsStr::new("-i"),
+            inputfile.as_ref(),
+            OsStr::new("-vf"), // Pad uneven pixels with black.
+            OsStr::new(concat!(
+                "scale='min(2048,iw)':min'(2048,ih)':",
+                "force_original_aspect_ratio=decrease",
+                ",pad=ceil(iw/2)*2:ceil(ih/2)*2",
+            )),
+            OsStr::new("-pix_fmt"),
+            OsStr::new("yuv420p"),
+            OsStr::new("-f"),
+            OsStr::new("mp4"),
+            OsStr::new("-preset"),
+            OsStr::new("slow"),
+            OsStr::new("-movflags"),
+            OsStr::new("+faststart"),
+            outputfile.path().as_ref(),
+        ])
+        .spawn();
+
+    let converter_result = converter?.wait()?;
+    if !converter_result.success() {
+        return Err(std::io::Error::from_raw_os_error(
+            converter_result.code().unwrap_or(0),
+        ));
+    }
+
+    outputfile.reopen()?;
+    let mut output = Vec::new();
+    outputfile.read_to_end(&mut output)?;
+
+    Ok(output)
+}
+
 #[derive(Clone)]
 pub enum ReencodeMedia {
     Jpeg(Vec<u8>),
@@ -1259,80 +1301,50 @@ pub fn reencode(
 
         (true, _) => {
             // There is imagery.
-            let (mut decoder, mut decoded_image_stream) =
-                unfail!(SplitIntoBmps::from_file(inputfile));
-            match decoded_image_stream.next() {
-                Some(Ok(first_frame)) => {
-                    // We have at least one frame. Cool beans!
-                    // Do we have more frames, though?
-                    match decoded_image_stream.next() {
-                        Some(second_frame) => {
-                            unfail!(decoder.kill());
-                            let _second_frame = unfail!(second_frame);
-                            // We have a second frame. This is a video.
 
-                            let mut outputfile = unfail!(NamedTempFile::new());
-
-                            let _ = status_report.send("Converting video...".to_string());
-
-                            let converter = Command::new("ffmpeg")
-                                .args([
-                                    OsStr::new("-y"),
-                                    OsStr::new("-loglevel"),
-                                    OsStr::new("error"),
-                                    OsStr::new("-i"),
-                                    inputfile.as_ref(),
-                                    OsStr::new("-vf"), // Pad uneven pixels with black.
-                                    OsStr::new(concat!(
-                                        "scale='min(2048,iw)':min'(2048,ih)':",
-                                        "force_original_aspect_ratio=decrease",
-                                        ",pad=ceil(iw/2)*2:ceil(ih/2)*2",
-                                    )),
-                                    OsStr::new("-pix_fmt"),
-                                    OsStr::new("yuv420p"),
-                                    OsStr::new("-f"),
-                                    OsStr::new("mp4"),
-                                    OsStr::new("-preset"),
-                                    OsStr::new("slow"),
-                                    OsStr::new("-movflags"),
-                                    OsStr::new("+faststart"),
-                                    outputfile.path().as_ref(),
-                                ])
-                                .spawn();
-
-                            let converter_result = unfail!(converter).wait();
-                            let converter_result = unfail!(converter_result);
-                            if !converter_result.success() {
-                                return Err("Converter returned an error.".to_string());
+            // Check if it's a single image.
+            if !has_audio {
+                let (mut decoder, mut decoded_image_stream) =
+                    unfail!(SplitIntoBmps::from_file(inputfile));
+                match decoded_image_stream.next() {
+                    Some(Ok(first_frame)) => {
+                        // We have at least one frame. Cool beans!
+                        // Do we have more frames, though?
+                        match decoded_image_stream.next() {
+                            Some(second_frame) => {
+                                unfail!(decoder.kill());
+                                let _second_frame = unfail!(second_frame);
+                                // We have a second frame. This is a video.
                             }
-
-                            unfail!(outputfile.reopen());
-                            let mut output = Vec::new();
-                            unfail!(outputfile.read_to_end(&mut output));
-
-                            if has_audio {
-                                Ok(ReencodeMedia::Video(output))
-                            } else {
-                                Ok(ReencodeMedia::Gif(output))
+                            None => {
+                                unfail!(decoder.kill());
+                                // Only one frame. This is an image. Sanitize size and throw out as a jpeg.
+                                let _ = status_report.send("Converting image...".to_string());
+                                return Ok(ReencodeMedia::Jpeg(unfail!(reencode_image(
+                                    &first_frame
+                                ))));
                             }
-                        }
-                        None => {
-                            unfail!(decoder.kill());
-                            // Only one frame. This is an image. Sanitize size and throw out as a jpeg.
-                            let _ = status_report.send("Converting image...".to_string());
-                            Ok(ReencodeMedia::Jpeg(unfail!(reencode_image(&first_frame))))
                         }
                     }
+                    Some(Err(e)) => {
+                        unfail!(decoder.kill());
+                        return Err(format!("Failed to decode media: {e}"));
+                    }
+                    None => {
+                        unfail!(decoder.kill());
+                        // ...So no imagery? Huh.
+                        return Err("Failed to decode video in this media.".into());
+                    }
                 }
+            };
 
-                Some(Err(e)) => {
-                    unfail!(decoder.kill());
-                    Err(format!("Failed to decode media: {e}"))
-                }
-                None => {
-                    // ...So no imagery? Huh.
-                    Err("Failed to decode video in this media.".into())
-                }
+            // Above has passed, meaning it's not a single image. Assume this is a video.
+            let video = unfail!(reencode_video(inputfile));
+
+            if has_audio {
+                Ok(ReencodeMedia::Video(video))
+            } else {
+                Ok(ReencodeMedia::Gif(video))
             }
         }
     }
