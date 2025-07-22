@@ -7,7 +7,7 @@ use std::{
     io::{Read, Write},
     num::NonZeroU8,
     path::Path,
-    process::{ChildStdout, Command, Stdio},
+    process::{Child, ChildStdout, Command, Stdio},
     sync::OnceLock,
     time::Duration,
 };
@@ -18,7 +18,9 @@ use magick_rust::{AlphaChannelOption, FilterType, MagickError, MagickWand, Pixel
 use regex::Regex;
 use tempfile::NamedTempFile;
 
-use crate::tasks::{ImageFormat, ResizeCurve, ResizeType};
+use crate::tasks::{
+    parsing::MAX_OUTPUT_MEDIA_DIMENSION_SIZE, ImageFormat, ResizeCurve, ResizeType,
+};
 
 /// Will error if [`ImageFormat::Preserve`] is sent.
 #[allow(clippy::too_many_arguments)]
@@ -300,6 +302,22 @@ pub fn resize_image(
     wand.write_image_blob(format.as_str())
 }
 
+pub fn reencode_image(data: &[u8]) -> Result<Vec<u8>, MagickError> {
+    let wand = MagickWand::new();
+
+    wand.read_image_blob(data)?;
+
+    let width = wand.get_image_width();
+    let height = wand.get_image_height();
+    let max = MAX_OUTPUT_MEDIA_DIMENSION_SIZE as usize;
+
+    if width > max || height > max {
+        wand.fit(max, max);
+    }
+
+    wand.write_image_blob("jpg")
+}
+
 struct SplitIntoBmps<T: Read> {
     item: T,
     buffer: Vec<u8>,
@@ -313,6 +331,30 @@ impl<T: Read> SplitIntoBmps<T> {
             // plus 4MB of other whiff.
             buffer: Vec::with_capacity(2048 * 2048 * 5),
         }
+    }
+}
+impl SplitIntoBmps<ChildStdout> {
+    pub fn from_file(path: &std::path::Path) -> Result<(Child, Self), std::io::Error> {
+        let mut decoder = Command::new("ffmpeg")
+            .args([
+                OsStr::new("-y"),
+                OsStr::new("-loglevel"),
+                OsStr::new("error"),
+                OsStr::new("-i"),
+                path.as_ref(),
+                OsStr::new("-c:v"),
+                OsStr::new("bmp"),
+                OsStr::new("-vsync"),
+                OsStr::new("passthrough"),
+                OsStr::new("-f"),
+                OsStr::new("image2pipe"),
+                OsStr::new("-"),
+            ])
+            .stdout(Stdio::piped())
+            .spawn()?;
+        let decoder_stdout = decoder.stdout.take().unwrap();
+
+        Ok((decoder, SplitIntoBmps::<ChildStdout>::new(decoder_stdout)))
     }
 }
 
@@ -469,6 +511,43 @@ pub fn count_video_frames_and_framerate_and_audio_and_length(
     let framerate = frame_count as f64 / length.as_secs_f64();
 
     Ok((frame_count, framerate, has_audio, length))
+}
+
+pub fn check_if_has_video_audio(path: &std::path::Path) -> Result<(bool, bool), std::io::Error> {
+    macro_rules! goodbye {
+        ($desc: expr) => {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, $desc))
+        };
+    }
+    let checker = Command::new("ffprobe")
+        .args([
+            OsStr::new("-loglevel"),
+            OsStr::new("error"),
+            OsStr::new("-show_entries"),
+            OsStr::new("stream=codec_type"),
+            OsStr::new("-of"),
+            OsStr::new("default=nw=1"),
+            path.as_ref(),
+        ])
+        .stdout(Stdio::piped())
+        .spawn()?;
+    let output = checker.wait_with_output()?;
+
+    let Ok(output) = String::from_utf8(output.stdout) else {
+        goodbye!("Stream type check returned non UTF-8 response");
+    };
+
+    // Output may be in a format like
+    //
+    // codec_type=audio
+    // codec_type=video
+    //
+    // Presence of such a line indicates presence of a stream of such a type.
+
+    Ok((
+        output.contains("codec_type=video"),
+        output.contains("codec_type=audio"),
+    ))
 }
 
 fn approx_same_aspect_ratio(
@@ -647,27 +726,7 @@ pub fn resize_video(
         };
 
     // We computed all the internal stuff. Now to actually do something useful.
-    let decoder = Command::new("ffmpeg")
-        .args([
-            OsStr::new("-y"),
-            OsStr::new("-loglevel"),
-            OsStr::new("error"),
-            OsStr::new("-i"),
-            inputfile.as_ref(),
-            OsStr::new("-c:v"),
-            OsStr::new("bmp"),
-            OsStr::new("-vsync"),
-            OsStr::new("passthrough"),
-            OsStr::new("-f"),
-            OsStr::new("image2pipe"),
-            OsStr::new("-"),
-        ])
-        .stdout(Stdio::piped())
-        .spawn();
-    let mut decoder = unfail!(decoder);
-    let decoder_stdout = decoder.stdout.take().unwrap();
-
-    let decoded_image_stream = SplitIntoBmps::<ChildStdout>::new(decoder_stdout).enumerate();
+    let (mut decoder, decoded_image_stream) = unfail!(SplitIntoBmps::from_file(inputfile));
 
     let parallelisms = std::thread::available_parallelism()
         .map(|x| x.get())
@@ -704,7 +763,7 @@ pub fn resize_video(
     drop(resized_sender);
 
     let sending_thread = std::thread::spawn(move || {
-        for frame in decoded_image_stream {
+        for frame in decoded_image_stream.enumerate() {
             if decoded_sender.send(frame).is_err() {
                 return;
             }
@@ -1093,7 +1152,7 @@ pub fn amen_break_media(
             OsStr::new("slow"),
             OsStr::new("-movflags"),
             OsStr::new("+faststart"),
-            outputfile.path().as_os_str(),
+            outputfile.path().as_ref(),
         ])
         .spawn();
 
@@ -1109,4 +1168,168 @@ pub fn amen_break_media(
     unfail!(outputfile.read_to_end(&mut output));
 
     Ok(output)
+}
+
+#[derive(Clone)]
+pub enum ReencodeMedia {
+    Jpeg(Vec<u8>),
+    Video(Vec<u8>),
+    Gif(Vec<u8>),
+    Audio(Vec<u8>),
+}
+
+impl ReencodeMedia {
+    pub fn adapt_file_name(&self, mut name: &str) -> String {
+        let postfix = match self {
+            Self::Jpeg(_) => ".jpg",
+            Self::Video(_) | Self::Gif(_) => ".mp4",
+            Self::Audio(_) => ".mp3",
+        };
+
+        if name.is_empty() {
+            name = "amogus";
+        }
+
+        format!("{}.{}", name.trim_end_matches(postfix), postfix)
+    }
+}
+
+impl AsRef<Vec<u8>> for ReencodeMedia {
+    fn as_ref(&self) -> &Vec<u8> {
+        match self {
+            Self::Jpeg(x) => x,
+            Self::Video(x) => x,
+            Self::Gif(x) => x,
+            Self::Audio(x) => x,
+        }
+    }
+}
+
+pub fn reencode(
+    status_report: Sender<String>,
+    inputfile: &std::path::Path,
+) -> Result<ReencodeMedia, String> {
+    macro_rules! unfail {
+        ($thing: expr) => {
+            match $thing {
+                Ok(o) => o,
+                Err(e) => return Err(e.to_string()),
+            }
+        };
+    }
+
+    let _ = status_report.send("Checking file type...".to_string());
+
+    let (has_video, has_audio) = unfail!(check_if_has_video_audio(inputfile));
+
+    match (has_video, has_audio) {
+        (false, false) => Err("Unknown file type.".into()),
+        (false, true) => {
+            // This is an audio.
+            let _ = status_report.send("Converting audio...".to_string());
+            let mut outputfile = unfail!(NamedTempFile::new());
+
+            let converter = Command::new("ffmpeg")
+                .args([
+                    OsStr::new("-y"),
+                    OsStr::new("-loglevel"),
+                    OsStr::new("error"),
+                    OsStr::new("-i"),
+                    inputfile.as_ref(),
+                    OsStr::new("-b:a"),
+                    OsStr::new("192k"),
+                    OsStr::new("-f"),
+                    OsStr::new("mp3"),
+                    outputfile.path().as_ref(),
+                ])
+                .spawn();
+
+            let converter_result = unfail!(converter).wait();
+            let converter_result = unfail!(converter_result);
+            if !converter_result.success() {
+                return Err("Converter returned an error.".to_string());
+            }
+
+            unfail!(outputfile.reopen());
+            let mut output = Vec::new();
+            unfail!(outputfile.read_to_end(&mut output));
+
+            Ok(ReencodeMedia::Audio(output))
+        }
+
+        (true, _) => {
+            // There is imagery.
+            let (mut decoder, mut decoded_image_stream) =
+                unfail!(SplitIntoBmps::from_file(inputfile));
+            match decoded_image_stream.next() {
+                Some(Ok(first_frame)) => {
+                    // We have at least one frame. Cool beans!
+                    // Do we have more frames, though?
+                    match decoded_image_stream.next() {
+                        Some(second_frame) => {
+                            unfail!(decoder.kill());
+                            let _second_frame = unfail!(second_frame);
+                            // We have a second frame. This is a video.
+
+                            let mut outputfile = unfail!(NamedTempFile::new());
+
+                            let _ = status_report.send("Converting video...".to_string());
+
+                            let converter = Command::new("ffmpeg")
+                                .args([
+                                    OsStr::new("-y"),
+                                    OsStr::new("-loglevel"),
+                                    OsStr::new("error"),
+                                    OsStr::new("-i"),
+                                    inputfile.as_ref(),
+                                    OsStr::new("-vf"), // Pad uneven pixels with black.
+                                    OsStr::new("pad=ceil(iw/2)*2:ceil(ih/2)*2"),
+                                    OsStr::new("-pix_fmt"),
+                                    OsStr::new("yuv420p"),
+                                    OsStr::new("-f"),
+                                    OsStr::new("mp4"),
+                                    OsStr::new("-preset"),
+                                    OsStr::new("slow"),
+                                    OsStr::new("-movflags"),
+                                    OsStr::new("+faststart"),
+                                    outputfile.path().as_ref(),
+                                ])
+                                .spawn();
+
+                            let converter_result = unfail!(converter).wait();
+                            let converter_result = unfail!(converter_result);
+                            if !converter_result.success() {
+                                return Err("Converter returned an error.".to_string());
+                            }
+
+                            unfail!(outputfile.reopen());
+                            let mut output = Vec::new();
+                            unfail!(outputfile.read_to_end(&mut output));
+
+                            if has_audio {
+                                Ok(ReencodeMedia::Video(output))
+                            } else {
+                                Ok(ReencodeMedia::Gif(output))
+                            }
+                        }
+                        None => {
+                            unfail!(decoder.kill());
+                            // Only one frame. This is an image. Sanitize size and throw out as a jpeg.
+                            let _ = status_report.send("Converting image...".to_string());
+                            Ok(ReencodeMedia::Jpeg(unfail!(reencode_image(&first_frame))))
+                        }
+                    }
+                }
+
+                Some(Err(e)) => {
+                    unfail!(decoder.kill());
+                    Err(format!("Failed to decode media: {e}"))
+                }
+                None => {
+                    // ...So no imagery? Huh.
+                    Err("Failed to decode video in this media.".into())
+                }
+            }
+        }
+    }
 }

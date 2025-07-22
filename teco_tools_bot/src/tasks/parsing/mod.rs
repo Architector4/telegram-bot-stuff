@@ -236,8 +236,8 @@ impl Task {
                             ),
                 }
             },
-        Task::Ocr => "",
-        Task::AmenBreak => "",
+            Task::Ocr => "",
+            Task::AmenBreak => "",
             Task::Transcribe { temperature: _, translate_to_english: _ } =>
                 concat!(
                     "<b>Possible parameters for this command:</b>\n",
@@ -245,7 +245,8 @@ impl Task {
                     "Can only be between 0 and 1. 0 (default) means autodetect a good value.\n",
                     "<code>english</code>: Translate to English when transcribing.",
 
-                )
+                ),
+            Task::Reencode => "",
         }
     }
 
@@ -647,6 +648,7 @@ impl Task {
                     translate_to_english: english,
                 })
             }
+            Task::Reencode => Ok(Task::Reencode),
         }
     }
 }

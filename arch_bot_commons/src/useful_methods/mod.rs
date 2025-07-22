@@ -23,6 +23,7 @@ pub struct MessageMediaInfo<'a> {
     pub is_voice_or_video_note: bool,
     pub is_vector_sticker: bool,
     pub file: &'a FileMeta,
+    pub name: &'a Option<String>,
 }
 
 impl MessageMediaInfo<'_> {
@@ -37,11 +38,7 @@ impl MessageMediaInfo<'_> {
 pub trait MessageStuff {
     fn text_full(&self) -> Option<&str>;
     #[allow(clippy::result_unit_err)] // i'm lazy lol
-    /// On success, returns info about image/video/sound in the video,
-    /// as well as bool that is `true` if it's a sticker.
-    ///
-    /// # Errors
-    /// Returns Err(()) if there is a sticker but it's not raster.
+    /// On success, returns info about image/video/sound in the video.
     fn get_media_info(&self) -> Option<MessageMediaInfo<'_>>;
     fn find_biggest_photo(&self) -> Option<&PhotoSize>;
 }
@@ -63,6 +60,7 @@ impl MessageStuff for Message {
                 is_voice_or_video_note: false,
                 is_vector_sticker: false,
                 file: &biggest.file,
+                name: &None,
             });
         }
 
@@ -78,6 +76,7 @@ impl MessageStuff for Message {
                 is_voice_or_video_note: false,
                 is_vector_sticker: sticker.is_animated(),
                 file: &sticker.file,
+                name: &None,
             });
         }
 
@@ -93,6 +92,7 @@ impl MessageStuff for Message {
                 is_voice_or_video_note: false,
                 is_vector_sticker: false,
                 file: &video.file,
+                name: &video.file_name,
             });
         }
 
@@ -108,6 +108,7 @@ impl MessageStuff for Message {
                 is_voice_or_video_note: false,
                 is_vector_sticker: false,
                 file: &animation.file,
+                name: &animation.file_name,
             });
         }
 
@@ -124,6 +125,7 @@ impl MessageStuff for Message {
                     is_voice_or_video_note: true,
                     is_vector_sticker: false,
                     file: &video_note.file,
+                    name: &None,
                 });
             }
         }
@@ -140,6 +142,7 @@ impl MessageStuff for Message {
                 is_voice_or_video_note: true,
                 is_vector_sticker: false,
                 file: &voice.file,
+                name: &None,
             });
         }
 
@@ -155,6 +158,7 @@ impl MessageStuff for Message {
                 is_voice_or_video_note: false,
                 is_vector_sticker: false,
                 file: &audio.file,
+                name: &audio.file_name,
             });
         }
 

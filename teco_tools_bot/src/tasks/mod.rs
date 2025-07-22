@@ -294,6 +294,7 @@ pub enum Task {
         translate_to_english: bool,
     },
     AmenBreak,
+    Reencode,
 }
 
 impl Task {
@@ -423,6 +424,7 @@ impl Task {
                 write_param!("Translate to English", translate_to_english)?;
                 Ok(())
             }
+            Task::Reencode => Ok(()),
         }
     }
 
@@ -574,5 +576,8 @@ impl Task {
     }
     pub fn default_amenbreak() -> Task {
         Task::AmenBreak
+    }
+    pub fn default_reencode() -> Task {
+        Task::Reencode
     }
 }

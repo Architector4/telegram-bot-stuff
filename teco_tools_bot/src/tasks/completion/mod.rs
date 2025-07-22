@@ -12,7 +12,10 @@ use teloxide::{
 use tokio::sync::watch::Sender;
 
 use crate::{
-    tasks::{ResizeCurve, ResizeType, VideoTypePreference},
+    tasks::{
+        completion::media_processing::{reencode, ReencodeMedia},
+        ResizeCurve, ResizeType, VideoTypePreference,
+    },
     MAX_DOWNLOAD_SIZE_MEGABYTES, MAX_UPLOAD_SIZE_MEGABYTES,
 };
 
@@ -417,10 +420,8 @@ impl Task {
 
                 let _ = status_report.send("Downloading media...".to_string());
 
-                let download =
+                let (path, file) =
                     unerror_download!(bot.download_file_to_temp_or_directly(media.file).await);
-                let path = download.0;
-                let file = download.1;
 
                 let status_report_for_processing = status_report.clone();
 
@@ -497,10 +498,8 @@ impl Task {
 
                 let _ = status_report.send("Downloading media...".to_string());
 
-                let download =
+                let (path, file) =
                     unerror_download!(bot.download_file_to_temp_or_directly(media.file).await);
-                let path = download.0;
-                let file = download.1;
 
                 let _ = status_report.send("Extracting audio...".to_string());
 
@@ -546,6 +545,132 @@ impl Task {
                 text.push_str("\n\n(automatically generated transcription)");
 
                 goodbye!(encode_text(&text).as_ref());
+            }
+            Task::Reencode => {
+                let name;
+                let file = match data.message.get_media_info() {
+                    Some(media) => {
+                        name = media.name;
+                        if media.is_vector_sticker {
+                            goodbye!("Error: vector stickers are unsupported.");
+                        }
+                        media.file
+                    }
+                    None => match data
+                        .message
+                        .document()
+                        .or_else(|| data.message.reply_to_message().and_then(|x| x.document()))
+                    {
+                        Some(d) => {
+                            name = &d.file_name;
+                            &d.file
+                        }
+                        None => goodbye!(concat!(
+                            "Error: can't find a media or a file to reencode. ",
+                            "This command needs to be used as either a reply or caption to one."
+                        )),
+                    },
+                };
+
+                if file.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
+                    goodbye!(format!(
+                        "Error: media is too large. The limit is {MAX_DOWNLOAD_SIZE_MEGABYTES}MB."
+                    )
+                    .as_str());
+                }
+
+                let name = match name {
+                    Some(name) => name,
+                    None => &String::new(),
+                };
+
+                let _ = status_report.send("Downloading media...".to_string());
+
+                let (path, file) =
+                    unerror_download!(bot.download_file_to_temp_or_directly(file).await);
+
+                let status_report_for_processing = status_report.clone();
+                match tokio::task::spawn_blocking(move || {
+                    reencode(status_report_for_processing, &path)
+                })
+                .await
+                .expect("Worker died!")
+                {
+                    Ok(media_data) => {
+                        drop(file);
+                        let file_name = media_data.adapt_file_name(name);
+                        let _ = status_report.send("Sending...".to_string());
+
+                        teloxide_retry!({
+                            let send = media_data.clone();
+                            let file_name = file_name.clone();
+
+                            let result = match send {
+                                ReencodeMedia::Gif(send) => {
+                                    // Sending as an "animation" requires that the file has a filename, else
+                                    // it somehow ends up being a file document instead.
+                                    bot.send_animation(
+                                        data.message.chat.id,
+                                        InputFile::memory(send).file_name(file_name),
+                                    )
+                                    .reply_to(data.message.id)
+                                    .await
+                                }
+                                ReencodeMedia::Video(send) => {
+                                    bot.send_video(
+                                        data.message.chat.id,
+                                        InputFile::memory(send).file_name(file_name),
+                                    )
+                                    .reply_to(data.message.id)
+                                    .await
+                                }
+                                ReencodeMedia::Jpeg(send) => {
+                                    bot.send_photo(
+                                        data.message.chat.id,
+                                        InputFile::memory(send).file_name(file_name),
+                                    )
+                                    .reply_to(data.message.id)
+                                    .await
+                                }
+                                ReencodeMedia::Audio(send) => {
+                                    bot.send_audio(
+                                        data.message.chat.id,
+                                        InputFile::memory(send).file_name(file_name),
+                                    )
+                                    .reply_to(data.message.id)
+                                    .await
+                                }
+                            };
+
+                            match &result {
+                                Err(RequestError::Api(
+                                    teloxide::ApiError::RequestEntityTooLarge,
+                                )) => {
+                                    goodbye!(format!(
+                            "Error: the resulting media is too big ({:.3}MB, max is {}MB). Sorry!",
+                            media_data.as_ref().len() as f64 / 1000.0 / 100.00,
+                            MAX_UPLOAD_SIZE_MEGABYTES
+                        )
+                                    .as_str());
+                                }
+                                Err(RequestError::Api(teloxide::ApiError::Unknown(e))) => {
+                                    if e.contains("PHOTO_INVALID_DIMENSIONS") {
+                                        goodbye!(concat!(
+                                    "Error: the resulting image's dimensions are invalid. ",
+                                    "It's probably too small or the aspect ratio is too extreme. Sorry!"
+                                ));
+                                    }
+                                    result
+                                }
+                                _ => result,
+                            }
+                        })?;
+                        Ok(())
+                    }
+                    Err(e) => {
+                        goodbye!(format!("Error when trying to reencode: {e}").as_str());
+                    }
+                }
             }
         }
     }

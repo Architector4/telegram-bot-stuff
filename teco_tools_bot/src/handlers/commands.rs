@@ -32,6 +32,7 @@ pub const COMMANDS: &[Command] = &[
     AMOGUS,
     DISTORT,
     OCR,
+    REENCODE,
     RESIZE,
     REVERSE_TEXT,
     ROT_TEXT,
@@ -270,7 +271,7 @@ macro_rules! goodbye_cancel {
 
 macro_rules! check_too_large {
     ($media:expr) => {{
-        if $media.file.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
+        if $media.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
             goodbye_cancel!(format!(
                 "media is too large. The limit is {}MB.",
                 MAX_DOWNLOAD_SIZE_MEGABYTES
@@ -456,7 +457,7 @@ async fn resize_inner(tp: TaskParams<'_>, resize_type: ResizeType) -> Ret {
             if !media.is_raster() {
                 goodbye_cancel!("can't work with animated stickers nor voice messages.");
             }
-            check_too_large!(media);
+            check_too_large!(media.file);
             media
         }
         None => goodbye_cancel!(concat!(
@@ -505,7 +506,7 @@ async fn to_sticker(tp: TaskParams<'_>) -> Ret {
             if !photo.is_image() {
                 goodbye_cancel!("can't work with video nor animated nor video stickers.");
             }
-            check_too_large!(photo);
+            check_too_large!(photo.file);
             photo
         }
         None => goodbye_cancel!(concat!(
@@ -532,7 +533,7 @@ async fn to_custom_emoji(tp: TaskParams<'_>) -> Ret {
             if !photo.is_image() {
                 goodbye_cancel!("can't work with video nor animated nor video stickers.");
             }
-            check_too_large!(photo);
+            check_too_large!(photo.file);
             photo
         }
         None => goodbye_cancel!(concat!(
@@ -602,7 +603,7 @@ async fn ocr(tp: TaskParams<'_>) -> Ret {
             if !photo.is_image() {
                 goodbye_cancel!("can't work with video nor animated nor video stickers.");
             }
-            check_too_large!(photo);
+            check_too_large!(photo.file);
             photo
         }
         None => goodbye_cancel!(concat!(
@@ -638,7 +639,7 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
             if video.is_image() {
                 goodbye_cancel!("can't work with non-video images.");
             }
-            check_too_large!(video);
+            check_too_large!(video.file);
             video
         }
         None => goodbye_cancel!(concat!(
@@ -811,13 +812,13 @@ async fn amenbreak(tp: TaskParams<'_>) -> Ret {
     let media = tp.message.get_media_info();
     let _media = match media {
         Some(media) => {
-            if !media.is_raster() {
+            if media.is_vector_sticker {
                 goodbye_cancel!("can't work with animated stickers.");
             }
             if media.is_sound {
                 goodbye_cancel!("can't work with audio messages.");
             }
-            check_too_large!(media);
+            check_too_large!(media.file);
             media
         }
         None => goodbye_cancel!(concat!(
@@ -844,7 +845,7 @@ async fn transcribe(tp: TaskParams<'_>) -> Ret {
             if !(media.is_video || media.is_sound || media.is_voice_or_video_note) {
                 goodbye_cancel!("input media doesn't have sound.");
             }
-            check_too_large!(media);
+            check_too_large!(media.file);
             media
         }
         None => goodbye_cancel!(concat!(
@@ -1031,6 +1032,43 @@ async fn spoiler(tp: TaskParams<'_>) -> Ret {
     }
 
     result
+}
+
+pub const REENCODE: Command = Command {
+    callname: "/reencode",
+    description: "Reencode an image/gif/video/audio to a format Telegram can show conveniently.",
+    function: wrap!(reencode),
+    hidden: false,
+};
+async fn reencode(tp: TaskParams<'_>) -> Ret {
+    let temp_task = Task::default_reencode();
+    print_help!(tp, temp_task);
+    let media = tp.message.get_media_info();
+    let file = match media {
+        Some(media) => {
+            if media.is_vector_sticker {
+                goodbye_cancel!("can't work with animated stickers.");
+            }
+            media.file
+        }
+        None => {
+            let Some(document) = tp
+                .message
+                .document()
+                .or_else(|| tp.message.reply_to_message().and_then(|x| x.document()))
+            else {
+                goodbye_cancel!(concat!(
+                    "can't find a media. ",
+                    "This command needs to be used as either a reply or caption to one."
+                ));
+            };
+            &document.file
+        }
+    };
+
+    check_too_large!(file);
+
+    Ok(Ok(temp_task))
 }
 
 #[cfg(test)]
