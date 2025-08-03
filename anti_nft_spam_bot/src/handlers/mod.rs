@@ -4,7 +4,7 @@ use arch_bot_commons::{teloxide_retry, useful_methods::BotArchSendMsg};
 use html_escape::encode_text;
 use teloxide::{
     prelude::*,
-    sugar::request::RequestLinkPreviewExt,
+    sugar::request::{RequestLinkPreviewExt, RequestReplyExt},
     types::{
         BotCommand, ChatMember, CopyTextButton, Me, MessageEntityKind, MessageEntityRef, MessageId,
         SwitchInlineQueryChosenChat,
@@ -676,11 +676,6 @@ async fn handle_command(
     database: &Arc<Database>,
     mut sent_by_admin: Option<bool>,
 ) -> Result<bool, RequestError> {
-    if message.edit_date().is_some() {
-        // Ignore message edits here.
-        return Ok(false);
-    }
-
     macro_rules! byadmin {
         () => {{
             if sent_by_admin.is_none() {
@@ -701,11 +696,40 @@ async fn handle_command(
             return Ok(true);
         }};
     }
+
+    if message.edit_date().is_some() {
+        // Ignore message edits here.
+        return Ok(false);
+    }
+
     let is_private = message.chat.is_private();
 
     let Some(text) = message.text() else {
         return Ok(false);
     };
+
+    // Special case: nag for cash money if someone says "good bot" uwu
+    static GOOD_BOT: &str = "good bot";
+    if let Some((maybe, _)) = text.split_at_checked(GOOD_BOT.len()) {
+        if maybe.eq_ignore_ascii_case(GOOD_BOT)
+            && (is_private
+                || message
+                    .reply_to_message()
+                    .and_then(|x| x.from.as_ref())
+                    .map(|x| x.id == me.id)
+                    .unwrap_or(false))
+        {
+            static NAG: &str =
+                "<a href=\"https://boosty.to/architector_4\">(Consider supporting? 👉👈)</a>";
+            bot.send_message(message.chat.id, NAG)
+                .reply_to(message.id)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .disable_link_preview(true)
+                .await?;
+            return Ok(true);
+        }
+    };
+
     // Check if it starts with "/", like how a command should.
     if !text.starts_with('/') {
         return Ok(false);
