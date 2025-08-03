@@ -1105,4 +1105,16 @@ mod tests {
             assert!(command.description.len() <= 256);
         }
     }
+
+    #[test]
+    fn validate_command_html_parsing() {
+        for command in COMMANDS {
+            let tag_chars = &['<', '>'];
+            assert!(
+                !(command.callname.contains(tag_chars) || command.description.contains(tag_chars)),
+                "Command {} contains invalid characters",
+                command.callname
+            );
+        }
+    }
 }
