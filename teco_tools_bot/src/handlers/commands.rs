@@ -13,7 +13,7 @@ use teloxide::{
     requests::Requester,
     sugar::request::RequestReplyExt,
     types::{BotCommand, InputFile, Me, Message, UserId},
-    Bot, RequestError,
+    ApiError, Bot, RequestError,
 };
 use tempfile::NamedTempFile;
 
@@ -932,10 +932,8 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
         .await
     {
         Ok(_) => (),
-        Err(teloxide::RequestError::Api(teloxide::ApiError::Unknown(x)))
-            if x == "Bad Request: text must be non-empty" =>
-        {
-            goodbye_err!("Sorry, resulting text is empty.");
+        Err(RequestError::Api(ApiError::MessageTextIsEmpty)) => {
+            goodbye_err!("Sorry, resulting text is empty.")
         }
         Err(e) => Err(e)?,
     };

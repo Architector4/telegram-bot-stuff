@@ -209,14 +209,10 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
             .await;
 
         if let Err(e) = result {
-            let mut request_deleted: bool = false;
-            if let RequestError::Api(ApiError::Unknown(s)) = &e {
-                // to telegram: ?????????????????????????????
-                request_deleted = s.contains("Bad Request: message to reply not found")
-                    || s.contains("Bad Request: message to be replied not found");
-            };
-
-            if !request_deleted {
+            if let RequestError::Api(ApiError::MessageToReplyNotFound) = &e {
+                // The person requesting the command deleted their message or something.
+                // No need to care.
+            } else {
                 log::error!("ERROR when processing task: {e:#?}\nTask data: {task_data:#?}");
                 let _ = taskman
                     .bot
