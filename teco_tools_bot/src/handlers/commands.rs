@@ -941,7 +941,7 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
 }
 
 pub const SPOILER: Command = Command {
-    callname: "/spoiler <caption>",
+    callname: "/spoiler &lt;caption&gt;",
     description: "Hide a media within a spoiler with a specified caption, if any.",
     function: wrap!(spoiler),
     hidden: false,
