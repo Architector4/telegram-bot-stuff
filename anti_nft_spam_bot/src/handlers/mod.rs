@@ -81,7 +81,7 @@ fn get_entity_url_domain(entity: &MessageEntityRef) -> Option<(Url, Domain)> {
 /// Get a domain and a URL from this button, if available.
 fn get_button_url_domain(
     button: &teloxide::types::InlineKeyboardButton,
-) -> Option<(Cow<Url>, Domain)> {
+) -> Option<(Cow<'_, Url>, Domain)> {
     use teloxide::types::InlineKeyboardButtonKind as Kind;
     use teloxide::types::{LoginUrl, WebAppInfo};
     let url = match &button.kind {

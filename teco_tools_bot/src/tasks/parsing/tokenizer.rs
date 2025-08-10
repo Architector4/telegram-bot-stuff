@@ -7,7 +7,7 @@ pub enum Token<'a> {
 }
 
 impl<'a> Tokenizer<'a> {
-    pub fn new(input: &str) -> Tokenizer {
+    pub fn new(input: &str) -> Tokenizer<'_> {
         Tokenizer(input)
     }
 
