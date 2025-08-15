@@ -59,7 +59,7 @@ async fn lol() {
         LazyLock::new(|| Regex::new("hi+,? +herbert.*").expect("Regex will always be valid"));
     // Hardcoded file ID
     static MOW_URL: LazyLock<Url> = LazyLock::new(|| {
-        Url::parse("https://architector4.tilde.team/stuff/mow.ogg")
+        Url::parse("https://raw.githubusercontent.com/Architector4/telegram-bot-stuff/refs/heads/main/hi_cutie_bot/mow.ogg")
             .expect("URL will always be valid")
     });
 
