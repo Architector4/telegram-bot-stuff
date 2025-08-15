@@ -180,9 +180,9 @@ macro_rules! teloxide_retry {
                     break result;
                 }
                 continue;
-            } else {
-                break result;
-            }
+            } 
+
+            break result;
         }
     }};
 }

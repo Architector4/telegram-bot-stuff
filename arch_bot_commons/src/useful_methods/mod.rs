@@ -27,9 +27,11 @@ pub struct MessageMediaInfo<'a> {
 }
 
 impl MessageMediaInfo<'_> {
+    #[must_use]
     pub fn is_image(&self) -> bool {
         !self.is_video && self.is_raster()
     }
+    #[must_use]
     pub fn is_raster(&self) -> bool {
         !self.is_vector_sticker && !self.is_sound
     }
