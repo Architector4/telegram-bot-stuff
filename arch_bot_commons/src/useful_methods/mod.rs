@@ -37,7 +37,6 @@ impl MessageMediaInfo<'_> {
 
 pub trait MessageStuff {
     fn text_full(&self) -> Option<&str>;
-    #[allow(clippy::result_unit_err)] // i'm lazy lol
     /// On success, returns info about image/video/sound in the video.
     fn get_media_info(&self) -> Option<MessageMediaInfo<'_>>;
     fn find_biggest_photo(&self) -> Option<&PhotoSize>;
@@ -170,7 +169,9 @@ impl MessageStuff for Message {
     }
     fn find_biggest_photo(&self) -> Option<&PhotoSize> {
         if let Some(photo_sizes) = self.photo() {
-            photo_sizes.iter().max_by_key(|x| x.width + x.height)
+            photo_sizes
+                .iter()
+                .max_by_key(|x| u64::from(x.width) + u64::from(x.height))
         } else {
             None
         }
