@@ -407,7 +407,7 @@ impl Task {
                     wp!(vibrato_hz)?;
                     wp!(vibrato_depth)?;
                     write_param!("Resize curve", resize_curve)?;
-                };
+                }
 
                 writeln!(output, "<b>Quality</b>: {quality}%")
             }

@@ -226,7 +226,7 @@ pub fn resize_image(
     // Quality tends to behave in an exponential manner.
     // Normalize this to make it perceptually linear.
     let quality = quality.get() - 1; // From 0 to 99.
-    let quality_pow_4 = (quality as u32).pow(4); // From 0 to 99⁴.
+    let quality_pow_4 = u32::from(quality).pow(4); // From 0 to 99⁴.
 
     // Bring it back to 0..99, then back to 1.100.
     let quality = quality_pow_4 / 99u32.pow(3) + 1;
@@ -274,7 +274,7 @@ pub fn resize_image(
             let jpg = wand.write_image_blob("jpg")?;
             wand = MagickWand::new();
             wand.read_image_blob(jpg)?;
-        };
+        }
     }
 
     // Apply output size to the results of above.
@@ -642,8 +642,8 @@ pub fn resize_video(
             // don't stretch.
             false
         } else {
-            let input_width = input_dimensions.0 as f64;
-            let input_height = input_dimensions.1 as f64;
+            let input_width = f64::from(input_dimensions.0);
+            let input_height = f64::from(input_dimensions.1);
 
             // "max" to avoid inf/NaN values
             let end_width = (width as f64).max(1.0);
@@ -671,13 +671,13 @@ pub fn resize_video(
                 let curved_width = resize_curve.apply_resize_for(
                     count,
                     input_frame_count,
-                    input_dimensions.0 as f64,
+                    f64::from(input_dimensions.0),
                     width as f64,
                 );
                 let curved_height = resize_curve.apply_resize_for(
                     count,
                     input_frame_count,
-                    input_dimensions.1 as f64,
+                    f64::from(input_dimensions.1),
                     height as f64,
                 );
                 let curved_rotation =
@@ -729,7 +729,7 @@ pub fn resize_video(
     let (mut decoder, decoded_image_stream) = unfail!(SplitIntoBmps::from_file(inputfile));
 
     let parallelisms = std::thread::available_parallelism()
-        .map(|x| x.get())
+        .map(std::num::NonZero::get)
         .unwrap_or(1);
 
     let mut converting_thread_handles = Vec::with_capacity(parallelisms);
@@ -918,7 +918,7 @@ pub fn resize_video(
         // Quality tends to behave in an exponential manner.
         // Normalize this to make it perceptually linear.
         let quality = quality.get() - 1; // From 0 to 99.
-        let quality_pow_4 = (quality as u32).pow(3); // From 0 to 99³.
+        let quality_pow_4 = u32::from(quality).pow(3); // From 0 to 99³.
 
         // Bring it back to 0..99, then back to 1.100.
         let quality = quality_pow_4 / 99u32.pow(2) + 1;
@@ -1015,11 +1015,11 @@ pub fn ocr_image(data: &[u8]) -> Result<String, MagickError> {
         let new = {
             static OCR_REGEX_1: OnceLock<Regex> = OnceLock::new();
             static OCR_REGEX_2: OnceLock<Regex> = OnceLock::new();
-            let regex_1 = OCR_REGEX_1.get_or_init(|| Regex::new(r#"[ \t]{2,}"#).unwrap());
-            let regex_2 = OCR_REGEX_2.get_or_init(|| Regex::new(r#"\s\s\s+"#).unwrap());
+            let regex_1 = OCR_REGEX_1.get_or_init(|| Regex::new(r"[ \t]{2,}").unwrap());
+            let regex_2 = OCR_REGEX_2.get_or_init(|| Regex::new(r"\s\s\s+").unwrap());
             // Sometimes, Tesseract inserts | (pipe) instead of I (uppercase i).
             // Replace those in-place, if they exist.
-            let regex_3 = OCR_REGEX_2.get_or_init(|| Regex::new(r#"\|"#).unwrap());
+            let regex_3 = OCR_REGEX_2.get_or_init(|| Regex::new(r"\|").unwrap());
 
             let stripped = regex_1.replace_all(buffer, " ");
             let stripped = regex_2.replace_all(&stripped, "\n");
@@ -1326,9 +1326,8 @@ pub fn reencode(
 
                 if has_audio {
                     return Ok(ReencodeMedia::Video(video));
-                } else {
-                    return Ok(ReencodeMedia::Gif(video));
                 }
+                return Ok(ReencodeMedia::Gif(video));
             }
             Some(Err(e)) => {
                 return Err(format!(

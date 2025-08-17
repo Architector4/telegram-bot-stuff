@@ -938,7 +938,7 @@ async fn rot_text(tp: TaskParams<'_>) -> Ret {
             goodbye_err!("Sorry, resulting text is empty.")
         }
         Err(e) => Err(e)?,
-    };
+    }
     goodbye!();
 }
 
@@ -975,13 +975,12 @@ async fn spoiler(tp: TaskParams<'_>) -> Ret {
                     sticker.height.into(),
                     tp.get_params().to_string(),
                 )));
-            } else {
-                return Ok(Ok(Task::default_to_spoilered_image(
-                    sticker.width.into(),
-                    sticker.height.into(),
-                    tp.get_params().to_string(),
-                )));
             }
+            return Ok(Ok(Task::default_to_spoilered_image(
+                sticker.width.into(),
+                sticker.height.into(),
+                tp.get_params().to_string(),
+            )));
         }
 
         if message.voice().is_some() || message.audio().is_some() {

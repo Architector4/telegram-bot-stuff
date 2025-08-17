@@ -62,9 +62,8 @@ macro_rules! parse_plain_param_with_parser_optional {
             if let Ok(value) = $parser(value) {
                 $name = value;
                 continue;
-            } else {
-                true
             }
+            true
         } else {
             false
         }
@@ -416,14 +415,14 @@ impl Task {
                         (data.eq_ignore_ascii_case("maxfit")
                             || data.eq_ignore_ascii_case("max_fit"))
                         .then(|| {
-                            let scale_to_fit_for_x =
-                                MAX_OUTPUT_MEDIA_DIMENSION_SIZE as f64 / old_dimensions.0 as f64;
-                            let scale_to_fit_for_y =
-                                MAX_OUTPUT_MEDIA_DIMENSION_SIZE as f64 / old_dimensions.1 as f64;
+                            let scale_to_fit_for_x = f64::from(MAX_OUTPUT_MEDIA_DIMENSION_SIZE)
+                                / f64::from(old_dimensions.0);
+                            let scale_to_fit_for_y = f64::from(MAX_OUTPUT_MEDIA_DIMENSION_SIZE)
+                                / f64::from(old_dimensions.1);
                             let scale = f64::min(scale_to_fit_for_x, scale_to_fit_for_y);
 
-                            let x = old_dimensions.0 as f64 * scale;
-                            let y = old_dimensions.1 as f64 * scale;
+                            let x = f64::from(old_dimensions.0) * scale;
+                            let y = f64::from(old_dimensions.1) * scale;
 
                             Some((x as i32, y as i32))
                         })
@@ -535,7 +534,7 @@ impl Task {
                             original_dimensions.1,
                             biggest_percentage_that_can_fit(*original_dimensions)
                         )));
-                    };
+                    }
 
                     // Calculate percentages.
                     let p_x = 100.0 * new_dimensions.0 as f32 / original_dimensions.0 as f32;
@@ -543,7 +542,7 @@ impl Task {
 
                     // Only true if the X and Y percentages are close enough.
                     let percentage = if (p_x - p_y).abs() < 1.5 {
-                        Some((p_x + p_y) / 2.0)
+                        Some(f32::midpoint(p_x, p_y))
                     } else {
                         None
                     };
@@ -792,7 +791,10 @@ fn aspect_ratio_parser(
     (a, mut b): (&str, &str),
     starting_dimensions: (i32, i32),
 ) -> Option<(i32, i32)> {
-    let (width, height) = (starting_dimensions.0 as f64, starting_dimensions.1 as f64);
+    let (width, height) = (
+        f64::from(starting_dimensions.0),
+        f64::from(starting_dimensions.1),
+    );
     let ends_in_plus = if b.ends_with('+') {
         b = &b[0..b.len() - 1];
         true

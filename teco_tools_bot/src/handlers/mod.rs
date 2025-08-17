@@ -277,8 +277,7 @@ pub async fn handle_edited_message(
 
     let is_delayed = taskdata
         .delay_processing_until
-        .map(|x| x > Utc::now())
-        .unwrap_or(false);
+        .is_some_and(|x| x > Utc::now());
 
     let response = task.produce_queue_message(is_delayed.then_some(queue_size), None);
 

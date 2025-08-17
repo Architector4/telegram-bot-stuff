@@ -61,7 +61,7 @@ impl Taskman {
         };
 
         let parallelisms = std::thread::available_parallelism()
-            .map(|x| x.get())
+            .map(std::num::NonZero::get)
             .unwrap_or(2);
 
         // Spawn two tasks per each pair of parallelisms, at least once
@@ -239,7 +239,7 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
                     log::error!("ERROR when sending the info above to the owner:\n{e:#?}");
                 }
             }
-        };
+        }
 
         // Task done. Delete the "edit message", just in case.
         if let Some(new_task_data) = taskman
@@ -300,8 +300,7 @@ pub async fn queue_counter_spinjob(taskman: Weak<Taskman>) {
             // If the task is delayed...
             let queue_size_if_not_delayed = if taskdata
                 .delay_processing_until
-                .map(|x| x > Utc::now())
-                .unwrap_or(false)
+                .is_some_and(|x| x > Utc::now())
             {
                 None
             } else {

@@ -447,7 +447,7 @@ impl Database {
 
     pub async fn user_has_too_much_tasks(&self, user: Option<UserId>) -> Result<bool, Error> {
         let parallelisms = std::thread::available_parallelism()
-            .map(|x| x.get())
+            .map(std::num::NonZero::get)
             .unwrap_or_default()
             .max(3);
 
