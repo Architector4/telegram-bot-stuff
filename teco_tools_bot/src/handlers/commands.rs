@@ -32,6 +32,8 @@ pub const COMMANDS: &[Command] = &[
     AMOGUS,
     DISTORT,
     OCR,
+    PICKAUDIO,
+    LAYERAUDIO,
     REENCODE,
     RESIZE,
     REVERSE_TEXT,
@@ -1065,6 +1067,100 @@ async fn reencode(tp: TaskParams<'_>) -> Ret {
     };
 
     check_too_large!(file);
+
+    Ok(Ok(temp_task))
+}
+
+pub const PICKAUDIO: Command = Command {
+    callname: "/pickaudio",
+    description: "Pick an audio file for use with /layeraudio",
+    function: wrap!(pickaudio),
+    hidden: false,
+};
+async fn pickaudio(tp: TaskParams<'_>) -> Ret {
+    let id = if let Some(chat) = &tp.message.sender_chat {
+        chat.id.0
+    } else if let Some(user) = &tp.message.from {
+        user.id.0 as i64
+    } else {
+        goodbye_err!("Cannot determine the sender of this message");
+    };
+
+    let media = tp.message.get_media_info();
+    let file = match media {
+        Some(media) => {
+            if !media.is_sound {
+                goodbye_cancel!("only audio files can be tagged.");
+            }
+            check_too_large!(media.file);
+            media.file
+        }
+        None => {
+            let Some(document) = tp
+                .message
+                .document()
+                .or_else(|| tp.message.reply_to_message().and_then(|x| x.document()))
+            else {
+                goodbye_cancel!("only audio files can be tagged.");
+            };
+            check_too_large!(document.file);
+            &document.file
+        }
+    };
+
+    tp.taskman
+        .db
+        .pick_audio(id, file)
+        .await
+        .expect("Database died!");
+
+    goodbye_desc!("Marked audio. Now use /layeraudio on a media to apply it.");
+}
+
+pub const LAYERAUDIO: Command = Command {
+    callname: "/layeraudio",
+    description: "Layer audio (previously selected with /pickaudio) over an image or a video",
+    function: wrap!(layeraudio),
+    hidden: false,
+};
+async fn layeraudio(tp: TaskParams<'_>) -> Ret {
+    let id = if let Some(chat) = &tp.message.sender_chat {
+        chat.id.0
+    } else if let Some(user) = &tp.message.from {
+        user.id.0 as i64
+    } else {
+        goodbye_err!("Cannot determine the sender of this message");
+    };
+
+    let Some(filemeta) = tp
+        .taskman
+        .db
+        .get_picked_audio(id)
+        .await
+        .expect("Database died!")
+    else {
+        goodbye_err!("You have no audio picked. Pick some audio with /pickaudio first.");
+    };
+
+    let temp_task = Task::default_layer_audio(filemeta);
+    print_help!(tp, temp_task);
+    let media = tp.message.get_media_info();
+    let _media = match media {
+        Some(media) => {
+            if media.is_vector_sticker {
+                goodbye_cancel!("can't work with animated stickers.");
+            }
+            if media.is_sound {
+                goodbye_cancel!("can't work with audio messages.");
+            }
+            check_too_large!(media.file);
+            media
+        }
+        None => goodbye_cancel!(concat!(
+            "can't find a video or a photo. ",
+            "This command needs to be used as either a reply or caption to one."
+        )),
+    };
 
     Ok(Ok(temp_task))
 }

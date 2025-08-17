@@ -6,7 +6,7 @@ use std::{f64::consts::TAU, fmt::Display, num::NonZeroU8, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use teloxide::{
-    types::{Me, Message},
+    types::{FileMeta, Me, Message},
     Bot,
 };
 
@@ -294,6 +294,7 @@ pub enum Task {
         translate_to_english: bool,
     },
     AmenBreak,
+    LayerAudio(FileMeta),
     Reencode,
 }
 
@@ -412,6 +413,7 @@ impl Task {
             }
             Task::Ocr => Ok(()),
             Task::AmenBreak => Ok(()),
+            Task::LayerAudio(_) => Ok(()),
             Task::Transcribe {
                 temperature,
                 translate_to_english,
@@ -576,6 +578,9 @@ impl Task {
     }
     pub fn default_amenbreak() -> Task {
         Task::AmenBreak
+    }
+    pub fn default_layer_audio(meta: FileMeta) -> Task {
+        Task::LayerAudio(meta)
     }
     pub fn default_reencode() -> Task {
         Task::Reencode

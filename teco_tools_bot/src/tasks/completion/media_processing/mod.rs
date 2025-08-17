@@ -1060,10 +1060,11 @@ pub fn ocr_image(data: &[u8]) -> Result<String, MagickError> {
     Ok(result)
 }
 
-pub fn amen_break_media(
+pub fn layer_audio_over_media(
     status_report: Sender<String>,
     inputfile: &Path,
     is_video: bool,
+    audiofile: Option<&Path>,
 ) -> Result<Vec<u8>, String> {
     macro_rules! unfail {
         ($thing: expr) => {
@@ -1077,20 +1078,27 @@ pub fn amen_break_media(
     let _ = status_report.send("Creating temp files...".to_string());
     let mut outputfile = unfail!(NamedTempFile::new());
 
-    let _ = status_report.send("Choosing an amen break...".to_string());
-    let count = unfail!(std::fs::read_dir("amen-breaks")).count();
-    let mut rng = rand::rng();
-    use rand::Rng;
-    let which_to_pick = rng.random_range(0..count);
-    let Some(the_break) = unfail!(std::fs::read_dir("amen-breaks")).nth(which_to_pick) else {
-        return Err("Failed to pick an amen break!".to_string());
+    let break_path;
+
+    let path = if let Some(audiofile) = audiofile {
+        audiofile
+    } else {
+        let _ = status_report.send("Choosing an amen break...".to_string());
+        let count = unfail!(std::fs::read_dir("amen-breaks")).count();
+        let mut rng = rand::rng();
+        use rand::Rng;
+        let which_to_pick = rng.random_range(0..count);
+        let Some(the_break) = unfail!(std::fs::read_dir("amen-breaks")).nth(which_to_pick) else {
+            return Err("Failed to pick an amen break!".to_string());
+        };
+
+        break_path = unfail!(the_break).path();
+        &break_path
     };
 
-    let break_path = unfail!(the_break).path();
-
-    let _ = status_report.send("Checking amen break length".to_string());
+    let _ = status_report.send("Checking audio length...".to_string());
     let (_input_frame_count, _input_frame_rate, _has_audio, amen_break_length) = unfail!(
-        count_video_frames_and_framerate_and_audio_and_length(&break_path, true)
+        count_video_frames_and_framerate_and_audio_and_length(path, true)
     );
 
     let _ = status_report.send("Checking video length...".to_string());
@@ -1103,7 +1111,7 @@ pub fn amen_break_media(
         .as_secs_f64()
         .to_string();
 
-    let _ = status_report.send("Amen breaking...".to_string());
+    let _ = status_report.send("Layering audio...".to_string());
 
     let loop_params = if is_video {
         // For some reason, using -loop for videos makes
@@ -1126,7 +1134,7 @@ pub fn amen_break_media(
             OsStr::new("-stream_loop"),
             OsStr::new("-1"),
             OsStr::new("-i"),
-            break_path.as_ref(),
+            path.as_ref(),
             OsStr::new("-map"),
             OsStr::new("0:v"),
             OsStr::new("-map"),

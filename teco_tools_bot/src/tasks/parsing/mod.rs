@@ -238,6 +238,7 @@ impl Task {
             },
             Task::Ocr => "",
             Task::AmenBreak => "",
+            Task::LayerAudio(_) => "To pick an audio, reply to a message that has some with /pickaudio.",
             Task::Transcribe { temperature: _, translate_to_english: _ } =>
                 concat!(
                     "<b>Possible parameters for this command:</b>\n",
@@ -626,6 +627,7 @@ impl Task {
             }
             Task::Ocr => Ok(Task::Ocr),
             Task::AmenBreak => Ok(Task::AmenBreak),
+            Task::LayerAudio(meta) => Ok(Task::LayerAudio(meta.clone())),
             Task::Transcribe {
                 temperature: _,
                 translate_to_english: _,

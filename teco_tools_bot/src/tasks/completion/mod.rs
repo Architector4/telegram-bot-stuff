@@ -395,7 +395,7 @@ impl Task {
 
                 goodbye!(encode_text(&text).as_ref());
             }
-            Task::AmenBreak => {
+            Task::AmenBreak | Task::LayerAudio(_) => {
                 let media = data.message.get_media_info();
                 let media = match media {
                     Some(media) => {
@@ -423,31 +423,41 @@ impl Task {
                 let (path, file) =
                     unerror_download!(bot.download_file_to_temp_or_directly(media.file).await);
 
+                let (path_audio, file_audio) = if let Task::LayerAudio(meta) = self {
+                    let (path, file) =
+                        unerror_download!(bot.download_file_to_temp_or_directly(meta).await);
+                    (Some(path), file)
+                } else {
+                    (None, None)
+                };
+
                 let status_report_for_processing = status_report.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
-                    media_processing::amen_break_media(
+                    media_processing::layer_audio_over_media(
                         status_report_for_processing,
                         &path,
                         media.is_video,
+                        path_audio.as_deref(),
                     )
                 })
                 .await
                 .expect("Worker died!");
 
                 drop(file);
+                drop(file_audio);
 
                 let video_data = match result {
                     Ok(m) => m,
                     Err(e) => {
-                        log::error!("Error when amen breaking video: {e}");
-                        goodbye!("Error: failed to amen break the video");
+                        log::error!("Error when layering audio: {e}");
+                        goodbye!("Error: failed to layer audio. Are you sure the picked audio really has sound?");
                     }
                 };
 
                 if video_data.is_empty() {
                     goodbye!(
-                        "Error: failed to amen break the video; got empty file as a result. Sorry!"
+                        "Error: failed to layer audio over the media; got empty file as a result. Sorry!"
                     );
                 }
 

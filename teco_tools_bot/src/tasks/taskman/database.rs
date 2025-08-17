@@ -8,7 +8,7 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
     Executor, Row, Sqlite,
 };
-use teloxide::types::{ChatId, Message, MessageId, UserId};
+use teloxide::types::{ChatId, FileMeta, Message, MessageId, UserId};
 use tokio_stream::Stream;
 
 use crate::{tasks::Task, OWNER_ID};
@@ -78,8 +78,8 @@ impl Database {
         // TASKS:
         // taskid (key, i64),
         // userid (i64 because sqlite doesn't support u64; may be NULL),
-        // task (task object serialized in RON),
-        // message (message that requested the task, serialized in RON;
+        // task (task object serialized in JSON),
+        // message (message that requested the task, serialized in JSON;
         //          will also contain all the file hashes and stuff as well as
         //          the replied-to message),
         // request_message_chat_id (i64),
@@ -117,6 +117,17 @@ impl Database {
         pool.execute(sqlx::query(
             "CREATE TABLE IF NOT EXISTS premium_users (
                 userid INTEGER PRIMARY KEY NOT NULL
+            ) STRICT;",
+        ))
+        .await?;
+
+        // AUDIO_PICKS
+        // userid (key, u64)
+        // filemeta (FileMeta object serialized in JSON)
+        pool.execute(sqlx::query(
+            "CREATE TABLE IF NOT EXISTS audio_picks (
+                userid INTEGER PRIMARY KEY NOT NULL,
+                filemeta TEXT NOT NULL
             ) STRICT;",
         ))
         .await?;
@@ -490,4 +501,44 @@ impl Database {
             time_until.to_std().unwrap_or(std::time::Duration::ZERO),
         ))
     }
+
+    /// Pick an audio file for this user.
+    pub async fn pick_audio(&self, userid: i64, filemeta: &FileMeta) -> Result<(), Error> {
+        let filemeta_ser = serde_json::to_string(&filemeta).unwrap();
+        sqlx::query(
+            "INSERT INTO audio_picks(userid, filemeta) VALUES (?, ?)
+                ON CONFLICT DO UPDATE SET userid=?, filemeta=?;",
+        )
+        .bind(userid)
+        .bind(&filemeta_ser)
+        .bind(userid)
+        .bind(&filemeta_ser)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Get an audio file picked by this user.
+    pub async fn get_picked_audio(&self, userid: i64) -> Result<Option<FileMeta>, Error> {
+        sqlx::query("SELECT filemeta FROM audio_picks WHERE userid=?")
+            .bind(userid)
+            .map(|row: SqliteRow| serde_json::from_str(row.get(0)).unwrap())
+            .fetch_optional(&self.pool)
+            .await
+    }
+
+    ///// If this user still has this audio file picked, discard it.
+    //pub async fn picked_audio_discard(
+    //    &self,
+    //    userid: i64,
+    //    filemeta: &FileMeta,
+    //) -> Result<(), Error> {
+    //    let filemeta_ser = serde_json::to_string(&filemeta).unwrap();
+    //    sqlx::query("DELETE from audio_picks WHERE userid=? AND filemeta=?;")
+    //        .bind(userid)
+    //        .bind(&filemeta_ser)
+    //        .execute(&self.pool)
+    //        .await?;
+    //    Ok(())
+    //}
 }
