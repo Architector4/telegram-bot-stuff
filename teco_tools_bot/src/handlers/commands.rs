@@ -1088,8 +1088,8 @@ async fn pickaudio(tp: TaskParams<'_>) -> Ret {
     let media = tp.message.get_media_info();
     let file = match media {
         Some(media) => {
-            if !media.is_sound {
-                goodbye_cancel!("only audio files can be tagged.");
+            if !media.is_sound && !media.is_video {
+                goodbye_cancel!("only audio or video files can be tagged.");
             }
             check_too_large!(media.file);
             media.file
@@ -1100,7 +1100,7 @@ async fn pickaudio(tp: TaskParams<'_>) -> Ret {
                 .document()
                 .or_else(|| tp.message.reply_to_message().and_then(|x| x.document()))
             else {
-                goodbye_cancel!("only audio files can be tagged.");
+                goodbye_cancel!("only audio or video files can be tagged.");
             };
             check_too_large!(document.file);
             &document.file
