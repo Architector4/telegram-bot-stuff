@@ -180,7 +180,7 @@ macro_rules! teloxide_retry {
                     break result;
                 }
                 continue;
-            } 
+            }
 
             break result;
         }

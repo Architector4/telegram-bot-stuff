@@ -186,7 +186,7 @@ async fn edit_message_into_a_review(
         })
         .await?;
         return Ok(());
-    };
+    }
 
     edit_result?;
     Ok(())

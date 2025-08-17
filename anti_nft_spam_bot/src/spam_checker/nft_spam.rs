@@ -34,7 +34,7 @@ pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
         // Annoying crypto spam that's a telegram bot but
         // also has a username without "bot" at the end.
         return Some(IsSpam::Yes);
-    };
+    }
 
     if username == "notpixel" {
         // Same as above.
@@ -60,7 +60,7 @@ pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
     if !username.ends_with("bot") {
         // Not a telegram bot (usually).
         return Some(IsSpam::No);
-    };
+    }
 
     if username.ends_with("hamster_kombat_bot") {
         // Specific one that's being spammed a bunch.
@@ -78,7 +78,7 @@ pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
     if username.ends_with("drop_bot") {
         // No way in hell a "...drop_bot" is anything other than spam, right?
         return Some(IsSpam::Yes);
-    };
+    }
 
     let Some(params) = segments.next() else {
         // It's a bot, but no params. Probably fine.

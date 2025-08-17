@@ -37,6 +37,7 @@ pub fn parse_url_like_telegram(string: &str) -> Result<Url, url::ParseError> {
     }
 }
 
+#[must_use]
 pub fn sender_name_prettyprint(message: &Message, with_id: bool) -> String {
     let mut userid = None;
     let mut chatid = None;

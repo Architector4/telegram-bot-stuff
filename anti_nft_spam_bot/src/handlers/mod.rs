@@ -445,16 +445,16 @@ async fn gather_suspicion(
             if replied_to_sent_by_admin != Some(true) {
                 // The sender of the replied-to message isn't an admin.
                 break 'reject_from_admin;
-            };
+            }
 
             if sent_by_admin.is_none() {
                 sent_by_admin = Some(is_sender_admin(bot, message).await?);
-            };
+            }
 
             if sent_by_admin == Some(true) {
                 // The sender of this message *is* an admin.
                 break 'reject_from_admin;
-            };
+            }
 
             // The two checks above will return true for private chats without extra
             // Telegram API queries.
@@ -542,7 +542,7 @@ async fn gather_suspicion(
                     }
                 }
             }
-        };
+        }
 
         // Get replied-to message "entities", if any.
         if let Some(replied_message) = message.reply_to_message() {
@@ -658,7 +658,7 @@ async fn gather_suspicion(
                 bot,
                 database,
                 message,
-                links_marked.iter().map(|x| x.as_ref()),
+                links_marked.iter().map(std::convert::AsRef::as_ref),
                 false,
             )
             .await;
@@ -716,8 +716,7 @@ async fn handle_command(
                 || message
                     .reply_to_message()
                     .and_then(|x| x.from.as_ref())
-                    .map(|x| x.id == me.id)
-                    .unwrap_or(false))
+                    .is_some_and(|x| x.id == me.id))
         {
             static NAG: &str =
                 "<a href=\"https://boosty.to/architector_4\">(Consider supporting? 👉👈)</a>";
@@ -728,7 +727,7 @@ async fn handle_command(
                 .await?;
             return Ok(true);
         }
-    };
+    }
 
     // Check if it starts with "/", like how a command should.
     if !text.starts_with('/') {
@@ -969,5 +968,5 @@ pub async fn create_review_notify(
     .is_err()
     {
         log::error!("Failed notifying control chat of new marked sus link!\n{notify_text}");
-    };
+    }
 }

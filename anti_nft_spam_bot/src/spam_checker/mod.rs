@@ -77,7 +77,7 @@ async fn check_inner(
     if let Some((result, true)) = db_result {
         // Manually reviewed. Go ahead.
         return Some((result, true));
-    };
+    }
 
     // We now know it's not manually reviewed. Discard that flag.
     let db_result = db_result.map(|x| x.0);
@@ -85,7 +85,7 @@ async fn check_inner(
     if let Some(IsSpam::Yes) = db_result {
         // Confirmed spam. Just return.
         return Some((IsSpam::Yes, true));
-    };
+    }
 
     if let Some(db_result) = db_result {
         // It's marked as not spam or maybe spam.
@@ -203,7 +203,7 @@ fn get_reqwest_client(use_proxy: bool) -> Result<reqwest::Client, reqwest::Error
         .connect_timeout(Duration::from_secs(7))
         // Force IPv4 because a proxy of mine doesn't support it lol
         // https://github.com/seanmonstar/reqwest/issues/584
-        .local_address(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)));
+        .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
 
     if use_proxy {
         if let Ok(proxies) = File::open("proxies.txt").map(|x| BufReader::new(x).lines()) {

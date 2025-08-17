@@ -197,7 +197,7 @@ impl ReviewResponse {
                     };
 
                     responses.push(response);
-                };
+                }
             }
 
             return Ok(responses);

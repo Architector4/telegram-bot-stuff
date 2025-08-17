@@ -826,7 +826,7 @@ impl Database {
             _ => {
                 err?;
             }
-        };
+        }
 
         Ok(())
     }
