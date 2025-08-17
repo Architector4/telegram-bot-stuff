@@ -424,9 +424,16 @@ impl Task {
                     unerror_download!(bot.download_file_to_temp_or_directly(media.file).await);
 
                 let (path_audio, file_audio) = if let Task::LayerAudio(meta) = self {
-                    let (path, file) =
-                        unerror_download!(bot.download_file_to_temp_or_directly(meta).await);
-                    (Some(path), file)
+                    match bot.download_file_to_temp_or_directly(meta).await {
+                        Ok((path, file)) => (Some(path), file),
+                        Err(_) => {
+                            goodbye!(concat!(
+                                "Error: the picked audio file is unavailable for the bot. ",
+                                "Try picking it again and/or reuploading it and ",
+                                "performing the command again."
+                            ));
+                        }
+                    }
                 } else {
                     (None, None)
                 };
