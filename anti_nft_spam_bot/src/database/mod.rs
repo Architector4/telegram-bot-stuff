@@ -53,6 +53,12 @@ impl Database {
         Self::new_by_path(bot, DB_PATH, true)
     }
 
+    /// Create a new database for testing.
+    #[cfg(test)]
+    pub fn new_test() -> impl std::future::Future<Output = Result<Arc<Database>, Error>> + Send {
+        Database::new_by_path(None, "sqlite::memory:", false)
+    }
+
     /// Create a new database with specified path. Will check if it's a unique database if `unique`
     /// is set. If `bot` is provided, it will also ingest the `spam_website_list.txt` file and
     /// watch it for changes.
@@ -963,19 +969,15 @@ mod tests {
 
     type Ret = Result<(), Error>;
 
-    pub fn new_temp() -> impl std::future::Future<Output = Result<Arc<Database>, Error>> + Send {
-        Database::new_by_path(None, "sqlite::memory:", false)
-    }
-
     #[tokio::test]
     async fn create_db() -> Ret {
-        new_temp().await?;
+        Database::new_test().await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn is_url_spam() -> Ret {
-        let db = new_temp().await?;
+        let db = Database::new_test().await?;
         let spam: Url = parse_url_like_telegram("amogus.com/badspam").unwrap();
 
         assert_eq!(db.is_url_spam(&spam, false).await?, None);
@@ -998,7 +1000,7 @@ mod tests {
 
     #[tokio::test]
     async fn is_domain_spam() -> Ret {
-        let db = new_temp().await?;
+        let db = Database::new_test().await?;
         let spamurl: Url = parse_url_like_telegram("amogus.com/badspam").unwrap();
         let spamdomain: Domain = Domain::from_url(&spamurl).unwrap();
 
@@ -1042,7 +1044,7 @@ mod tests {
 
     #[tokio::test]
     async fn mark_sus_workflow() -> Ret {
-        let db = new_temp().await?;
+        let db = Database::new_test().await?;
         let link = parse_url_like_telegram("example.com/notspam").unwrap();
         let domain = Domain::from_url(&link).unwrap();
 
@@ -1106,14 +1108,14 @@ mod tests {
         let domain = Domain::from_url(&url).unwrap();
 
         for spam_status in [IsSpam::No, IsSpam::Maybe, IsSpam::Yes] {
-            let db = new_temp().await?;
+            let db = Database::new_test().await?;
             db.add_domain(&domain, &url, spam_status, false, false)
                 .await?;
             assert_eq!(
                 db.is_spam(&url, &domain, true).await?,
                 Some((spam_status, false))
             );
-            let db = new_temp().await?;
+            let db = Database::new_test().await?;
             db.add_url(&url, spam_status, false, false).await?;
             assert_eq!(
                 db.is_spam(&url, &domain, true).await?,
@@ -1138,7 +1140,7 @@ mod tests {
         let domainspam = ReviewResponse::DomainSpam(domain.clone(), url.clone());
 
         // Neither URL nor domain is in the database.
-        let db = new_temp().await?;
+        let db = Database::new_test().await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(notspam.conflicts_with_db(&db).await?);
         assert!(urlspam.conflicts_with_db(&db).await?);
@@ -1147,7 +1149,7 @@ mod tests {
         //
 
         // The URL is marked as not spam.
-        let db = new_temp().await?;
+        let db = Database::new_test().await?;
         db.add_url(&url, IsSpam::No, false, true).await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(!notspam.conflicts_with_db(&db).await?);
@@ -1155,7 +1157,7 @@ mod tests {
         assert!(domainspam.conflicts_with_db(&db).await?);
 
         // The URL is marked as maybe spam.
-        let db = new_temp().await?;
+        let db = Database::new_test().await?;
         db.add_url(&url, IsSpam::Maybe, false, true).await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(notspam.conflicts_with_db(&db).await?);
@@ -1163,7 +1165,7 @@ mod tests {
         assert!(domainspam.conflicts_with_db(&db).await?);
 
         // The URL is marked as yes spam.
-        let db = new_temp().await?;
+        let db = Database::new_test().await?;
         db.add_url(&url, IsSpam::Yes, false, true).await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(notspam.conflicts_with_db(&db).await?);
@@ -1173,7 +1175,7 @@ mod tests {
         //
 
         // The domain is marked as not spam.
-        let db = new_temp().await?;
+        let db = Database::new_test().await?;
         db.add_domain(&domain, &url, IsSpam::No, false, true)
             .await?;
         assert!(!skip.conflicts_with_db(&db).await?);
@@ -1182,7 +1184,7 @@ mod tests {
         assert!(domainspam.conflicts_with_db(&db).await?);
 
         // The domain is marked as maybe spam.
-        let db = new_temp().await?;
+        let db = Database::new_test().await?;
         db.add_domain(&domain, &url, IsSpam::Maybe, false, true)
             .await?;
         assert!(!skip.conflicts_with_db(&db).await?);
@@ -1191,7 +1193,7 @@ mod tests {
         assert!(domainspam.conflicts_with_db(&db).await?);
 
         // The domain is marked as yes spam.
-        let db = new_temp().await?;
+        let db = Database::new_test().await?;
         db.add_domain(&domain, &url, IsSpam::Yes, false, true)
             .await?;
         assert!(!skip.conflicts_with_db(&db).await?);
@@ -1219,7 +1221,7 @@ mod tests {
 
         /// Make a database with initial state.
         async fn make_a_db() -> Result<Arc<Database>, Error> {
-            let db = new_temp().await?;
+            let db = Database::new_test().await?;
             let spam: Url = parse_url_like_telegram("t.me/badspam").unwrap();
             let normal: Url = parse_url_like_telegram("t.me/channels").unwrap();
             let tg = parse_url_like_telegram("t.me").unwrap();
@@ -1313,7 +1315,7 @@ mod tests {
         //
         // They should get the "is already marked as spam" response.
 
-        let db = new_temp().await?;
+        let db = Database::new_test().await?;
 
         let spam_url = parse_url_like_telegram("example.org/12345").unwrap();
         let spam_domain = Domain::from_url(&spam_url).unwrap();
