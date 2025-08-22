@@ -198,14 +198,14 @@ pub async fn parse_callback_query(
     db: Arc<Database>,
 ) -> Result<(), RequestError> {
     macro_rules! goodbye {
-        ($text:expr) => {
+        ($text:expr) => {{
             bot.answer_callback_query(query.id).text($text).await?;
             return Ok(());
-        };
-        () => {
+        }};
+        () => {{
             bot.answer_callback_query(query.id).await?;
             return Ok(());
-        };
+        }};
     }
 
     let Some(query_data) = query.data else {
@@ -231,9 +231,13 @@ pub async fn parse_callback_query(
     }
 
     for response in &responses {
-        if !apply_review(&bot, &user, &db, response).await? {
-            goodbye!("Access denied.");
-        }
+        match apply_review(&bot, &user, &db, response).await? {
+            Err(Unauthorized) => goodbye!("Access denied."),
+            Ok(Ok(())) => (),
+            Ok(Err(DomainIsProtected)) => {
+                goodbye!("This domain is protected and cannot be marked as spam.")
+            }
+        };
     }
 
     let Some(message) = message else {
@@ -270,6 +274,11 @@ pub async fn parse_callback_query(
     goodbye!();
 }
 
+#[derive(Debug)]
+pub struct Unauthorized;
+#[derive(Debug)]
+pub struct DomainIsProtected;
+
 /// Apply this review response as coming from this user.
 ///
 /// Returns true if succeeded, false if the user is not in control chat.
@@ -278,13 +287,14 @@ pub async fn apply_review(
     user: &User,
     db: &Arc<Database>,
     response: &ReviewResponse,
-) -> Result<bool, RequestError> {
+) -> Result<Result<Result<(), DomainIsProtected>, Unauthorized>, RequestError> {
+    // ....shush.
+
     if !authenticate_control(bot, user).await? {
-        return Ok(false);
+        return Ok(Err(Unauthorized));
     }
 
-    apply_review_unverified(bot, user, db, response).await?;
-    Ok(true)
+    Ok(Ok(apply_review_unverified(bot, user, db, response).await?))
 }
 
 /// Apply this review response as coming from this user.
@@ -295,7 +305,18 @@ pub async fn apply_review_unverified(
     user: &User,
     db: &Arc<Database>,
     response: &ReviewResponse,
-) -> Result<(), RequestError> {
+) -> Result<Result<(), DomainIsProtected>, RequestError> {
+    // If this review response marks the domain as spam, and it's protected, reject.
+    if let ReviewResponse::DomainSpam(domain, _) = response {
+        if db
+            .is_domain_protected(domain)
+            .await
+            .expect("Database died!")
+        {
+            return Ok(Err(DomainIsProtected));
+        }
+    };
+
     // See if it should be written into the log...
     let should_be_logged = response
         .conflicts_with_db(db)
@@ -348,5 +369,5 @@ pub async fn apply_review_unverified(
             .await?;
     }
 
-    Ok(())
+    Ok(Ok(()))
 }

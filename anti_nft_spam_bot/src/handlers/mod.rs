@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, fmt::Write, sync::Arc};
 
 use arch_bot_commons::{teloxide_retry, useful_methods::BotArchSendMsg};
 use html_escape::encode_text;
@@ -15,6 +15,7 @@ use url::Url;
 
 use crate::{
     database::Database,
+    handlers::reviews::DomainIsProtected,
     parse_url_like_telegram, sender_name_prettyprint,
     types::{Domain, IsSpam, ReviewResponse},
     CONTROL_CHAT_ID,
@@ -822,7 +823,9 @@ async fn handle_command(
                 match command.as_str() {
                     "/mark_not_spam" => {
                         let action = ReviewResponse::NotSpam(Some(domain), url);
-                        reviews::apply_review_unverified(bot, sender, database, &action).await?;
+                        reviews::apply_review_unverified(bot, sender, database, &action)
+                            .await?
+                            .expect("Not marking a domain as spam");
                         // Get the URL back lol
                         url = action.deconstruct().unwrap().1;
 
@@ -833,7 +836,9 @@ async fn handle_command(
                     }
                     "/mark_url_spam" => {
                         let action = ReviewResponse::UrlSpam(Some(domain), url);
-                        reviews::apply_review_unverified(bot, sender, database, &action).await?;
+                        reviews::apply_review_unverified(bot, sender, database, &action)
+                            .await?
+                            .expect("Not marking a domain as spam");
                         // Get the URL back lol
                         url = action.deconstruct().unwrap().1;
 
@@ -844,9 +849,19 @@ async fn handle_command(
                     }
                     "/mark_domain_spam" => {
                         let action = ReviewResponse::DomainSpam(domain, url);
-                        reviews::apply_review_unverified(bot, sender, database, &action).await?;
+                        let result =
+                            reviews::apply_review_unverified(bot, sender, database, &action)
+                                .await?;
                         // Get the URL back lol
                         url = action.deconstruct().unwrap().1;
+
+                        if let Err(DomainIsProtected) = result {
+                            writeln!(
+                                response,
+                                "Domain of {url} is protected and cannot be marked as spam."
+                            )
+                            .expect("String writing is infallible");
+                        };
 
                         if !wrote_header {
                             response.push_str("Marked domains of these URLs as spam:\n");

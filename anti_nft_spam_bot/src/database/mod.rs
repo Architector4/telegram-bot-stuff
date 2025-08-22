@@ -862,6 +862,16 @@ impl Database {
         .await?;
         Ok(())
     }
+
+    /// Check if this domain is protected against accidentally marking as spam.
+    ///
+    /// Currently a stub with hardcoded checks.
+    pub async fn is_domain_protected(&self, domain: &Domain) -> Result<bool, Error> {
+        match domain.as_ref() {
+            "youtube.com" | "youtu.be" | "t.me" => Ok(true),
+            _ => Ok(false),
+        }
+    }
 }
 
 pub struct DomainVisitDebounceGuard {
