@@ -258,7 +258,7 @@ impl ReviewResponse {
         let domain_to_check = match self {
             ReviewResponse::DomainSpam(domain, _) => Some(domain),
             ReviewResponse::UrlSpam(domain, url) => {
-                if url.path().is_empty() {
+                if url.path().is_empty() || url.path() == "/" {
                     // We're marking just the plain link to the domain as spam. We want to ensure that
                     // it's not protected for this too.
 
