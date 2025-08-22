@@ -820,7 +820,7 @@ async fn handle_command(
                     continue;
                 };
 
-                let (action, header) = match command.as_str() {
+                let (mut action, header) = match command.as_str() {
                     "/mark_not_spam" => (
                         ReviewResponse::NotSpam(Some(domain), url),
                         "Marked as not spam:\n",
@@ -838,7 +838,7 @@ async fn handle_command(
                 };
 
                 let result =
-                    reviews::apply_review_unverified(bot, sender, database, &action).await?;
+                    reviews::apply_review_unverified(bot, sender, database, &mut action).await?;
 
                 // Get the URL back lol
                 url = action.deconstruct().unwrap().1;

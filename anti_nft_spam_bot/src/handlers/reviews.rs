@@ -14,7 +14,7 @@ use teloxide::{
 
 use crate::{
     database::Database,
-    types::{IsSpam, ReviewResponse},
+    types::{Domain, IsSpam, ReviewResponse},
     CONTROL_CHAT_ID, REVIEW_LOG_CHANNEL_ID,
 };
 
@@ -219,7 +219,7 @@ pub async fn parse_callback_query(
 
     let user = query.from;
 
-    let responses = match ReviewResponse::from_str(query_data.as_str(), &db, message).await {
+    let mut responses = match ReviewResponse::from_str(query_data.as_str(), &db, message).await {
         Ok(r) => r,
         Err(e) => {
             goodbye!(&format!("Invalid query data: {e}"));
@@ -230,7 +230,7 @@ pub async fn parse_callback_query(
         goodbye!("Nothing to mark here...???");
     }
 
-    for response in &responses {
+    for response in &mut responses {
         match apply_review(&bot, &user, &db, response).await? {
             Err(Unauthorized) => goodbye!("Access denied."),
             Ok(Ok(())) => (),
@@ -286,7 +286,7 @@ pub async fn apply_review(
     bot: &Bot,
     user: &User,
     db: &Arc<Database>,
-    response: &ReviewResponse,
+    response: &mut ReviewResponse,
 ) -> Result<Result<Result<(), DomainIsProtected>, Unauthorized>, RequestError> {
     // ....shush.
 
@@ -300,16 +300,40 @@ pub async fn apply_review(
 /// Apply this review response as coming from this user.
 ///
 /// Will not check if this user actually is in control chat.
+///
+/// `response` is taken mutably because the function may populate the `domain` field of some
+/// variants.
 pub async fn apply_review_unverified(
     bot: &Bot,
     user: &User,
     db: &Arc<Database>,
-    response: &ReviewResponse,
+    response: &mut ReviewResponse,
 ) -> Result<Result<(), DomainIsProtected>, RequestError> {
     // If this review response marks the domain as spam, and it's protected, reject.
-    if let ReviewResponse::DomainSpam(domain, _) = response {
+    let domain_to_check = match response {
+        ReviewResponse::DomainSpam(domain, _) => Some(domain),
+        ReviewResponse::UrlSpam(domain, url) => {
+            if url.path().is_empty() {
+                None
+            } else {
+                // We're marking just the plain link to the domain as spam. We want to ensure that
+                // it's not protected for this too.
+
+                // First fetch it out, if needed.
+                if domain.is_none() {
+                    let domain_new = Domain::from_url(url);
+                    *domain = domain_new;
+                }
+
+                domain.as_mut()
+            }
+        }
+        ReviewResponse::NotSpam(..) | ReviewResponse::Skip => None,
+    };
+
+    if let Some(domain_to_check) = domain_to_check {
         if db
-            .is_domain_protected(domain)
+            .is_domain_protected(domain_to_check)
             .await
             .expect("Database died!")
         {
