@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use sqlx::Error;
 use teloxide::types::Message;
 use url::Url;
 
@@ -243,6 +244,45 @@ impl ReviewResponse {
         };
 
         Ok(vec![response])
+    }
+
+    /// If this review response would mark a protected domain as spam, this method returns a
+    /// reference to it, otherwise returns `None`.
+    ///
+    /// This function takes a mutable reference because it might fill out the domain field of
+    /// [`ReviewResponse::UrlSpam`] variant, if this is one.
+    pub async fn conflicts_with_protected_domains(
+        &mut self,
+        db: &Database,
+    ) -> Result<Option<&Domain>, Error> {
+        let domain_to_check = match self {
+            ReviewResponse::DomainSpam(domain, _) => Some(domain),
+            ReviewResponse::UrlSpam(domain, url) => {
+                if url.path().is_empty() {
+                    // We're marking just the plain link to the domain as spam. We want to ensure that
+                    // it's not protected for this too.
+
+                    // First fetch it out, if needed.
+                    if domain.is_none() {
+                        let domain_new = Domain::from_url(url);
+                        *domain = domain_new;
+                    }
+
+                    domain.as_mut()
+                } else {
+                    None
+                }
+            }
+            ReviewResponse::NotSpam(..) | ReviewResponse::Skip => None,
+        };
+
+        if let Some(domain_to_check) = domain_to_check {
+            db.is_domain_protected(domain_to_check)
+                .await
+                .map(|x| x.then_some(&*domain_to_check))
+        } else {
+            Ok(None)
+        }
     }
 }
 

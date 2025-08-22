@@ -14,7 +14,7 @@ use teloxide::{
 
 use crate::{
     database::Database,
-    types::{Domain, IsSpam, ReviewResponse},
+    types::{IsSpam, ReviewResponse},
     CONTROL_CHAT_ID, REVIEW_LOG_CHANNEL_ID,
 };
 
@@ -230,6 +230,20 @@ pub async fn parse_callback_query(
         goodbye!("Nothing to mark here...???");
     }
 
+    // First check for protected domains. If so, do nothing, bail out.
+    for response in &mut responses {
+        if let Some(protected_domain) = response
+            .conflicts_with_protected_domains(&db)
+            .await
+            .expect("Database died!")
+        {
+            goodbye!(format!(
+                "⚠️ Domain {} is protected and cannot be marked as spam.",
+                protected_domain
+            ));
+        };
+    }
+
     for response in &mut responses {
         match apply_review(&bot, &user, &db, response).await? {
             Err(Unauthorized) => goodbye!("Access denied."),
@@ -309,36 +323,13 @@ pub async fn apply_review_unverified(
     db: &Arc<Database>,
     response: &mut ReviewResponse,
 ) -> Result<Result<(), DomainIsProtected>, RequestError> {
-    // If this review response marks the domain as spam, and it's protected, reject.
-    let domain_to_check = match response {
-        ReviewResponse::DomainSpam(domain, _) => Some(domain),
-        ReviewResponse::UrlSpam(domain, url) => {
-            if url.path().is_empty() {
-                // We're marking just the plain link to the domain as spam. We want to ensure that
-                // it's not protected for this too.
-
-                // First fetch it out, if needed.
-                if domain.is_none() {
-                    let domain_new = Domain::from_url(url);
-                    *domain = domain_new;
-                }
-
-                domain.as_mut()
-            } else {
-                None
-            }
-        }
-        ReviewResponse::NotSpam(..) | ReviewResponse::Skip => None,
-    };
-
-    if let Some(domain_to_check) = domain_to_check {
-        if db
-            .is_domain_protected(domain_to_check)
-            .await
-            .expect("Database died!")
-        {
-            return Ok(Err(DomainIsProtected));
-        }
+    if response
+        .conflicts_with_protected_domains(db)
+        .await
+        .expect("Database died!")
+        .is_some()
+    {
+        return Ok(Err(DomainIsProtected));
     };
 
     // See if it should be written into the log...
