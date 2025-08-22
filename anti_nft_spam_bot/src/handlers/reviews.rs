@@ -241,7 +241,7 @@ pub async fn parse_callback_query(
         goodbye!("Review taken. Please send /review to perform more reviews.");
     };
 
-    // Avoid editing the message into reviews it's not in private i.e. in work chat
+    // Avoid editing the message into reviews if it's not in private i.e. in work chat
     if message.chat.is_private() {
         edit_message_into_a_review(&bot, &db, message).await?;
     } else {
@@ -273,8 +273,6 @@ pub async fn parse_callback_query(
 /// Apply this review response as coming from this user.
 ///
 /// Returns true if succeeded, false if the user is not in control chat.
-///
-/// If `verify_user` is set to `false`, it will always return true.
 pub async fn apply_review(
     bot: &Bot,
     user: &User,

@@ -384,13 +384,16 @@ pub async fn delete_spam_message(
 }
 
 /// Handler to intuit suspicious links based on them being replied to.
-/// For example, if someone replies "spam" or "admin" to a message
-/// with links, then those links may be spam. Send them to the database lol
-async fn gather_suspicion(
-    bot: &Bot,
-    message: &Message,
+///
+/// The parameter `sent_by_admin` may be specified as `None`; in this case, it will be checked for
+/// within this function as needed.
+///
+/// If this message starts with /spam or /scam, then the user wants this bot to see them.
+async fn gather_suspicion<'a>(
+    bot: &'a Bot,
+    message: &'a Message,
     mut sent_by_admin: Option<bool>,
-    database: &Database,
+    database: &'a Database,
 ) -> Result<(), RequestError> {
     let Some(text) = message.text() else {
         return Ok(());
@@ -403,11 +406,11 @@ async fn gather_suspicion(
     // Old check that captured links in a wider net.
     // Now our review queue is too big, so this is scaled
     // down to only handling the explicit /spam and /scam commands.
-
     //if text.contains("spam")
     //    || text.contains("scam")
     //    || text.contains("admin")
     //    || text.contains("begone")
+
     if text.starts_with("/spam") | text.starts_with("/scam") {
         // This or replied-to message may have sus links.
 
@@ -420,6 +423,7 @@ async fn gather_suspicion(
         // The check for above is accomplished by is_sender_admin function,
         // but there are other corner cases to consider too.
 
+        // If this scope runs to the end (i.e. doesn't hit any break), reject this as a reply to an admin.
         'reject_from_admin: {
             let Some(reply_to) = message.reply_to_message() else {
                 // This isn't a reply to anything.
@@ -482,39 +486,40 @@ async fn gather_suspicion(
 
         let sendername = sender_name_prettyprint(message, false);
 
-        macro_rules! marksus {
-            ($offending_message: expr, $sent_by_admin: expr, $sendername: expr, $url: expr, $domain: expr) => {{
-                let woot: Cow<Url> = $url;
-                log::debug!("Marking {} and its domain as sus...", woot);
+        let mut mark_sus = async |offending_message: &Message,
+                                  sent_by_admin: Option<bool>,
+                                  sendername: &str,
+                                  url: Cow<'a, Url>,
+                                  domain: &Domain| {
+            log::debug!("Marking {} and its domain as sus...", url);
 
-                had_links = true;
+            had_links = true;
 
-                let result = database
-                    .mark_sus(woot.as_ref(), Some($domain))
-                    .await
-                    .expect("Database died!");
+            let result = database
+                .mark_sus(&url, Some(domain))
+                .await
+                .expect("Database died!");
 
-                {
-                    use crate::types::MarkSusResult::*;
+            {
+                use crate::types::MarkSusResult::*;
 
-                    match result {
-                        Marked => {
-                            // Log it, if need be...
-                            if $sent_by_admin != Some(true) {
-                                database
-                                    .sus_link_sighted($offending_message, Some($sendername), &woot)
-                                    .await
-                                    .expect("Database died!");
-                            }
-                            links_marked.push(woot);
+                match result {
+                    Marked => {
+                        // Log it, if need be...
+                        if sent_by_admin != Some(true) {
+                            database
+                                .sus_link_sighted(offending_message, Some(sendername), &url)
+                                .await
+                                .expect("Database died!");
                         }
-                        AlreadyMarkedSus => already_marked_sus_count += 1,
-                        AlreadyMarkedSpam => already_marked_spam_count += 1,
-                        ManuallyReviewedNotSpam => manually_reviewed_not_spam_count += 1,
+                        links_marked.push(url);
                     }
+                    AlreadyMarkedSus => already_marked_sus_count += 1,
+                    AlreadyMarkedSpam => already_marked_spam_count += 1,
+                    ManuallyReviewedNotSpam => manually_reviewed_not_spam_count += 1,
                 }
-            }};
-        }
+            }
+        };
 
         if let Some(entities) = message
             .parse_entities()
@@ -529,13 +534,14 @@ async fn gather_suspicion(
                         if sent_by_admin.is_none() {
                             sent_by_admin = Some(is_sender_admin(bot, message).await?);
                         }
-                        marksus!(
-                            &message,
+                        mark_sus(
+                            message,
                             sent_by_admin,
                             &sendername,
                             Cow::Owned(url),
-                            &domain
-                        );
+                            &domain,
+                        )
+                        .await;
                     }
                     None => {
                         continue;
@@ -561,13 +567,14 @@ async fn gather_suspicion(
                             Some(is_sender_admin(bot, replied_message).await?);
                     }
 
-                    marksus!(
-                        &replied_message,
+                    mark_sus(
+                        replied_message,
                         replied_to_sent_by_admin,
                         &replied_to_sender_name,
                         Cow::Owned(url),
-                        &domain
-                    );
+                        &domain,
+                    )
+                    .await;
                 }
             }
 
@@ -583,13 +590,14 @@ async fn gather_suspicion(
                             replied_to_sent_by_admin =
                                 Some(is_sender_admin(bot, replied_message).await?);
                         }
-                        marksus!(
-                            &replied_message,
+                        mark_sus(
+                            replied_message,
                             replied_to_sent_by_admin,
                             &replied_to_sender_name,
                             url,
-                            &domain
-                        );
+                            &domain,
+                        )
+                        .await;
                     }
                 }
             }
@@ -676,14 +684,17 @@ async fn handle_command(
     database: &Arc<Database>,
     mut sent_by_admin: Option<bool>,
 ) -> Result<bool, RequestError> {
-    macro_rules! byadmin {
-        () => {{
-            if sent_by_admin.is_none() {
-                sent_by_admin = Some(is_sender_admin(bot, message).await?);
-            }
-            sent_by_admin.unwrap()
-        }};
-    }
+    // Conclusively check if the message was sent by an admin.
+    let mut byadmin = async || -> Result<bool, RequestError> {
+        if let Some(sent_by_admin) = sent_by_admin {
+            Ok(sent_by_admin)
+        } else {
+            let result = is_sender_admin(bot, message).await?;
+            sent_by_admin = Some(result);
+            Ok(result)
+        }
+    };
+
     macro_rules! respond {
         ($text:expr) => {
             bot.archsendmsg(message.chat.id, $text, message.id).await?;
@@ -754,7 +765,7 @@ async fn handle_command(
             true
         }
         "/hide_deletes" | "/show_deletes" => {
-            if message.chat.is_private() || !byadmin!() {
+            if message.chat.is_private() || !byadmin().await? {
                 goodbye!("This command can only be used by admins in group chats.");
             }
 
