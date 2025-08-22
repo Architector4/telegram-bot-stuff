@@ -827,7 +827,7 @@ async fn handle_command(
                     ),
                     "/mark_url_spam" => (
                         ReviewResponse::UrlSpam(Some(domain), url),
-                        "Not marking a domain as spam",
+                        "Marked these URLs as spam:\n"
                     ),
                     "/mark_domain_spam" => (
                         ReviewResponse::DomainSpam(domain, url),
