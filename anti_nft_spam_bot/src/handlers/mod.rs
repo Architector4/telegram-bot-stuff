@@ -827,7 +827,7 @@ async fn handle_command(
                     ),
                     "/mark_url_spam" => (
                         ReviewResponse::UrlSpam(Some(domain), url),
-                        "Marked these URLs as spam:\n"
+                        "Marked these URLs as spam:\n",
                     ),
                     "/mark_domain_spam" => (
                         ReviewResponse::DomainSpam(domain, url),
@@ -836,11 +836,6 @@ async fn handle_command(
 
                     _ => unreachable!(),
                 };
-
-                if !wrote_header {
-                    response.push_str(header);
-                    wrote_header = true;
-                }
 
                 let result =
                     reviews::apply_review_unverified(bot, sender, database, &action).await?;
@@ -854,6 +849,10 @@ async fn handle_command(
                         "⚠️ Domain of {url} is protected and cannot be marked as spam."
                     )
                 } else {
+                    if !wrote_header {
+                        response.push_str(header);
+                        wrote_header = true;
+                    }
                     writeln!(response, "{url}")
                 }
                 .expect("String writing is infallible");
