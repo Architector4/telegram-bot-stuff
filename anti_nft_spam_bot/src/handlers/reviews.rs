@@ -314,8 +314,6 @@ pub async fn apply_review_unverified(
         ReviewResponse::DomainSpam(domain, _) => Some(domain),
         ReviewResponse::UrlSpam(domain, url) => {
             if url.path().is_empty() {
-                None
-            } else {
                 // We're marking just the plain link to the domain as spam. We want to ensure that
                 // it's not protected for this too.
 
@@ -326,6 +324,8 @@ pub async fn apply_review_unverified(
                 }
 
                 domain.as_mut()
+            } else {
+                None
             }
         }
         ReviewResponse::NotSpam(..) | ReviewResponse::Skip => None,
