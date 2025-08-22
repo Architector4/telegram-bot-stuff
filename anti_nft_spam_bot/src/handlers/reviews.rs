@@ -235,7 +235,7 @@ pub async fn parse_callback_query(
             Err(Unauthorized) => goodbye!("Access denied."),
             Ok(Ok(())) => (),
             Ok(Err(DomainIsProtected)) => {
-                goodbye!("This domain is protected and cannot be marked as spam.")
+                goodbye!("⚠️ This domain is protected and cannot be marked as spam.")
             }
         };
     }
