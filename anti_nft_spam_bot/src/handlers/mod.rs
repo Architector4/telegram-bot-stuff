@@ -309,7 +309,7 @@ async fn handle_message_inner(
 
             // And, for convenience sake...
             if is_in_control_chat && bad_links_present {
-                bot.archsendmsg(
+                bot.archsendmsg_no_link_preview(
                     message.chat.id,
                     "Noticed a spam link in this message.",
                     message.id,
@@ -340,7 +340,7 @@ pub async fn delete_spam_message(
                     .await
                     .expect("Database died!")
                 {
-                    bot.archsendmsg(
+                    bot.archsendmsg_no_link_preview(
                         chatid,
                         format!(
                             "Removed a message from <code>{}</code> containing a spam link.",
@@ -361,7 +361,7 @@ pub async fn delete_spam_message(
             }
             Err(RequestError::Api(ApiError::MessageCantBeDeleted)) => {
                 // No rights?
-                bot.archsendmsg(
+                bot.archsendmsg_no_link_preview(
                     chatid,
                     concat!(
                         "Tried to remove a message containing a spam link, but failed. ",
@@ -470,7 +470,7 @@ async fn gather_suspicion<'a>(
                 "so it is ignored. If you believe it should be marked, ",
                 "DM this bot with the command <code>/spam badlink.com</code> to submit it anyway."
             );
-            bot.archsendmsg(message.chat.id, response, message.id)
+            bot.archsendmsg_no_link_preview(message.chat.id, response, message.id)
                 .await?;
             return Ok(());
         }
@@ -657,7 +657,7 @@ async fn gather_suspicion<'a>(
                     "This bot only blocks messages with usernames, links, and buttons with links."
                 )
             };
-            bot.archsendmsg(message.chat.id, response, message.id)
+            bot.archsendmsg_no_link_preview(message.chat.id, response, message.id)
                 .await?;
         }
 
@@ -698,7 +698,8 @@ async fn handle_command(
 
     macro_rules! respond {
         ($text:expr) => {
-            bot.archsendmsg(message.chat.id, $text, message.id).await?;
+            bot.archsendmsg_no_link_preview(message.chat.id, $text, message.id)
+                .await?;
         };
     }
 

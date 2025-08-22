@@ -2,19 +2,67 @@ use futures::Future;
 use teloxide::{
     payloads::SendMessageSetters,
     requests::Requester,
-    sugar::request::RequestReplyExt,
+    sugar::request::{RequestLinkPreviewExt, RequestReplyExt},
     types::{Message, MessageId, Recipient},
     Bot, RequestError,
 };
 
 use crate::teloxide_retry;
 
+async fn archsendmsg_inner<'a>(
+    bot: &'a Bot,
+    to_where: impl Into<Recipient> + Send,
+    text: impl Into<&'a str> + Send,
+    reply_to: impl Into<Option<MessageId>> + Send,
+    link_preview: bool,
+) -> Result<Vec<Message>, RequestError> {
+    let to_where: Recipient = to_where.into();
+    let text = text.into();
+    let reply_to = reply_to.into();
+    let mut sent_messages = Vec::new();
+
+    let iter = SplitOverLengthTokens::new(text, 4096);
+
+    for text in iter {
+        let result = teloxide_retry!({
+            let mut request = bot
+                .send_message(to_where.clone(), text)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .disable_link_preview(!link_preview);
+            if let Some(reply_to) = reply_to {
+                request = request.reply_to(reply_to);
+            }
+            request.await
+        });
+
+        match result {
+            Ok(message) => sent_messages.push(message),
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok(sent_messages)
+}
+
 pub trait BotArchSendMsg {
-    /// Opinionated method to send a message, with HTML markup,
-    /// and retries due to flood waiting or any other issues.
-    /// Also splits the message into many if it's longer than
-    /// the character limit.
+    /// Opinionated method to send a message, with HTML markup, and retries due to flood waiting or
+    /// any other issues. Also splits the message into many if it's longer than the character
+    /// limit.
+    ///
+    /// Shows a link preview on every message, if any.
     fn archsendmsg<'a>(
+        &'a self,
+        to_where: impl Into<Recipient> + Send,
+        text: impl Into<&'a str> + Send,
+        reply_to: impl Into<Option<MessageId>> + Send,
+    ) -> impl Future<Output = Result<Vec<Message>, RequestError>> + Send;
+
+    /// Opinionated method to send a message, with HTML markup, and retries due to flood waiting or
+    /// any other issues. Also splits the message into many if it's longer than the character
+    /// limit.
+    ///
+    /// Omits a link preview on every message, if any.
+    fn archsendmsg_no_link_preview<'a>(
         &'a self,
         to_where: impl Into<Recipient> + Send,
         text: impl Into<&'a str> + Send,
@@ -29,31 +77,16 @@ impl BotArchSendMsg for Bot {
         text: impl Into<&'a str> + Send,
         reply_to: impl Into<Option<MessageId>> + Send,
     ) -> Result<Vec<Message>, RequestError> {
-        let to_where: Recipient = to_where.into();
-        let text = text.into();
-        let reply_to = reply_to.into();
-        let mut sent_messages = Vec::new();
+        archsendmsg_inner(self, to_where, text, reply_to, true).await
+    }
 
-        let iter = SplitOverLengthTokens::new(text, 4096);
-
-        for text in iter {
-            let result = teloxide_retry!({
-                let mut request = self
-                    .send_message(to_where.clone(), text)
-                    .parse_mode(teloxide::types::ParseMode::Html);
-                if let Some(reply_to) = reply_to {
-                    request = request.reply_to(reply_to);
-                }
-                request.await
-            });
-
-            match result {
-                Ok(message) => sent_messages.push(message),
-                Err(e) => return Err(e),
-            }
-        }
-
-        Ok(sent_messages)
+    async fn archsendmsg_no_link_preview<'a>(
+        &'a self,
+        to_where: impl Into<Recipient> + Send,
+        text: impl Into<&'a str> + Send,
+        reply_to: impl Into<Option<MessageId>> + Send,
+    ) -> Result<Vec<Message>, RequestError> {
+        archsendmsg_inner(self, to_where, text, reply_to, false).await
     }
 }
 
