@@ -820,59 +820,43 @@ async fn handle_command(
                     continue;
                 };
 
-                match command.as_str() {
-                    "/mark_not_spam" => {
-                        let action = ReviewResponse::NotSpam(Some(domain), url);
-                        reviews::apply_review_unverified(bot, sender, database, &action)
-                            .await?
-                            .expect("Not marking a domain as spam");
-                        // Get the URL back lol
-                        url = action.deconstruct().unwrap().1;
+                let (action, header) = match command.as_str() {
+                    "/mark_not_spam" => (
+                        ReviewResponse::NotSpam(Some(domain), url),
+                        "Marked as not spam:\n",
+                    ),
+                    "/mark_url_spam" => (
+                        ReviewResponse::UrlSpam(Some(domain), url),
+                        "Not marking a domain as spam",
+                    ),
+                    "/mark_domain_spam" => (
+                        ReviewResponse::DomainSpam(domain, url),
+                        "Marked domains of these URLs as spam:\n",
+                    ),
 
-                        if !wrote_header {
-                            response.push_str("Marked as not spam:\n");
-                            wrote_header = true;
-                        }
-                    }
-                    "/mark_url_spam" => {
-                        let action = ReviewResponse::UrlSpam(Some(domain), url);
-                        reviews::apply_review_unverified(bot, sender, database, &action)
-                            .await?
-                            .expect("Not marking a domain as spam");
-                        // Get the URL back lol
-                        url = action.deconstruct().unwrap().1;
-
-                        if !wrote_header {
-                            response.push_str("Marked these URLs as spam:\n");
-                            wrote_header = true;
-                        }
-                    }
-                    "/mark_domain_spam" => {
-                        let action = ReviewResponse::DomainSpam(domain, url);
-                        let result =
-                            reviews::apply_review_unverified(bot, sender, database, &action)
-                                .await?;
-                        // Get the URL back lol
-                        url = action.deconstruct().unwrap().1;
-
-                        if let Err(DomainIsProtected) = result {
-                            writeln!(
-                                response,
-                                "Domain of {url} is protected and cannot be marked as spam."
-                            )
-                            .expect("String writing is infallible");
-                        };
-
-                        if !wrote_header {
-                            response.push_str("Marked domains of these URLs as spam:\n");
-                            wrote_header = true;
-                        }
-                    }
                     _ => unreachable!(),
+                };
+
+                if !wrote_header {
+                    response.push_str(header);
+                    wrote_header = true;
                 }
 
-                response.push_str(url.as_str());
-                response.push('\n');
+                let result =
+                    reviews::apply_review_unverified(bot, sender, database, &action).await?;
+
+                // Get the URL back lol
+                url = action.deconstruct().unwrap().1;
+
+                if let Err(DomainIsProtected) = result {
+                    writeln!(
+                        response,
+                        "⚠️ Domain of {url} is protected and cannot be marked as spam."
+                    )
+                } else {
+                    writeln!(response, "{url}")
+                }
+                .expect("String writing is infallible");
             }
 
             if response.is_empty() {
