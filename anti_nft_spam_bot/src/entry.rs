@@ -24,7 +24,7 @@ pub async fn entry() {
         .await
         .expect("Failed to set bot commands!");
 
-    let db: Arc<Database> = Database::new(bot.clone()).await.unwrap();
+    let db: Arc<Database> = Database::new().await.unwrap();
 
     log::info!("Creating the handler...");
 

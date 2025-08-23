@@ -1,5 +1,3 @@
-mod list_watcher;
-
 use std::{
     collections::HashSet,
     str::FromStr,
@@ -14,11 +12,8 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
     Executor, Row, Sqlite,
 };
-use teloxide::{
-    types::{ChatId, Message, MessageId},
-    Bot,
-};
-use tokio::sync::{watch, Mutex, Notify};
+use teloxide::types::{ChatId, Message, MessageId};
+use tokio::sync::{Mutex, Notify};
 use url::Url;
 
 use crate::{
@@ -35,7 +30,6 @@ static WAS_CONSTRUCTED: AtomicBool = AtomicBool::new(false);
 
 pub struct Database {
     pool: Pool,
-    drop_watch: (watch::Sender<()>, watch::Receiver<()>),
     // Mutexes are bad. However, this will only be used for reviews,
     // which can only be done by a few people in the control chat.
     review_lock: Mutex<()>,
@@ -49,24 +43,19 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn new(bot: Bot) -> impl std::future::Future<Output = Result<Arc<Database>, Error>> + Send {
-        Self::new_by_path(bot, DB_PATH, true)
+    pub fn new() -> impl std::future::Future<Output = Result<Arc<Database>, Error>> + Send {
+        Self::new_by_path(DB_PATH, true)
     }
 
     /// Create a new database for testing.
     #[cfg(test)]
     pub fn new_test() -> impl std::future::Future<Output = Result<Arc<Database>, Error>> + Send {
-        Database::new_by_path(None, "sqlite::memory:", false)
+        Database::new_by_path("sqlite::memory:", false)
     }
 
     /// Create a new database with specified path. Will check if it's a unique database if `unique`
-    /// is set. If `bot` is provided, it will also ingest the `spam_website_list.txt` file and
-    /// watch it for changes.
-    async fn new_by_path(
-        bot: impl Into<Option<Bot>>,
-        path: &str,
-        unique: bool,
-    ) -> Result<Arc<Database>, Error> {
+    /// is set.
+    async fn new_by_path(path: &str, unique: bool) -> Result<Arc<Database>, Error> {
         if unique {
             assert!(
                 !WAS_CONSTRUCTED.swap(true, std::sync::atomic::Ordering::SeqCst),
@@ -97,7 +86,6 @@ impl Database {
         //          (2 should NOT usually happen here, but eh)
         // last_sent_to_review (date+time in UTC timezone in ISO 8601 format)
         // manually_reviewed (0 for no, 1 for yes)
-        // from_spam_list (0 for no, 1 for yes)
         // spam_checker_version (version of this program this was determined at)
         pool.execute(sqlx::query(
             "
@@ -107,7 +95,6 @@ impl Database {
                     is_spam INTEGER NOT NULL,
                     last_sent_to_review TEXT NULL,
                     manually_reviewed INTEGER NOT NULL DEFAULT 0,
-                    from_spam_list INTEGER NOT NULL DEFAULT 0,
                     spam_checker_version INTEGER NOT NULL DEFAULT 0
                 ) STRICT;",
         ))
@@ -197,18 +184,19 @@ impl Database {
         .execute(&pool)
         .await;
 
+        let _ = sqlx::query("ALTER TABLE domains DROP COLUMN from_spam_list;")
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("ALTER TABLE urls DROP COLUMN from_spam_list;")
+            .execute(&pool)
+            .await;
+
         let db_arc = Arc::new(Database {
             pool,
             review_lock: Mutex::new(()),
-            drop_watch: watch::channel(()),
             domains_currently_being_visited: Mutex::new(HashSet::with_capacity(4)),
             domains_visit_notify: Notify::new(),
         });
-
-        if let Some(bot) = bot.into() {
-            // Spawn the watcher.
-            tokio::spawn(list_watcher::watch_list(bot, db_arc.clone()));
-        }
 
         Ok(db_arc)
     }
@@ -553,17 +541,6 @@ impl Database {
         // Add it in as a URL entry.
         self.mark_url_sus(url).await?;
         Ok(MarkSusResult::Marked)
-    }
-
-    /// Delete all entries added from the spam list.
-    pub async fn clean_all_from_spam_list(&self) -> Result<(), Error> {
-        sqlx::query("DELETE FROM domains WHERE from_spam_list=1")
-            .execute(&self.pool)
-            .await?;
-        sqlx::query("DELETE FROM urls WHERE from_spam_list=1")
-            .execute(&self.pool)
-            .await?;
-        Ok(())
     }
 
     /// Count and return the amount of links left to review.
