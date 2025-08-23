@@ -105,7 +105,6 @@ impl Database {
         // is_spam (0 for no, 1 for yes, 2 for unknown and needs review)
         // last_sent_to_review (date+time in UTC timezone in ISO 8601 format)
         // manually_reviewed (0 for no, 1 for yes)
-        // from_spam_list (0 for no, 1 for yes)
         // spam_checker_version (version of this program this was determined at)
         pool.execute(sqlx::query(
             "
@@ -114,7 +113,6 @@ impl Database {
                     is_spam INTEGER NOT NULL,
                     last_sent_to_review TEXT NULL,
                     manually_reviewed INTEGER NOT NULL DEFAULT 0,
-                    from_spam_list INTEGER NOT NULL DEFAULT 0,
                     spam_checker_version INTEGER NOT NULL DEFAULT 0
                 ) STRICT;",
         ))
@@ -156,18 +154,6 @@ impl Database {
         let _ = sqlx::query(
             "ALTER TABLE domains
         ADD COLUMN manually_reviewed INTEGER NOT NULL DEFAULT 0;",
-        )
-        .execute(&pool)
-        .await;
-        let _ = sqlx::query(
-            "ALTER TABLE domains
-        ADD COLUMN from_spam_list INTEGER NOT NULL DEFAULT 0;",
-        )
-        .execute(&pool)
-        .await;
-        let _ = sqlx::query(
-            "ALTER TABLE urls
-        ADD COLUMN from_spam_list INTEGER NOT NULL DEFAULT 0;",
         )
         .execute(&pool)
         .await;
@@ -222,12 +208,7 @@ impl Database {
         // We DON'T want to delete those, because they should still be useful for review.
         sqlx::query(
             "SELECT is_spam, example_url, manually_reviewed FROM domains
-            WHERE domain=? AND
-                NOT (
-                    is_spam!=1 AND
-                    from_spam_list=0 AND
-                    spam_checker_version<?
-                    );",
+            WHERE domain=? AND NOT (is_spam!=1 AND spam_checker_version<?);",
         )
         .bind(domain.as_str())
         .bind(if return_old_checker_results {
@@ -267,12 +248,7 @@ impl Database {
         // We DON'T want to delete those, because they should still be useful for review.
         sqlx::query(
             "SELECT is_spam, manually_reviewed FROM urls
-            WHERE url=? AND
-                NOT (
-                    is_spam!=1 AND
-                    from_spam_list=0 AND
-                    spam_checker_version<?
-                    );",
+            WHERE url=? AND NOT (is_spam!=1 AND spam_checker_version<?);",
         )
         .bind(url.as_str())
         .bind(if return_old_checker_results {
@@ -357,7 +333,6 @@ impl Database {
         domain: &Domain,
         example_url: impl Into<Option<&Url>>,
         is_spam: IsSpam,
-        from_spam_list: bool,
         manually_reviewed: bool,
     ) -> Result<(), Error> {
         let example_url = example_url.into();
@@ -366,27 +341,23 @@ impl Database {
                 domain,
                 example_url,
                 is_spam,
-                from_spam_list,
                 manually_reviewed,
                 spam_checker_version)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT DO UPDATE SET
                 example_url=COALESCE(?, example_url),
                 is_spam=?,
-                from_spam_list=?,
                 manually_reviewed=?,
                 spam_checker_version=?;",
         )
         .bind(domain.as_str())
         .bind(example_url.map(Url::as_str))
         .bind::<u8>(is_spam.into())
-        .bind(from_spam_list)
         .bind(manually_reviewed)
         .bind(SPAM_CHECKER_VERSION)
         // On conflict...
         .bind(example_url.map(Url::as_str))
         .bind::<u8>(is_spam.into())
-        .bind(from_spam_list)
         .bind(manually_reviewed)
         .bind(SPAM_CHECKER_VERSION)
         .execute(&self.pool)
@@ -418,31 +389,26 @@ impl Database {
         &self,
         url: &Url,
         is_spam: IsSpam,
-        from_spam_list: bool,
         manually_reviewed: bool,
     ) -> Result<(), Error> {
         sqlx::query(
             "INSERT INTO urls(
                 url,
                 is_spam,
-                from_spam_list,
                 manually_reviewed,
                 spam_checker_version)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT DO UPDATE SET
                 is_spam=?,
-                from_spam_list=?,
                 manually_reviewed=?,
                 spam_checker_version=?;",
         )
         .bind(url.as_str())
         .bind::<u8>(is_spam.into())
-        .bind(from_spam_list)
         .bind(manually_reviewed)
         .bind(SPAM_CHECKER_VERSION)
         // On conflict...
         .bind::<u8>(is_spam.into())
-        .bind(from_spam_list)
         .bind(manually_reviewed)
         .bind(SPAM_CHECKER_VERSION)
         .execute(&self.pool)
@@ -571,13 +537,11 @@ impl Database {
                     SELECT url, is_spam, rowid, 1 AS from_urls_table,
                     manually_reviewed, last_sent_to_review
                     FROM urls
-                    WHERE from_spam_list=0
                 UNION
                     SELECT COALESCE(example_url, domain) AS url, is_spam,
                     rowid, 0 AS from_urls_table,
                     manually_reviewed, last_sent_to_review
                     FROM domains
-                    WHERE from_spam_list=0
                 )
             ORDER BY manually_reviewed, is_spam DESC, last_sent_to_review, rowid DESC LIMIT 1;",
         )
@@ -690,10 +654,10 @@ impl Database {
         match response {
             ReviewResponse::Skip => (),
             ReviewResponse::UrlSpam(_domain, url) => {
-                self.add_url(url, IsSpam::Yes, false, true).await?;
+                self.add_url(url, IsSpam::Yes, true).await?;
             }
             ReviewResponse::DomainSpam(domain, url) => {
-                self.add_domain(domain, Some(url), IsSpam::Yes, false, true)
+                self.add_domain(domain, Some(url), IsSpam::Yes, true)
                     .await?;
                 // Implicitly this means that this specific URL is also spam,
                 // as part of this domain.
@@ -703,7 +667,7 @@ impl Database {
                 // Neither domain nor URL are spam.
 
                 // Write the result about the URL unconditionally.
-                self.add_url(url, IsSpam::No, false, true).await?;
+                self.add_url(url, IsSpam::No, true).await?;
 
                 // If not provided, try to get it from the URL.
                 let mut domain = domain;
@@ -715,8 +679,7 @@ impl Database {
 
                 if let Some(domain) = &domain {
                     // Write about the domain even if there's no domain-specific record.
-                    self.add_domain(domain, Some(url), IsSpam::No, false, true)
-                        .await?;
+                    self.add_domain(domain, Some(url), IsSpam::No, true).await?;
                 }
             }
         }
@@ -960,7 +923,7 @@ mod tests {
         assert_eq!(db.is_url_spam(&spam, false).await?, None);
         assert_eq!(db.is_spam(&spam, None, false).await?, None);
 
-        db.add_url(&spam, IsSpam::Yes, false, false).await?;
+        db.add_url(&spam, IsSpam::Yes, false).await?;
         assert_eq!(
             db.is_url_spam(&spam, false).await?,
             Some((IsSpam::Yes, false))
@@ -986,7 +949,7 @@ mod tests {
         assert_eq!(db.is_spam(&spamurl, None, false).await?, None);
         assert_eq!(db.is_spam(&spamurl, Some(&spamdomain), false).await?, None);
 
-        db.add_domain(&spamdomain, Some(&spamurl), IsSpam::Yes, false, false)
+        db.add_domain(&spamdomain, Some(&spamurl), IsSpam::Yes, false)
             .await?;
         // This checks if the URL specifically is a spam, so it will return None.
         assert_eq!(db.is_url_spam(&spamurl, false).await?, None);
@@ -1031,7 +994,7 @@ mod tests {
 
         // Then, the checker determines it as not spam and adds it to
         // the database.
-        db.add_domain(&domain, &link, IsSpam::No, false, false)
+        db.add_domain(&domain, &link, IsSpam::No, false)
             .await
             .expect("Database died!");
 
@@ -1086,14 +1049,13 @@ mod tests {
 
         for spam_status in [IsSpam::No, IsSpam::Maybe, IsSpam::Yes] {
             let db = Database::new_test().await?;
-            db.add_domain(&domain, &url, spam_status, false, false)
-                .await?;
+            db.add_domain(&domain, &url, spam_status, false).await?;
             assert_eq!(
                 db.is_spam(&url, &domain, true).await?,
                 Some((spam_status, false))
             );
             let db = Database::new_test().await?;
-            db.add_url(&url, spam_status, false, false).await?;
+            db.add_url(&url, spam_status, false).await?;
             assert_eq!(
                 db.is_spam(&url, &domain, true).await?,
                 Some((spam_status, false))
@@ -1127,7 +1089,7 @@ mod tests {
 
         // The URL is marked as not spam.
         let db = Database::new_test().await?;
-        db.add_url(&url, IsSpam::No, false, true).await?;
+        db.add_url(&url, IsSpam::No, true).await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(!notspam.conflicts_with_db(&db).await?);
         assert!(urlspam.conflicts_with_db(&db).await?);
@@ -1135,7 +1097,7 @@ mod tests {
 
         // The URL is marked as maybe spam.
         let db = Database::new_test().await?;
-        db.add_url(&url, IsSpam::Maybe, false, true).await?;
+        db.add_url(&url, IsSpam::Maybe, true).await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(notspam.conflicts_with_db(&db).await?);
         assert!(urlspam.conflicts_with_db(&db).await?);
@@ -1143,7 +1105,7 @@ mod tests {
 
         // The URL is marked as yes spam.
         let db = Database::new_test().await?;
-        db.add_url(&url, IsSpam::Yes, false, true).await?;
+        db.add_url(&url, IsSpam::Yes, true).await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(notspam.conflicts_with_db(&db).await?);
         assert!(!urlspam.conflicts_with_db(&db).await?);
@@ -1153,8 +1115,7 @@ mod tests {
 
         // The domain is marked as not spam.
         let db = Database::new_test().await?;
-        db.add_domain(&domain, &url, IsSpam::No, false, true)
-            .await?;
+        db.add_domain(&domain, &url, IsSpam::No, true).await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(!notspam.conflicts_with_db(&db).await?);
         assert!(urlspam.conflicts_with_db(&db).await?);
@@ -1162,8 +1123,7 @@ mod tests {
 
         // The domain is marked as maybe spam.
         let db = Database::new_test().await?;
-        db.add_domain(&domain, &url, IsSpam::Maybe, false, true)
-            .await?;
+        db.add_domain(&domain, &url, IsSpam::Maybe, true).await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(notspam.conflicts_with_db(&db).await?);
         assert!(urlspam.conflicts_with_db(&db).await?);
@@ -1171,8 +1131,7 @@ mod tests {
 
         // The domain is marked as yes spam.
         let db = Database::new_test().await?;
-        db.add_domain(&domain, &url, IsSpam::Yes, false, true)
-            .await?;
+        db.add_domain(&domain, &url, IsSpam::Yes, true).await?;
         assert!(!skip.conflicts_with_db(&db).await?);
         assert!(notspam.conflicts_with_db(&db).await?);
         assert!(urlspam.conflicts_with_db(&db).await?);
@@ -1297,16 +1256,14 @@ mod tests {
         let spam_url = parse_url_like_telegram("example.org/12345").unwrap();
         let spam_domain = Domain::from_url(&spam_url).unwrap();
 
-        db.add_domain(&spam_domain, None, IsSpam::Yes, false, true)
-            .await?;
+        db.add_domain(&spam_domain, None, IsSpam::Yes, true).await?;
         let sus_result = db.mark_sus(&spam_url, None).await?;
         assert_eq!(sus_result, MarkSusResult::AlreadyMarkedSpam);
 
         // However, if it's marked as *not* spam,
         // then trying to mark sus *should* succeed.
 
-        db.add_domain(&spam_domain, None, IsSpam::No, false, true)
-            .await?;
+        db.add_domain(&spam_domain, None, IsSpam::No, true).await?;
         let sus_result = db.mark_sus(&spam_url, None).await?;
         assert_eq!(sus_result, MarkSusResult::Marked);
 

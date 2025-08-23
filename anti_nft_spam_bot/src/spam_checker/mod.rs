@@ -128,7 +128,7 @@ async fn check_inner(
         match url_looks_like_spam {
             IsSpam::Yes => {
                 database
-                    .add_url(url, url_looks_like_spam, false, false)
+                    .add_url(url, url_looks_like_spam, false)
                     .await
                     .expect("Database died!");
                 return Some((url_looks_like_spam, false));
@@ -164,7 +164,7 @@ async fn check_inner(
         // Add it to the database.
         log::debug!("Visited {url} and got: {is_spam_check:?}");
         database
-            .add_url(url, is_spam_check.into(), false, false)
+            .add_url(url, is_spam_check.into(), false)
             .await
             .expect("Database died!");
         // All the other cases effectively apply to the domains too...
@@ -174,7 +174,7 @@ async fn check_inner(
             }
 
             database
-                .add_domain(domain, url, is_spam_check.into(), false, false)
+                .add_domain(domain, url, is_spam_check.into(), false)
                 .await
                 .expect("Database died!");
         }
