@@ -163,6 +163,24 @@ impl MessageStuff for Message {
             });
         }
 
+        if let Some(new_chat_photo) = self.new_chat_photo() {
+            if let Some(biggest) = new_chat_photo.iter().max_by_key(|x| u64::from(x.width) + u64::from(x.height)) {
+                return Some(MessageMediaInfo {
+                    width: biggest.width,
+                    height: biggest.height,
+                    is_sticker: false,
+                    is_gif: false,
+                    is_video: false,
+                    is_image: true,
+                    is_sound: false,
+                    is_voice_or_video_note: false,
+                    is_vector_sticker: false,
+                    file: &biggest.file,
+                    name: &None,
+                });
+            }
+        }
+
         if let Some(reply_to) = self.reply_to_message() {
             return reply_to.get_media_info();
         }
