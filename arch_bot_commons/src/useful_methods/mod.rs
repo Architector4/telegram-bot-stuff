@@ -164,7 +164,10 @@ impl MessageStuff for Message {
         }
 
         if let Some(new_chat_photo) = self.new_chat_photo() {
-            if let Some(biggest) = new_chat_photo.iter().max_by_key(|x| u64::from(x.width) + u64::from(x.height)) {
+            if let Some(biggest) = new_chat_photo
+                .iter()
+                .max_by_key(|x| u64::from(x.width) + u64::from(x.height))
+            {
                 return Some(MessageMediaInfo {
                     width: biggest.width,
                     height: biggest.height,
