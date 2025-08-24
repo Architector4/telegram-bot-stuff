@@ -662,7 +662,7 @@ impl Task {
                                         )
                                         .reply_to(data.message.id)
                                         .width(send.final_width)
-                                        .height(send.final_width);
+                                        .height(send.final_height);
                                     request.thumbnail = send.thumbnail.map(InputFile::memory);
                                     request.await
                                 }
@@ -674,7 +674,7 @@ impl Task {
                                         )
                                         .reply_to(data.message.id)
                                         .width(send.final_width)
-                                        .height(send.final_width);
+                                        .height(send.final_height);
                                     request.thumbnail = send.thumbnail.map(InputFile::memory);
                                     request.await
                                 }
