@@ -335,6 +335,7 @@ impl Task {
                         } else {
                             let mut request = bot
                                 .send_video(data.message.chat.id, InputFile::memory(send))
+                                .supports_streaming(true)
                                 .reply_to(data.message.id)
                                 .caption(&caption)
                                 .has_spoiler(should_be_spoilered)
@@ -513,6 +514,7 @@ impl Task {
 
                     let mut request = bot
                         .send_video(data.message.chat.id, InputFile::memory(send.data))
+                        .supports_streaming(true)
                         .width(send.final_width)
                         .height(send.final_height)
                         .reply_to(data.message.id);
@@ -677,6 +679,7 @@ impl Task {
                                             data.message.chat.id,
                                             InputFile::memory(send.data).file_name(file_name),
                                         )
+                                        .supports_streaming(true)
                                         .reply_to(data.message.id)
                                         .width(send.final_width)
                                         .height(send.final_height);
