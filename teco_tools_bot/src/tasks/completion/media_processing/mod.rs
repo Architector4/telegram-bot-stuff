@@ -4,7 +4,7 @@ pub mod whisper;
 
 use std::{
     ffi::OsStr,
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     num::NonZeroU8,
     path::Path,
     process::{Child, ChildStdout, Command, Stdio},
@@ -1136,6 +1136,41 @@ pub fn ocr_image(data: &[u8]) -> Result<String, MagickError> {
     Ok(result)
 }
 
+fn ffmpeg_status_report(
+    process: &mut Child,
+    status_report: &Sender<String>,
+    prefix: &str,
+) -> Result<(), std::io::Error> {
+    let mut stderr = BufReader::new(
+        process
+            .stderr
+            .take()
+            .expect("Converter stderr should be captured"),
+    );
+    let mut line_buf = Vec::<u8>::new();
+
+    while stderr.read_until(b'\r', &mut line_buf)? != 0 {
+        let text = str::from_utf8(&line_buf).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "stream did not contain valid UTF-8",
+            )
+        })?;
+
+        if text.starts_with("frame=") {
+            // Normal status report
+            let _ = status_report.send(format!("{prefix}\n<code>{text}</code>"));
+        } else {
+            println!("Error from ffmepg for operation {prefix}: {text}");
+        }
+        line_buf.clear();
+    }
+
+    process.stderr = Some(stderr.into_inner());
+
+    Ok(())
+}
+
 pub fn layer_audio_over_media(
     status_report: Sender<String>,
     inputfile: &Path,
@@ -1201,6 +1236,7 @@ pub fn layer_audio_over_media(
     let converter = Command::new("ffmpeg")
         .args([
             OsStr::new("-y"),
+            OsStr::new("-stats"),
             OsStr::new("-loglevel"),
             OsStr::new("error"),
             loop_params[0],
@@ -1238,10 +1274,17 @@ pub fn layer_audio_over_media(
             OsStr::new("+faststart"),
             outputfile.path().as_ref(),
         ])
+        .stderr(Stdio::piped())
         .spawn();
+    let mut converter = unfail!(converter);
 
-    let converter_result = unfail!(converter).wait();
-    let converter_result = unfail!(converter_result);
+    unfail!(ffmpeg_status_report(
+        &mut converter,
+        &status_report,
+        "Layering audio..."
+    ));
+
+    let converter_result = unfail!(converter.wait());
     if !converter_result.success() {
         return Err("Converter returned an error.".to_string());
     }
@@ -1254,12 +1297,16 @@ pub fn layer_audio_over_media(
     Ok(output)
 }
 
-fn reencode_video(inputfile: &Path) -> Result<Vec<u8>, std::io::Error> {
+fn reencode_video(
+    inputfile: &Path,
+    status_report: &Sender<String>,
+) -> Result<Vec<u8>, std::io::Error> {
     let mut outputfile = NamedTempFile::new()?;
 
-    let converter = Command::new("ffmpeg")
+    let mut converter = Command::new("ffmpeg")
         .args([
             OsStr::new("-y"),
+            OsStr::new("-stats"),
             OsStr::new("-loglevel"),
             OsStr::new("error"),
             OsStr::new("-i"),
@@ -1280,9 +1327,12 @@ fn reencode_video(inputfile: &Path) -> Result<Vec<u8>, std::io::Error> {
             OsStr::new("+faststart"),
             outputfile.path().as_ref(),
         ])
-        .spawn();
+        .stderr(Stdio::piped())
+        .spawn()?;
 
-    let converter_result = converter?.wait()?;
+    ffmpeg_status_report(&mut converter, status_report, "Converting video...")?;
+
+    let converter_result = converter.wait()?;
     if !converter_result.success() {
         return Err(std::io::Error::from_raw_os_error(
             converter_result.code().unwrap_or(0),
@@ -1295,13 +1345,17 @@ fn reencode_video(inputfile: &Path) -> Result<Vec<u8>, std::io::Error> {
 
     Ok(output)
 }
-fn reencode_audio(inputfile: &Path) -> Result<Vec<u8>, std::io::Error> {
+fn reencode_audio(
+    inputfile: &Path,
+    status_report: &Sender<String>,
+) -> Result<Vec<u8>, std::io::Error> {
     // This is an audio.
     let mut outputfile = NamedTempFile::new()?;
 
-    let converter = Command::new("ffmpeg")
+    let mut converter = Command::new("ffmpeg")
         .args([
             OsStr::new("-y"),
+            OsStr::new("-stats"),
             OsStr::new("-loglevel"),
             OsStr::new("error"),
             OsStr::new("-i"),
@@ -1312,9 +1366,12 @@ fn reencode_audio(inputfile: &Path) -> Result<Vec<u8>, std::io::Error> {
             OsStr::new("mp3"),
             outputfile.path().as_ref(),
         ])
-        .spawn();
+        .stderr(Stdio::piped())
+        .spawn()?;
 
-    let converter_result = converter?.wait()?;
+    ffmpeg_status_report(&mut converter, status_report, "Converting video...")?;
+
+    let converter_result = converter.wait()?;
     if !converter_result.success() {
         return Err(std::io::Error::from_raw_os_error(
             converter_result.code().unwrap_or(0),
@@ -1402,7 +1459,7 @@ pub fn reencode(
                     get_bmp_width_height(&first_frame).unwrap_or((320, 320));
 
                 let video = VideoOutput {
-                    data: unfail!(reencode_video(inputfile)),
+                    data: unfail!(reencode_video(inputfile, &status_report)),
                     thumbnail: image_into_thumbnail(&first_frame).ok(),
                     final_width,
                     final_height,
@@ -1435,7 +1492,7 @@ pub fn reencode(
     // Above did not return. Presumably, we have no video. Therefore, this is music or unknown.
     if has_audio {
         let _ = status_report.send("Reencoding audio...".to_string());
-        return Ok(ReencodeMedia::Audio(unfail!(reencode_audio(inputfile))));
+        return Ok(ReencodeMedia::Audio(unfail!(reencode_audio(inputfile, &status_report))));
     }
 
     Err("Unknown file type.".to_string())
