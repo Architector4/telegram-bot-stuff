@@ -621,7 +621,7 @@ fn approx_same_aspect_ratio(
 }
 
 #[derive(Clone)]
-pub struct ResizeVideoOutput {
+pub struct VideoOutput {
     pub data: Vec<u8>,
     pub final_width: u32,
     pub final_height: u32,
@@ -641,7 +641,7 @@ pub fn resize_video(
     input_dimensions: (u32, u32),
     resize_curve: ResizeCurve,
     quality: NonZeroU8,
-) -> Result<ResizeVideoOutput, String> {
+) -> Result<VideoOutput, String> {
     macro_rules! unfail {
         ($thing: expr) => {
             match $thing {
@@ -1027,7 +1027,7 @@ pub fn resize_video(
 
     let thumbnail = thumbnail.lock().expect("Thumbnail mutex died!").take();
 
-    Ok(ResizeVideoOutput {
+    Ok(VideoOutput {
         data: output,
         final_width: output_width,
         final_height: output_height,
@@ -1331,8 +1331,8 @@ fn reencode_audio(inputfile: &Path) -> Result<Vec<u8>, std::io::Error> {
 #[derive(Clone)]
 pub enum ReencodeMedia {
     Jpeg(Vec<u8>),
-    Video(ResizeVideoOutput),
-    Gif(ResizeVideoOutput),
+    Video(VideoOutput),
+    Gif(VideoOutput),
     Audio(Vec<u8>),
 }
 
@@ -1401,7 +1401,7 @@ pub fn reencode(
                 let (final_width, final_height) =
                     get_bmp_width_height(&first_frame).unwrap_or((320, 320));
 
-                let video = ResizeVideoOutput {
+                let video = VideoOutput {
                     data: unfail!(reencode_video(inputfile)),
                     thumbnail: image_into_thumbnail(&first_frame).ok(),
                     final_width,
