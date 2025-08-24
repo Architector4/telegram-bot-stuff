@@ -14,6 +14,7 @@ use tokio::sync::watch::Sender;
 use crate::{
     tasks::{
         completion::media_processing::{reencode, ReencodeMedia},
+        parsing::MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
         ResizeCurve, ResizeType, VideoTypePreference,
     },
     MAX_DOWNLOAD_SIZE_MEGABYTES, MAX_UPLOAD_SIZE_MEGABYTES,
@@ -220,13 +221,28 @@ impl Task {
                 // Variable just to hold the temporary file and drop it later.
                 let mut file = None;
 
+                // Metadata mostly for video stuff.
+                let mut output_width: u32 = dimensions
+                    .0
+                    .unsigned_abs()
+                    .try_into()
+                    .unwrap_or(MAX_OUTPUT_MEDIA_DIMENSION_SIZE);
+                let mut output_height: u32 = dimensions
+                    .1
+                    .unsigned_abs()
+                    .try_into()
+                    .unwrap_or(MAX_OUTPUT_MEDIA_DIMENSION_SIZE);
+                let mut thumbnail = None;
+
                 let _ = status_report.send("Downloading media...".to_string());
+
                 let woot = if media.is_video {
                     let download =
                         unerror_download!(bot.download_file_to_temp_or_directly(media.file).await);
                     let path = download.0;
                     file = download.1;
-                    tokio::task::spawn_blocking(move || {
+
+                    let result = tokio::task::spawn_blocking(move || {
                         media_processing::resize_video(
                             status_report_for_processing,
                             &path,
@@ -241,7 +257,20 @@ impl Task {
                             quality,
                         )
                     })
+                    .await
+                    .expect("Worker died!");
+
+                    match result {
+                        Ok(x) => {
+                            output_width = x.final_width;
+                            output_height = x.final_height;
+                            thumbnail = x.thumbnail.map(InputFile::memory);
+                            Ok(x.data)
+                        }
+                        Err(e) => Err(e),
+                    }
                 } else {
+                    // Else it's a photo.
                     let download_result =
                         bot.download_file_to_vec(media.file, &mut media_data).await;
                     unerror_download!(download_result);
@@ -260,9 +289,9 @@ impl Task {
                         )
                         .map_err(|e| e.to_string())
                     })
-                }
-                .await
-                .expect("Worker died!");
+                    .await
+                    .expect("Worker died!")
+                };
 
                 drop(file);
 
@@ -295,24 +324,33 @@ impl Task {
 
                 teloxide_retry!({
                     let send = media_data.clone();
+                    let thumbnail = thumbnail.clone();
                     let result = if media.is_video {
                         if should_be_gif {
                             // Sending as an "animation" requires that the file has a filename, else
                             // it somehow ends up being a file document instead.
-                            bot.send_animation(
-                                data.message.chat.id,
-                                InputFile::memory(send).file_name("amogus.mp4"),
-                            )
-                            .reply_to(data.message.id)
-                            .caption(&caption)
-                            .has_spoiler(should_be_spoilered)
-                            .await
-                        } else {
-                            bot.send_video(data.message.chat.id, InputFile::memory(send))
+                            let mut request = bot
+                                .send_animation(
+                                    data.message.chat.id,
+                                    InputFile::memory(send).file_name("amogus.mp4"),
+                                )
                                 .reply_to(data.message.id)
                                 .caption(&caption)
                                 .has_spoiler(should_be_spoilered)
-                                .await
+                                .width(output_width)
+                                .height(output_height);
+                            request.thumbnail = thumbnail;
+                            request.await
+                        } else {
+                            let mut request = bot
+                                .send_video(data.message.chat.id, InputFile::memory(send))
+                                .reply_to(data.message.id)
+                                .caption(&caption)
+                                .has_spoiler(should_be_spoilered)
+                                .width(output_width)
+                                .height(output_height);
+                            request.thumbnail = thumbnail;
+                            request.await
                         }
                     } else if should_be_sticker {
                         bot.send_sticker(data.message.chat.id, InputFile::memory(send))
@@ -626,20 +664,28 @@ impl Task {
                                 ReencodeMedia::Gif(send) => {
                                     // Sending as an "animation" requires that the file has a filename, else
                                     // it somehow ends up being a file document instead.
-                                    bot.send_animation(
-                                        data.message.chat.id,
-                                        InputFile::memory(send).file_name(file_name),
-                                    )
-                                    .reply_to(data.message.id)
-                                    .await
+                                    let mut request = bot
+                                        .send_animation(
+                                            data.message.chat.id,
+                                            InputFile::memory(send.data).file_name(file_name),
+                                        )
+                                        .reply_to(data.message.id)
+                                        .width(send.final_width)
+                                        .height(send.final_width);
+                                    request.thumbnail = send.thumbnail.map(InputFile::memory);
+                                    request.await
                                 }
                                 ReencodeMedia::Video(send) => {
-                                    bot.send_video(
-                                        data.message.chat.id,
-                                        InputFile::memory(send).file_name(file_name),
-                                    )
-                                    .reply_to(data.message.id)
-                                    .await
+                                    let mut request = bot
+                                        .send_video(
+                                            data.message.chat.id,
+                                            InputFile::memory(send.data).file_name(file_name),
+                                        )
+                                        .reply_to(data.message.id)
+                                        .width(send.final_width)
+                                        .height(send.final_width);
+                                    request.thumbnail = send.thumbnail.map(InputFile::memory);
+                                    request.await
                                 }
                                 ReencodeMedia::Jpeg(send) => {
                                     bot.send_photo(

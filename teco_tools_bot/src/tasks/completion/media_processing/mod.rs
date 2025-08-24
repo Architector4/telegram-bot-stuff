@@ -8,7 +8,7 @@ use std::{
     num::NonZeroU8,
     path::Path,
     process::{Child, ChildStdout, Command, Stdio},
-    sync::OnceLock,
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 
@@ -318,6 +318,39 @@ pub fn reencode_image(data: &[u8]) -> Result<Vec<u8>, MagickError> {
     wand.write_image_blob("jpg")
 }
 
+/// Tries to convert an image into a thumbnail fit for Telegram's thumbnail restriction. In
+/// particular, less than 200KB in size and with width and height not exceeding 320px.
+pub fn image_into_thumbnail(data: &[u8]) -> Result<Vec<u8>, MagickError> {
+    let mut wand = MagickWand::new();
+
+    wand.read_image_blob(data)?;
+
+    let width = wand.get_image_width();
+    let height = wand.get_image_height();
+    let max = 320;
+
+    if width > max || height > max {
+        wand.fit(max, max);
+    }
+
+    let mut quality: usize = 100;
+
+    // Compress image smaller and smaller until it finally fits lol
+    loop {
+        let result = wand.write_image_blob("jpg")?;
+        if result.len() < 200 * 1000 * 1000 {
+            return Ok(result);
+        }
+        if let Some(new_q) = quality.checked_sub(10) {
+            quality = new_q;
+        } else {
+            return Err(MagickError(String::from("Cannot compress image")));
+        };
+        wand.set_image_compression_quality(quality)?;
+        wand.set_compression_quality(quality)?;
+    }
+}
+
 struct SplitIntoBmps<T: Read> {
     item: T,
     buffer: Vec<u8>,
@@ -572,6 +605,14 @@ fn approx_same_aspect_ratio(
     width_diff_is_insignificant && height_diff_is_insignificant
 }
 
+#[derive(Clone)]
+pub struct ResizeVideoOutput {
+    pub data: Vec<u8>,
+    pub final_width: u32,
+    pub final_height: u32,
+    pub thumbnail: Option<Vec<u8>>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn resize_video(
     status_report: Sender<String>,
@@ -585,7 +626,7 @@ pub fn resize_video(
     input_dimensions: (u32, u32),
     resize_curve: ResizeCurve,
     quality: NonZeroU8,
-) -> Result<Vec<u8>, String> {
+) -> Result<ResizeVideoOutput, String> {
     macro_rules! unfail {
         ($thing: expr) => {
             match $thing {
@@ -762,8 +803,21 @@ pub fn resize_video(
     drop(decoded_receiver);
     drop(resized_sender);
 
+    let thumbnail = Arc::new(Mutex::new(None::<Vec<u8>>));
+    let thumbnail_for_sending_thread = thumbnail.clone();
+
     let sending_thread = std::thread::spawn(move || {
         for frame in decoded_image_stream.enumerate() {
+            if frame.0 == 0 {
+                if let Ok(first_frame) = &frame.1 {
+                    // Generate a thumbnail...
+                    if let Ok(new_thumb) = image_into_thumbnail(first_frame) {
+                        *thumbnail_for_sending_thread
+                            .lock()
+                            .expect("Thumbnail mutex died!!??") = Some(new_thumb);
+                    }
+                }
+            }
             if decoded_sender.send(frame).is_err() {
                 return;
             }
@@ -956,7 +1010,18 @@ pub fn resize_video(
     let mut output = Vec::new();
     unfail!(finalfile.read_to_end(&mut output));
 
-    Ok(output)
+    let thumbnail = thumbnail.lock().expect("Thumbnail mutex died!").take();
+
+    Ok(ResizeVideoOutput {
+        data: output,
+        final_width: output_width
+            .try_into()
+            .unwrap_or(MAX_OUTPUT_MEDIA_DIMENSION_SIZE),
+        final_height: output_height
+            .try_into()
+            .unwrap_or(MAX_OUTPUT_MEDIA_DIMENSION_SIZE),
+        thumbnail,
+    })
 }
 
 pub fn ocr_image(data: &[u8]) -> Result<String, MagickError> {
@@ -1255,8 +1320,8 @@ fn reencode_audio(inputfile: &Path) -> Result<Vec<u8>, std::io::Error> {
 #[derive(Clone)]
 pub enum ReencodeMedia {
     Jpeg(Vec<u8>),
-    Video(Vec<u8>),
-    Gif(Vec<u8>),
+    Video(ResizeVideoOutput),
+    Gif(ResizeVideoOutput),
     Audio(Vec<u8>),
 }
 
@@ -1280,8 +1345,8 @@ impl AsRef<Vec<u8>> for ReencodeMedia {
     fn as_ref(&self) -> &Vec<u8> {
         match self {
             Self::Jpeg(x) => x,
-            Self::Video(x) => x,
-            Self::Gif(x) => x,
+            Self::Video(x) => &x.data,
+            Self::Gif(x) => &x.data,
             Self::Audio(x) => x,
         }
     }
@@ -1322,7 +1387,14 @@ pub fn reencode(
             Some(Ok(_second_frame)) => {
                 // There's at least two frames. Then this is, presumably, a video or a gif.
                 let _ = status_report.send("Reencoding video...".to_string());
-                let video = unfail!(reencode_video(inputfile));
+                let (width, height) = get_bmp_width_height(&first_frame).unwrap_or((320, 320));
+
+                let video = ResizeVideoOutput {
+                    data: unfail!(reencode_video(inputfile)),
+                    thumbnail: image_into_thumbnail(&first_frame).ok(),
+                    final_width: width.try_into().unwrap_or(MAX_OUTPUT_MEDIA_DIMENSION_SIZE),
+                    final_height: height.try_into().unwrap_or(MAX_OUTPUT_MEDIA_DIMENSION_SIZE),
+                };
 
                 if has_audio {
                     return Ok(ReencodeMedia::Video(video));
