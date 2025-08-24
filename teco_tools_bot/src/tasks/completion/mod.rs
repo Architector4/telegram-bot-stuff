@@ -14,7 +14,6 @@ use tokio::sync::watch::Sender;
 use crate::{
     tasks::{
         completion::media_processing::{reencode, ReencodeMedia},
-        parsing::MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
         ResizeCurve, ResizeType, VideoTypePreference,
     },
     MAX_DOWNLOAD_SIZE_MEGABYTES, MAX_UPLOAD_SIZE_MEGABYTES,
@@ -181,7 +180,7 @@ impl Task {
 
                 let input_dimensions = (media.width, media.height);
 
-                let dimensions = (new_dimensions.0 as isize, new_dimensions.1 as isize);
+                let dimensions = *new_dimensions;
                 let mut resize_type = resize_type.clone();
                 let rotation = *rotation;
                 let quality = *quality;
@@ -222,16 +221,8 @@ impl Task {
                 let mut file = None;
 
                 // Metadata mostly for video stuff.
-                let mut output_width: u32 = dimensions
-                    .0
-                    .unsigned_abs()
-                    .try_into()
-                    .unwrap_or(MAX_OUTPUT_MEDIA_DIMENSION_SIZE);
-                let mut output_height: u32 = dimensions
-                    .1
-                    .unsigned_abs()
-                    .try_into()
-                    .unwrap_or(MAX_OUTPUT_MEDIA_DIMENSION_SIZE);
+                let mut output_width = dimensions.0.unsigned_abs();
+                let mut output_height: u32 = dimensions.1.unsigned_abs();
                 let mut thumbnail = None;
 
                 let _ = status_report.send("Downloading media...".to_string());

@@ -26,14 +26,14 @@ use crate::tasks::{
 #[allow(clippy::too_many_arguments)]
 pub fn resize_image(
     data: &[u8],
-    width: isize,
-    height: isize,
+    width: i32,
+    height: i32,
     rotation: f64,
     resize_type: ResizeType,
     format: ImageFormat,
     // Width, height, and if the resulting image should be stretched to
     // output size instead of fitting.
-    output_size: Option<(usize, usize, bool)>,
+    output_size: Option<(u32, u32, bool)>,
     crop_rotation: bool,
     quality: NonZeroU8,
 ) -> Result<Vec<u8>, MagickError> {
@@ -56,12 +56,25 @@ pub fn resize_image(
     // Record and sanitize signs...
     let width_is_negative = width.is_negative();
     let height_is_negative = height.is_negative();
-    // Avoid resizing to zero.
-    let width = width.unsigned_abs().max(1);
-    let height = height.unsigned_abs().max(1);
+    // Avoid resizing to zero. Also, cast to usize, since that's what imagemagick wants.
+    let width: usize = width.unsigned_abs().max(1).try_into().unwrap_or(usize::MAX);
+    let height: usize = height
+        .unsigned_abs()
+        .max(1)
+        .try_into()
+        .unwrap_or(usize::MAX);
 
     let iwidth = wand.get_image_width();
     let iheight = wand.get_image_height();
+
+    // Also convert to usize here too.
+    let output_size = output_size.map(|x| {
+        (
+            x.0.try_into().unwrap_or(usize::MAX),
+            x.1.try_into().unwrap_or(usize::MAX),
+            x.2,
+        )
+    });
 
     // The second and third arguments are "delta_x" and "rigidity"
     // This library doesn't document them, but another bindings
@@ -435,7 +448,7 @@ impl<T: Read> Iterator for SplitIntoBmps<T> {
     }
 }
 
-fn get_bmp_width_height(buffer: &[u8]) -> Option<(isize, isize)> {
+fn get_bmp_width_height(buffer: &[u8]) -> Option<(u32, u32)> {
     // Based on data from:
     // http://www.dragonwins.com/domains/getteched/bmp/bmpfileformat.htm#The%20Image%20Header
 
@@ -449,10 +462,12 @@ fn get_bmp_width_height(buffer: &[u8]) -> Option<(isize, isize)> {
     }
 
     let width = u32::from_le_bytes(buffer[18..18 + 4].try_into().unwrap());
+    // Height may be negative to indicate top to bottom pixel row order instead.
+    // We don't care, we just want to know how tall it is.
     let height = i32::from_le_bytes(buffer[22..22 + 4].try_into().unwrap());
     let height = height.unsigned_abs();
 
-    Some((width as isize, height as isize))
+    Some((width, height))
 }
 
 pub fn count_video_frames_and_framerate_and_audio_and_length(
@@ -617,7 +632,7 @@ pub struct ResizeVideoOutput {
 pub fn resize_video(
     status_report: Sender<String>,
     inputfile: &Path,
-    (width, height): (isize, isize),
+    (width, height): (i32, i32),
     rotation: f64,
     mut resize_type: ResizeType,
     strip_audio: bool,
@@ -646,8 +661,8 @@ pub fn resize_video(
     let is_curved = resize_curve != ResizeCurve::Constant;
     let (mut output_width, mut output_height) = if is_curved {
         (
-            (input_dimensions.0 as usize).max(width.unsigned_abs()),
-            (input_dimensions.1 as usize).max(height.unsigned_abs()),
+            (input_dimensions.0).max(width.unsigned_abs()),
+            (input_dimensions.1).max(height.unsigned_abs()),
         )
     } else {
         (width.unsigned_abs(), height.unsigned_abs())
@@ -738,8 +753,8 @@ pub fn resize_video(
                 // are the same, it doesn't.
                 let input_dimensions = get_bmp_width_height(&frame);
                 let resize_result = if rotation.abs() == 0.0
-                    && input_dimensions == Some((output_width as isize, output_height as isize))
-                    && input_dimensions == Some((curved_width as isize, curved_height as isize))
+                    && input_dimensions == Some((output_width, output_height))
+                    && input_dimensions == Some((curved_width as u32, curved_height as u32))
                     && quality.get() >= 100
                 {
                     // It doesn't. Just return the same buffer directly.
@@ -747,8 +762,8 @@ pub fn resize_video(
                 } else {
                     resize_image(
                         &frame,
-                        curved_width as isize,
-                        curved_height as isize,
+                        curved_width as i32,
+                        curved_height as i32,
                         curved_rotation,
                         resize_type,
                         format,
@@ -1014,12 +1029,8 @@ pub fn resize_video(
 
     Ok(ResizeVideoOutput {
         data: output,
-        final_width: output_width
-            .try_into()
-            .unwrap_or(MAX_OUTPUT_MEDIA_DIMENSION_SIZE),
-        final_height: output_height
-            .try_into()
-            .unwrap_or(MAX_OUTPUT_MEDIA_DIMENSION_SIZE),
+        final_width: output_width,
+        final_height: output_height,
         thumbnail,
     })
 }
@@ -1387,13 +1398,14 @@ pub fn reencode(
             Some(Ok(_second_frame)) => {
                 // There's at least two frames. Then this is, presumably, a video or a gif.
                 let _ = status_report.send("Reencoding video...".to_string());
-                let (width, height) = get_bmp_width_height(&first_frame).unwrap_or((320, 320));
+                let (final_width, final_height) =
+                    get_bmp_width_height(&first_frame).unwrap_or((320, 320));
 
                 let video = ResizeVideoOutput {
                     data: unfail!(reencode_video(inputfile)),
                     thumbnail: image_into_thumbnail(&first_frame).ok(),
-                    final_width: width.try_into().unwrap_or(MAX_OUTPUT_MEDIA_DIMENSION_SIZE),
-                    final_height: height.try_into().unwrap_or(MAX_OUTPUT_MEDIA_DIMENSION_SIZE),
+                    final_width,
+                    final_height,
                 };
 
                 if has_audio {
