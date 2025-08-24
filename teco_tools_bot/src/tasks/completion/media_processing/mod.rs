@@ -1176,7 +1176,7 @@ pub fn layer_audio_over_media(
     inputfile: &Path,
     is_video: bool,
     audiofile: Option<&Path>,
-) -> Result<Vec<u8>, String> {
+) -> Result<VideoOutput, String> {
     macro_rules! unfail {
         ($thing: expr) => {
             match $thing {
@@ -1294,7 +1294,25 @@ pub fn layer_audio_over_media(
     let mut output = Vec::new();
     unfail!(outputfile.read_to_end(&mut output));
 
-    Ok(output)
+    let mut outputdata = VideoOutput {
+        data: output,
+        final_width: 320,
+        final_height: 320,
+        thumbnail: None,
+    };
+
+    // While we're here, get the thumbnail and size, if this doesn't fail.
+    let (mut decoder, mut decoded_image_stream) = unfail!(SplitIntoBmps::from_file(inputfile));
+    let first_frame = decoded_image_stream.next();
+    unfail!(decoder.kill());
+
+    if let Some(Ok(first_frame)) = first_frame {
+        (outputdata.final_width, outputdata.final_height) =
+            get_bmp_width_height(&first_frame).unwrap_or((320, 320));
+        outputdata.thumbnail = image_into_thumbnail(&first_frame).ok();
+    }
+
+    Ok(outputdata)
 }
 
 fn reencode_video(
@@ -1492,7 +1510,10 @@ pub fn reencode(
     // Above did not return. Presumably, we have no video. Therefore, this is music or unknown.
     if has_audio {
         let _ = status_report.send("Reencoding audio...".to_string());
-        return Ok(ReencodeMedia::Audio(unfail!(reencode_audio(inputfile, &status_report))));
+        return Ok(ReencodeMedia::Audio(unfail!(reencode_audio(
+            inputfile,
+            &status_report
+        ))));
     }
 
     Err("Unknown file type.".to_string())

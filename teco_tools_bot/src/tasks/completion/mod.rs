@@ -491,16 +491,16 @@ impl Task {
                     }
                 };
 
-                if video_data.is_empty() {
+                if video_data.data.is_empty() {
                     goodbye!(
                         "Error: failed to layer audio over the media; got empty file as a result. Sorry!"
                     );
                 }
 
-                if video_data.len() > MAX_UPLOAD_SIZE_MEGABYTES as usize * 1000 * 1000 {
+                if video_data.data.len() > MAX_UPLOAD_SIZE_MEGABYTES as usize * 1000 * 1000 {
                     goodbye!(format!(
                         "Error: the resulting media is too big ({:.3}MB, max is {}MB). Sorry!",
-                        video_data.len() as f64 / 1000.0 / 100.00,
+                        video_data.data.len() as f64 / 1000.0 / 100.00,
                         MAX_UPLOAD_SIZE_MEGABYTES
                     )
                     .as_str());
@@ -511,9 +511,14 @@ impl Task {
                 teloxide_retry!({
                     let send = video_data.clone();
 
-                    bot.send_video(data.message.chat.id, InputFile::memory(send))
-                        .reply_to(data.message.id)
-                        .await
+                    let mut request = bot
+                        .send_video(data.message.chat.id, InputFile::memory(send.data))
+                        .width(send.final_width)
+                        .height(send.final_height)
+                        .reply_to(data.message.id);
+                    request.thumbnail = send.thumbnail.map(InputFile::memory);
+
+                    request.await
                 })?;
                 Ok(())
             }
