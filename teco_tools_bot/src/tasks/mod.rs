@@ -294,7 +294,10 @@ pub enum Task {
         translate_to_english: bool,
     },
     AmenBreak,
-    LayerAudio(FileMeta),
+    LayerAudio {
+        meta: FileMeta,
+        shortest: bool,
+    },
     Reencode,
 }
 
@@ -413,7 +416,15 @@ impl Task {
             }
             Task::Ocr => Ok(()),
             Task::AmenBreak => Ok(()),
-            Task::LayerAudio(_) => Ok(()),
+            Task::LayerAudio { meta: _, shortest } => {
+                if *shortest {
+                    writeln!(output, "Pick <b>shortest</b> length")?;
+                } else {
+                    writeln!(output, "Pick <b>longest</b> length")?;
+                }
+
+                Ok(())
+            }
             Task::Transcribe {
                 temperature,
                 translate_to_english,
@@ -580,7 +591,10 @@ impl Task {
         Task::AmenBreak
     }
     pub fn default_layer_audio(meta: FileMeta) -> Task {
-        Task::LayerAudio(meta)
+        Task::LayerAudio {
+            meta,
+            shortest: false,
+        }
     }
     pub fn default_reencode() -> Task {
         Task::Reencode

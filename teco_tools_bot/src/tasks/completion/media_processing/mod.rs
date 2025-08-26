@@ -1176,6 +1176,7 @@ pub fn layer_audio_over_media(
     inputfile: &Path,
     is_video: bool,
     audiofile: Option<&Path>,
+    shortest: bool,
 ) -> Result<VideoOutput, String> {
     macro_rules! unfail {
         ($thing: expr) => {
@@ -1217,10 +1218,13 @@ pub fn layer_audio_over_media(
         count_video_frames_and_framerate_and_audio_and_length(inputfile, false)
     );
 
-    let target_length = amen_break_length
-        .max(input_length)
-        .as_secs_f64()
-        .to_string();
+    let target_length = if shortest {
+        amen_break_length.min(input_length)
+    } else {
+        amen_break_length.max(input_length)
+    }
+    .as_secs_f64()
+    .to_string();
 
     let _ = status_report.send("Layering audio...".to_string());
 

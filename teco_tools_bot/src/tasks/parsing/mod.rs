@@ -237,7 +237,13 @@ impl Task {
             },
             Task::Ocr => "",
             Task::AmenBreak => "",
-            Task::LayerAudio(_) => "To pick an audio, reply to a message that has some with /pickaudio.",
+            Task::LayerAudio{meta: _, shortest: _ } =>
+                concat!(
+                    "<b>Possible parameters for this command:</b>\n",
+                    "<code>shortest</code>: Pick shortest length between video and audio instead of longest.\n\n",
+                    "To pick an audio, reply to a message that has some with /pickaudio.",
+                ),
+
             Task::Transcribe { temperature: _, translate_to_english: _ } =>
                 concat!(
                     "<b>Possible parameters for this command:</b>\n",
@@ -626,7 +632,23 @@ impl Task {
             }
             Task::Ocr => Ok(Task::Ocr),
             Task::AmenBreak => Ok(Task::AmenBreak),
-            Task::LayerAudio(meta) => Ok(Task::LayerAudio(meta.clone())),
+            Task::LayerAudio { meta, shortest: _ } => {
+                let mut shortest = false;
+
+                for param in params {
+                    parse_plain_param_with_parser_optional!(
+                        param,
+                        shortest,
+                        |x| if x == "shortest" { Ok(true) } else { Err(()) }
+                    );
+                    parse_keyval_param!(param, shortest, help);
+                    parse_stop!(param, help);
+                }
+                Ok(Task::LayerAudio {
+                    meta: meta.clone(),
+                    shortest,
+                })
+            }
             Task::Transcribe {
                 temperature: _,
                 translate_to_english: _,

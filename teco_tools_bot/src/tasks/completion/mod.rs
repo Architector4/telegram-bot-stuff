@@ -425,7 +425,7 @@ impl Task {
 
                 goodbye!(encode_text(&text).as_ref());
             }
-            Task::AmenBreak | Task::LayerAudio(_) => {
+            Task::AmenBreak | Task::LayerAudio { .. } => {
                 let media = data.message.get_media_info();
                 let media = match media {
                     Some(media) => {
@@ -453,20 +453,21 @@ impl Task {
                 let (path, file) =
                     unerror_download!(bot.download_file_to_temp_or_directly(media.file).await);
 
-                let (path_audio, file_audio) = if let Task::LayerAudio(meta) = self {
-                    match bot.download_file_to_temp_or_directly(meta).await {
-                        Ok((path, file)) => (Some(path), file),
-                        Err(_) => {
-                            goodbye!(concat!(
-                                "Error: the picked audio file is unavailable for the bot. ",
-                                "Try picking it again and/or reuploading it and ",
-                                "performing the command again."
-                            ));
+                let (path_audio, file_audio, shortest) =
+                    if let Task::LayerAudio { meta, shortest: s } = self {
+                        match bot.download_file_to_temp_or_directly(meta).await {
+                            Ok((path, file)) => (Some(path), file, *s),
+                            Err(_) => {
+                                goodbye!(concat!(
+                                    "Error: the picked audio file is unavailable for the bot. ",
+                                    "Try picking it again and/or reuploading it and ",
+                                    "performing the command again."
+                                ));
+                            }
                         }
-                    }
-                } else {
-                    (None, None)
-                };
+                    } else {
+                        (None, None, false)
+                    };
 
                 let status_report_for_processing = status_report.clone();
 
@@ -476,6 +477,7 @@ impl Task {
                         &path,
                         media.is_video,
                         path_audio.as_deref(),
+                        shortest,
                     )
                 })
                 .await
