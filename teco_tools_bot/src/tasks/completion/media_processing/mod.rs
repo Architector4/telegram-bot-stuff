@@ -1209,7 +1209,7 @@ pub fn layer_audio_over_media(
     };
 
     let _ = status_report.send("Checking audio length...".to_string());
-    let (_input_frame_count, _input_frame_rate, _has_audio, amen_break_length) = unfail!(
+    let (_input_frame_count, _input_frame_rate, _has_audio, audio_length) = unfail!(
         count_video_frames_and_framerate_and_audio_and_length(path, true)
     );
 
@@ -1219,9 +1219,9 @@ pub fn layer_audio_over_media(
     );
 
     let target_length = if shortest {
-        amen_break_length.min(input_length)
+        audio_length.min(input_length)
     } else {
-        amen_break_length.max(input_length)
+        audio_length.max(input_length)
     }
     .as_secs_f64()
     .to_string();
