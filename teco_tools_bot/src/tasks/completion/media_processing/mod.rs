@@ -358,7 +358,7 @@ pub fn image_into_thumbnail(data: &[u8]) -> Result<Vec<u8>, MagickError> {
             quality = new_q;
         } else {
             return Err(MagickError(String::from("Cannot compress image")));
-        };
+        }
         wand.set_image_compression_quality(quality)?;
         wand.set_compression_quality(quality)?;
     }
@@ -702,8 +702,8 @@ pub fn resize_video(
             let input_height = f64::from(input_dimensions.1);
 
             // "max" to avoid inf/NaN values
-            let end_width = (width as f64).max(1.0);
-            let end_height = (height as f64).max(1.0);
+            let end_width = f64::from(width).max(1.0);
+            let end_height = f64::from(height).max(1.0);
 
             approx_same_aspect_ratio((input_width, input_height), (end_width, end_height))
         }
@@ -728,13 +728,13 @@ pub fn resize_video(
                     count,
                     input_frame_count,
                     f64::from(input_dimensions.0),
-                    width as f64,
+                    f64::from(width),
                 );
                 let curved_height = resize_curve.apply_resize_for(
                     count,
                     input_frame_count,
                     f64::from(input_dimensions.1),
-                    height as f64,
+                    f64::from(height),
                 );
                 let curved_rotation =
                     resize_curve.apply_resize_for(count, input_frame_count, 0.0, rotation);

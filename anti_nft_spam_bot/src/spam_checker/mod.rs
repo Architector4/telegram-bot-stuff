@@ -148,17 +148,7 @@ async fn check_inner(
         true
     };
 
-    if !has_visit_guard {
-        log::debug!("{url} was just visited. Trying the database.");
-        // Oh no nevermind, someone else visited it.
-        // Just get the database result.
-        drop(visit_guard);
-        database
-            .is_spam(url, domain, false)
-            .await
-            .expect("Database died!")
-            .map(|x| (x.0, true))
-    } else {
+    if has_visit_guard {
         match visit_and_check_if_spam(database, domain, url, recursion_depth).await {
             Ok(mut is_spam_check) => {
                 // Add it to the database.
@@ -187,6 +177,16 @@ async fn check_inner(
                 None
             }
         }
+    } else {
+        log::debug!("{url} was just visited. Trying the database.");
+        // Oh no nevermind, someone else visited it.
+        // Just get the database result.
+        drop(visit_guard);
+        database
+            .is_spam(url, domain, false)
+            .await
+            .expect("Database died!")
+            .map(|x| (x.0, true))
     }
 }
 

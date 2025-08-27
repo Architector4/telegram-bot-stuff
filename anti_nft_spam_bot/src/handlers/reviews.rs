@@ -330,7 +330,7 @@ pub async fn apply_review_unverified(
         .is_some()
     {
         return Ok(Err(DomainIsProtected));
-    };
+    }
 
     // See if it should be written into the log...
     let should_be_logged = response

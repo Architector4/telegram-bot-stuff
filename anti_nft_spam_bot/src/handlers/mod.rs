@@ -492,7 +492,7 @@ async fn gather_suspicion<'a>(
                                   sendername: &str,
                                   url: Cow<'a, Url>,
                                   domain: &Domain| {
-            log::debug!("Marking {} and its domain as sus...", url);
+            log::debug!("Marking {url} and its domain as sus...");
 
             had_links = true;
 
