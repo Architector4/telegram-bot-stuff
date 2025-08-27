@@ -158,32 +158,36 @@ async fn check_inner(
             .await
             .expect("Database died!")
             .map(|x| (x.0, true))
-    } else { match visit_and_check_if_spam(database, domain, url, recursion_depth).await
-    { Ok(mut is_spam_check) => {
-        // Add it to the database.
-        log::debug!("Visited {url} and got: {is_spam_check:?}");
-        database
-            .add_url(url, is_spam_check.into(), false)
-            .await
-            .expect("Database died!");
-        // All the other cases effectively apply to the domains too...
-        if is_spam_check != IsSpamCheckResult::YesUrl {
-            if is_spam_check == IsSpamCheckResult::No && url_maybe_spam {
-                is_spam_check = IsSpamCheckResult::Maybe;
+    } else {
+        match visit_and_check_if_spam(database, domain, url, recursion_depth).await {
+            Ok(mut is_spam_check) => {
+                // Add it to the database.
+                log::debug!("Visited {url} and got: {is_spam_check:?}");
+                database
+                    .add_url(url, is_spam_check.into(), false)
+                    .await
+                    .expect("Database died!");
+                // All the other cases effectively apply to the domains too...
+                if is_spam_check != IsSpamCheckResult::YesUrl {
+                    if is_spam_check == IsSpamCheckResult::No && url_maybe_spam {
+                        is_spam_check = IsSpamCheckResult::Maybe;
+                    }
+
+                    database
+                        .add_domain(domain, url, is_spam_check.into(), false)
+                        .await
+                        .expect("Database died!");
+                }
+
+                Some((is_spam_check.into(), false))
             }
-
-            database
-                .add_domain(domain, url, is_spam_check.into(), false)
-                .await
-                .expect("Database died!");
+            _ => {
+                // The visit probably timed out or something. Meh.
+                log::debug!("{url} timed out");
+                None
+            }
         }
-
-        Some((is_spam_check.into(), false))
-    } _ => {
-        // The visit probably timed out or something. Meh.
-        log::debug!("{url} timed out");
-        None
-    }}}
+    }
 }
 
 fn get_reqwest_client(use_proxy: bool) -> Result<reqwest::Client, reqwest::Error> {
