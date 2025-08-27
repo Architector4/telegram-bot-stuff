@@ -29,14 +29,14 @@ impl Task {
         data: &TaskDatabaseInfo,
     ) -> Result<(), RequestError> {
         macro_rules! respond {
-            ($text:expr) => {
+            ($text:expr_2021) => {
                 bot.archsendmsg(data.message.chat.id, $text, data.message.id)
                     .await?;
             };
         }
 
         macro_rules! goodbye {
-            ($text:expr) => {{
+            ($text:expr_2021) => {{
                 respond!($text);
                 return Ok(());
             }};
@@ -44,7 +44,7 @@ impl Task {
 
         #[allow(unused_macros)]
         macro_rules! unfail_any {
-            ($thing:expr) => {{
+            ($thing:expr_2021) => {{
                 match $thing {
                     Ok(woot) => woot,
                     Err(e) => {
@@ -59,7 +59,7 @@ impl Task {
 
         // Little handler for the downloading.
         macro_rules! unerror_download {
-            ($download: expr) => {{
+            ($download: expr_2021) => {{
                 let result = $download;
                 if let Err(RequestError::Api(ApiError::Unknown(text))) = &result {
                     if text.contains("file is temporarily unavailable") {

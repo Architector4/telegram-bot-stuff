@@ -56,7 +56,7 @@ impl std::fmt::Display for TaskError {
 /// Returns true if this isn't a plain parameter,
 /// false if it is but failed to parse, or continues if it succeeds.
 macro_rules! parse_plain_param_with_parser_optional {
-    ($input: expr, $name: expr, $parser: expr) => {{
+    ($input: expr_2021, $name: expr_2021, $parser: expr_2021) => {{
         #[allow(clippy::redundant_closure_call)]
         if let Token::Plain(value) = $input {
             if let Ok(value) = $parser(value) {
@@ -70,13 +70,13 @@ macro_rules! parse_plain_param_with_parser_optional {
     }};
 }
 macro_rules! parse_plain_param_optional {
-    ($input: expr, $name: expr, $help: expr) => {
+    ($input: expr_2021, $name: expr_2021, $help: expr_2021) => {
         parse_plain_param_with_parser_optional!($input, $name, std::str::FromStr::from_str)
     };
 }
 
 macro_rules! parse_plain_param_with_parser_mandatory {
-    ($input: expr, $name: expr, $parser: expr, $help: expr) => {
+    ($input: expr_2021, $name: expr_2021, $parser: expr_2021, $help: expr_2021) => {
         #[allow(clippy::redundant_closure_call)]
         if let Token::Plain(value) = $input {
             let Ok(value) = $parser(value) else {
@@ -93,13 +93,13 @@ macro_rules! parse_plain_param_with_parser_mandatory {
     };
 }
 macro_rules! parse_plain_param {
-    ($input: expr, $name: expr, $help: expr) => {
+    ($input: expr_2021, $name: expr_2021, $help: expr_2021) => {
         parse_plain_param_with_parser_mandatory!($input, $name, std::str::FromStr::from_str, $help)
     };
 }
 
 macro_rules! parse_keyval_param_with_parser {
-    ($input: expr, $name: expr, $parser: expr, $help: expr) => {
+    ($input: expr_2021, $name: expr_2021, $parser: expr_2021, $help: expr_2021) => {
         let (key, value) = match $input {
             Token::KeyVal(key, value) => (key, value),
             Token::Plain(plain) => {
@@ -119,12 +119,12 @@ macro_rules! parse_keyval_param_with_parser {
 }
 
 macro_rules! parse_keyval_param {
-    ($input: expr, $name: expr, $help: expr) => {
+    ($input: expr_2021, $name: expr_2021, $help: expr_2021) => {
         parse_keyval_param_with_parser!($input, $name, std::str::FromStr::from_str, $help)
     };
 }
 macro_rules! parse_stop {
-    ($input: expr, $help: expr) => {
+    ($input: expr_2021, $help: expr_2021) => {
         let response = match $input {
             Token::KeyVal(key, val) => format!(
                 "unexpected parameter <code>{}</code> with value <code>{}</code>\n{}",
@@ -313,17 +313,17 @@ impl Task {
 
                 Ok(Task::Amogus { amogus })
             }
-            Task::ImageResize {
-                new_dimensions: original_dimensions,
-                rotation,
+            &Task::ImageResize {
+                new_dimensions: ref original_dimensions,
+                ref rotation,
                 percentage: _,
                 format: _,
                 ref resize_type,
                 mut quality,
             }
-            | Task::VideoResize {
-                new_dimensions: original_dimensions,
-                rotation,
+            | &Task::VideoResize {
+                new_dimensions: ref original_dimensions,
+                ref rotation,
                 percentage: _,
                 ref resize_type,
                 vibrato_hz: _,

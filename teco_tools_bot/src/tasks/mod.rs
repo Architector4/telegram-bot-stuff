@@ -331,13 +331,13 @@ impl Task {
             }};
         }
         macro_rules! write_param {
-            ($name:expr, $value:expr) => {{
+            ($name:expr_2021, $value:expr_2021) => {{
                 writeln!(output, "<b>{}</b>: {}", $name, $value.to_string())
             }};
         }
 
         macro_rules! wp {
-            ($name:expr) => {
+            ($name:expr_2021) => {
                 write_param!(stringify!($name), $name)
             };
         }

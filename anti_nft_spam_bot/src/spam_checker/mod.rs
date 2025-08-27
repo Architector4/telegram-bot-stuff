@@ -158,9 +158,8 @@ async fn check_inner(
             .await
             .expect("Database died!")
             .map(|x| (x.0, true))
-    } else if let Ok(mut is_spam_check) =
-        visit_and_check_if_spam(database, domain, url, recursion_depth).await
-    {
+    } else { match visit_and_check_if_spam(database, domain, url, recursion_depth).await
+    { Ok(mut is_spam_check) => {
         // Add it to the database.
         log::debug!("Visited {url} and got: {is_spam_check:?}");
         database
@@ -180,11 +179,11 @@ async fn check_inner(
         }
 
         Some((is_spam_check.into(), false))
-    } else {
+    } _ => {
         // The visit probably timed out or something. Meh.
         log::debug!("{url} timed out");
         None
-    }
+    }}}
 }
 
 fn get_reqwest_client(use_proxy: bool) -> Result<reqwest::Client, reqwest::Error> {
