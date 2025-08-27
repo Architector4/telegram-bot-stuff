@@ -1,5 +1,5 @@
-use std::{fs, sync::Arc};
-use teloxide::{dptree::deps, prelude::*, RequestError};
+use std::{fs, sync::Arc, time::Duration};
+use teloxide::{dptree::deps, net::default_reqwest_settings, prelude::*, RequestError};
 
 use crate::{
     handlers,
@@ -22,7 +22,13 @@ pub async fn entry() {
     })
     .expect("Could not load bot key file!");
 
-    let bot = Bot::new(key);
+    let bot = Bot::with_client(
+        key,
+        default_reqwest_settings()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .expect("Failed making reqwest client"),
+    );
 
     let bot = if USE_LOCAL_API {
         bot.set_api_url(url::Url::parse("http://127.0.0.1:8081/").unwrap())
