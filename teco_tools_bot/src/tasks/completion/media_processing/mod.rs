@@ -408,7 +408,7 @@ impl<T: Read> Iterator for SplitIntoBmps<T> {
     type Item = Result<Vec<u8>, std::io::Error>;
     fn next(&mut self) -> Option<Self::Item> {
         macro_rules! unfail_read_exact {
-            ($thing: expr_2021) => {
+            ($thing: expr) => {
                 match $thing {
                     Ok(o) => o,
                     Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return None,
@@ -475,7 +475,7 @@ pub fn count_video_frames_and_framerate_and_audio_and_length(
     count_audio: bool,
 ) -> Result<(u64, f64, bool, Duration), std::io::Error> {
     macro_rules! goodbye {
-        ($desc: expr_2021) => {
+        ($desc: expr) => {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, $desc))
         };
     }
@@ -563,7 +563,7 @@ pub fn count_video_frames_and_framerate_and_audio_and_length(
 
 pub fn check_if_has_video_audio(path: &std::path::Path) -> Result<(bool, bool), std::io::Error> {
     macro_rules! goodbye {
-        ($desc: expr_2021) => {
+        ($desc: expr) => {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, $desc))
         };
     }
@@ -643,7 +643,7 @@ pub fn resize_video(
     quality: NonZeroU8,
 ) -> Result<VideoOutput, String> {
     macro_rules! unfail {
-        ($thing: expr_2021) => {
+        ($thing: expr) => {
             match $thing {
                 Ok(o) => o,
                 Err(e) => return Err(e.to_string()),
@@ -1179,7 +1179,7 @@ pub fn layer_audio_over_media(
     shortest: bool,
 ) -> Result<VideoOutput, String> {
     macro_rules! unfail {
-        ($thing: expr_2021) => {
+        ($thing: expr) => {
             match $thing {
                 Ok(o) => o,
                 Err(e) => return Err(e.to_string()),
@@ -1447,7 +1447,7 @@ pub fn reencode(
     inputfile: &std::path::Path,
 ) -> Result<ReencodeMedia, String> {
     macro_rules! unfail {
-        ($thing: expr_2021) => {
+        ($thing: expr) => {
             match $thing {
                 Ok(o) => o,
                 Err(e) => return Err(e.to_string()),

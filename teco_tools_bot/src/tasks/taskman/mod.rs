@@ -155,7 +155,7 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
 
         // Inform the user that we're doing the task.
         macro_rules! produce_queue_message {
-            ($task: expr_2021, $taskman:expr_2021, $progress: expr_2021) => {
+            ($task: expr, $taskman:expr, $progress: expr) => {
                 // Inform the user that we're doing the task.
                 let response = $task.produce_queue_message(Some(0), $progress);
                 let _ = $taskman

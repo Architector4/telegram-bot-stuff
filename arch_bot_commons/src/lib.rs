@@ -162,7 +162,7 @@ pub fn append_with_message_entities(
 /// network error, retry it up to 5 times.
 #[macro_export]
 macro_rules! teloxide_retry {
-    ($what:expr_2021) => {{
+    ($what:expr) => {{
         let mut counter: u8 = 0;
         loop {
             let result = $what;

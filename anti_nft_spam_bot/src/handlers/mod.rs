@@ -697,14 +697,14 @@ async fn handle_command(
     };
 
     macro_rules! respond {
-        ($text:expr_2021) => {
+        ($text:expr) => {
             bot.archsendmsg_no_link_preview(message.chat.id, $text, message.id)
                 .await?;
         };
     }
 
     macro_rules! goodbye {
-        ($text:expr_2021) => {{
+        ($text:expr) => {{
             respond!($text);
             return Ok(true);
         }};

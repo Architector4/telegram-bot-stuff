@@ -227,14 +227,14 @@ pub fn request_for_help(text: &str) -> bool {
 
 /// Wraps the function's return value in a pinning closure.
 macro_rules! wrap {
-    ($thing:expr_2021) => {
+    ($thing:expr) => {
         |tp| Box::pin($thing(tp))
     };
 }
 
 #[allow(unused_macros)]
 macro_rules! respond {
-    ($stuff:expr_2021, $text:expr_2021) => {
+    ($stuff:expr, $text:expr) => {
         $stuff
             .bot
             .send_message($stuff.message.chat.id, $text)
@@ -245,7 +245,7 @@ macro_rules! respond {
 }
 
 macro_rules! goodbye {
-    ($err:expr_2021) => {
+    ($err:expr) => {
         return Ok(Err($err))
     };
     () => {
@@ -254,25 +254,25 @@ macro_rules! goodbye {
 }
 
 macro_rules! goodbye_err {
-    ($err:expr_2021) => {
+    ($err:expr) => {
         goodbye!(TaskError::Error($err.to_string()))
     };
 }
 
 macro_rules! goodbye_desc {
-    ($err:expr_2021) => {
+    ($err:expr) => {
         goodbye!(TaskError::Descriptory($err.to_string()))
     };
 }
 
 macro_rules! goodbye_cancel {
-    ($err:expr_2021) => {{
+    ($err:expr) => {{
         goodbye!(TaskError::Cancel($err.to_string()));
     }};
 }
 
 macro_rules! check_too_large {
-    ($media:expr_2021) => {{
+    ($media:expr) => {{
         if $media.size > MAX_DOWNLOAD_SIZE_MEGABYTES * 1000 * 1000 {
             goodbye_cancel!(format!(
                 "media is too large. The limit is {}MB.",
@@ -284,7 +284,7 @@ macro_rules! check_too_large {
 }
 
 macro_rules! unfail {
-    ($item:expr_2021) => {
+    ($item:expr) => {
         match $item {
             Ok(x) => x,
             Err(e) => {
@@ -304,7 +304,7 @@ macro_rules! error {
 /// Check if the input parameters is someone asking for help, and if so,
 /// print it for this type of task.
 macro_rules! print_help {
-    ($stuff: expr_2021, $task: expr_2021) => {
+    ($stuff: expr, $task: expr) => {
         if request_for_help($stuff.get_params()) {
             let mut help = $task.param_help();
             // Some tasks have empty help.

@@ -198,7 +198,7 @@ pub async fn parse_callback_query(
     db: Arc<Database>,
 ) -> Result<(), RequestError> {
     macro_rules! goodbye {
-        ($text:expr_2021) => {{
+        ($text:expr) => {{
             bot.answer_callback_query(query.id).text($text).await?;
             return Ok(());
         }};
