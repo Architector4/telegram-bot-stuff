@@ -968,6 +968,36 @@ pub async fn create_review_notify(
 
     let _ = writeln!(notify_text, "There are {to_review} links to review.");
 
+    // Forward offending messages.
+    // It's a good nicety, but it could fail: the messages may be protected from forwarding, or an
+    // admin might have deleted them in just the right moment, or telegram goes funny again. So,
+    // honestly, just ignore it failing.
+    //
+    // Decide what exactly to forward and how first, though.
+    match message.reply_to_message() {
+        None => {
+            // Just forward this one.
+            let _ = bot
+                .forward_message(CONTROL_CHAT_ID, message.chat.id, message.id)
+                .await;
+        }
+        Some(reply_to) if reply_to.chat.id == message.chat.id => {
+            // In the same chat. Forward them both with this call.
+            let _ = bot
+                .forward_messages(CONTROL_CHAT_ID, message.chat.id, [reply_to.id, message.id])
+                .await;
+        }
+        Some(reply_to) => {
+            // In different chats. Forward individually.
+            let _ = bot
+                .forward_message(CONTROL_CHAT_ID, reply_to.chat.id, reply_to.id)
+                .await;
+            let _ = bot
+                .forward_message(CONTROL_CHAT_ID, message.chat.id, message.id)
+                .await;
+        }
+    }
+
     if teloxide_retry!(
         bot.send_message(CONTROL_CHAT_ID, &notify_text)
             .parse_mode(teloxide::types::ParseMode::Html)
