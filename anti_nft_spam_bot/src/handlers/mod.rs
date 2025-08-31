@@ -527,26 +527,18 @@ async fn gather_suspicion<'a>(
             .or_else(|| message.parse_caption_entities())
         {
             for entity in &entities {
-                //let Some((url, domain)) = get_entity_url_domain(entity) else {
-                //    continue;
-                //};
-                match get_entity_url_domain(entity) {
-                    Some((url, domain)) => {
-                        if sent_by_admin.is_none() {
-                            sent_by_admin = Some(is_sender_admin(bot, message).await?);
-                        }
-                        mark_sus(
-                            message,
-                            sent_by_admin,
-                            &sendername,
-                            Cow::Owned(url),
-                            &domain,
-                        )
-                        .await;
+                if let Some((url, domain)) = get_entity_url_domain(entity) {
+                    if sent_by_admin.is_none() {
+                        sent_by_admin = Some(is_sender_admin(bot, message).await?);
                     }
-                    None => {
-                        continue;
-                    }
+                    mark_sus(
+                        message,
+                        sent_by_admin,
+                        &sendername,
+                        Cow::Owned(url),
+                        &domain,
+                    )
+                    .await;
                 }
             }
         }
