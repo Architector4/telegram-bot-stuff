@@ -485,7 +485,7 @@ impl Database {
         }
         if let Some(domain) = domain {
             // Check the domain one.
-            if let Some(is_spam_domain) = dbg!(self.is_domain_spam(domain, false).await?) {
+            if let Some(is_spam_domain) = self.is_domain_spam(domain, false).await? {
                 let result = match is_spam_domain.0 {
                     IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
                     IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
