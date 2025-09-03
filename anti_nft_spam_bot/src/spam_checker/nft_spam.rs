@@ -41,6 +41,12 @@ pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
         return Some(IsSpam::Yes);
     }
 
+    if username == "models3DPrint" {
+        // Not "NFT" spam per se, but those get spammed quite a lot in at least one chat and any
+        // query to them was only responded by automated bots. Might be a scam too.
+        return Some(IsSpam::Yes);
+    }
+
     if username.starts_with("tgh") {
         // If more than 3 digits at the end...
         // (if position of first non-digit character from the end
