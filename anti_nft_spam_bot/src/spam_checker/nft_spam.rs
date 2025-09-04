@@ -41,7 +41,7 @@ pub fn is_spam_telegram_url(url: &Url) -> Option<IsSpam> {
         return Some(IsSpam::Yes);
     }
 
-    if username == "models3DPrint" {
+    if username == "models3dprint" {
         // Not "NFT" spam per se, but those get spammed quite a lot in at least one chat and any
         // query to them was only responded by automated bots. Might be a scam too.
         return Some(IsSpam::Yes);
