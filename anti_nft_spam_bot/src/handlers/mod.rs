@@ -274,6 +274,12 @@ async fn handle_message_inner(
         // oh no!
         if sent_by_admin == Some(true) {
             log::debug!("Skipping deleting message from an admin.");
+            bot.archsendmsg_no_link_preview(
+                message.chat.id,
+                "Skipping deleting a message from an admin that contains a spam link.",
+                None,
+            )
+            .await?;
             false
         } else {
             // Bad links and not an admin. Buh-bye!
@@ -287,9 +293,7 @@ async fn handle_message_inner(
     let sender = sender_name_prettyprint(message, false);
 
     if should_delete {
-        let chatid = message.chat.id;
-        let messageid = message.id;
-        delete_spam_message(bot, chatid, messageid, &sender, database).await?;
+        delete_spam_message(bot, message.chat.id, message.id, &sender, database).await?;
     } else {
         // It's (maybe?) not spam. Do the other things.
 
