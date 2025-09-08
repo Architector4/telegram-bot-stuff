@@ -310,7 +310,7 @@ async fn handle_message_inner(
             }
         }
 
-        if !is_edited {
+        if !is_edited && !is_replied_to {
             // Deal with unknown sus links...
             gather_suspicion(bot, message, sent_by_admin, database).await?;
 
