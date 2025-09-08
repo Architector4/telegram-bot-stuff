@@ -728,6 +728,10 @@ impl Database {
         Ok(old_state)
     }
 
+    /// Tells the database that this sus link is sighted in this message and with this sender name.
+    ///
+    /// If sender name is not provided, it is derived from the message. If a record for this URL
+    /// exists, it's not inserted; duplicate runs of this function are allowed.
     pub async fn sus_link_sighted(
         &self,
         message: &Message,

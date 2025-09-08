@@ -253,22 +253,24 @@ async fn handle_message_inner(
     }
 
     // Check if it has any links we want to ban.
-    let (bad_links_present, sus_links_present) =
+    let (spam_links_present, sus_links_present) =
         does_message_have_bad_links(bot, message, database).await?;
-
-    let is_in_control_chat = message.chat.id == CONTROL_CHAT_ID;
 
     // We may need to check if the sender is an admin in two different places in this function.
     // If that happens, store the result determined first and reuse.
     // Check the result now, though.
-    let sent_by_admin: Option<bool> =
-        if !is_in_control_chat && (bad_links_present || !sus_links_present.is_empty()) {
-            Some(is_sender_admin(bot, message).await?)
-        } else {
-            None
-        };
+    let sent_by_admin: Option<bool> = if message.chat.id == CONTROL_CHAT_ID {
+        // Everyone in control chat is an "admin".
+        Some(true)
+    } else if spam_links_present || !sus_links_present.is_empty() {
+        // If there's spam/sus links, check if it's by an admin
+        Some(is_sender_admin(bot, message).await?)
+    } else {
+        // If no spam links are present, we don't need to care.
+        None
+    };
 
-    let should_delete = if bad_links_present && !is_in_control_chat {
+    let should_delete = if spam_links_present {
         // oh no!
         if sent_by_admin == Some(true) {
             log::debug!("Skipping deleting message from an admin.");
@@ -289,32 +291,27 @@ async fn handle_message_inner(
         let messageid = message.id;
         delete_spam_message(bot, chatid, messageid, &sender, database).await?;
     } else {
-        // It's (maybe?) not spam. Do the other things, if it's not an edit nor a replied-to message
-        if !is_replied_to && !is_edited {
-            if sent_by_admin != Some(true) {
-                // Deal with known sus links...
-                for url in sus_links_present {
-                    let _ = database
-                        .sus_link_sighted(message, Some(&sender), &url)
-                        .await;
-                }
-            }
+        // It's (maybe?) not spam. Do the other things.
 
+        if sent_by_admin != Some(true) {
+            // Mark this message for deletion in case any of the sus links it has get marked as
+            // spam.
+            //
+            // Note: this effectively accumulates links: if a sus link is present, then the message
+            // is edited to not have it, it would still have it sighted on there.
+            for url in sus_links_present {
+                let _ = database
+                    .sus_link_sighted(message, Some(&sender), &url)
+                    .await;
+            }
+        }
+
+        if !is_edited {
             // Deal with unknown sus links...
             gather_suspicion(bot, message, sent_by_admin, database).await?;
 
             if handle_command(bot, me, message, database, sent_by_admin).await? {
                 return Ok(());
-            }
-
-            // And, for convenience sake...
-            if is_in_control_chat && bad_links_present {
-                bot.archsendmsg_no_link_preview(
-                    message.chat.id,
-                    "Noticed a spam link in this message.",
-                    message.id,
-                )
-                .await?;
             }
         }
     }
