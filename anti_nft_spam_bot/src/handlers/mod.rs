@@ -360,14 +360,13 @@ pub async fn delete_spam_message(
                 break;
             }
             Err(RequestError::Api(ApiError::MessageCantBeDeleted)) => {
-                // No rights?
+                // No rights? // Older than 48 hours?
                 bot.archsendmsg_no_link_preview(
                     chatid,
                     concat!(
                         "Tried to remove a message containing a spam link, but failed. ",
-                        "Is this bot an admin with ability to remove messages?\n\n",
-                        "If so, this may also be a Telegram bug, and an admin ",
-                        "has to remove the message manually."
+                        "This might be because this bot is not an admin with ability to ",
+                        "remove messages, or the message is older than 48 hours.",
                     ),
                     None,
                 )
