@@ -293,7 +293,10 @@ pub enum Task {
         temperature: f32,
         translate_to_english: bool,
     },
-    AmenBreak,
+    AmenBreak {
+        shortest: bool,
+        match_length: bool,
+    },
     LayerAudio {
         meta: FileMeta,
         shortest: bool,
@@ -416,8 +419,11 @@ impl Task {
                 writeln!(output, "<b>Quality</b>: {quality}%")
             }
             Task::Ocr => Ok(()),
-            Task::AmenBreak => Ok(()),
-            Task::LayerAudio {
+            Task::AmenBreak {
+                shortest,
+                match_length,
+            }
+            | Task::LayerAudio {
                 meta: _,
                 shortest,
                 match_length,
@@ -605,7 +611,10 @@ impl Task {
         }
     }
     pub fn default_amenbreak() -> Task {
-        Task::AmenBreak
+        Task::AmenBreak {
+            shortest: false,
+            match_length: true,
+        }
     }
     pub fn default_layer_audio(meta: FileMeta) -> Task {
         Task::LayerAudio {

@@ -236,7 +236,13 @@ impl Task {
                 }
             },
             Task::Ocr => "",
-            Task::AmenBreak => "",
+            Task::AmenBreak { shortest: _, match_length: _ } =>
+                concat!(
+                    "<b>Possible parameters for this command:</b>\n",
+                    "<code>shortest</code>: Pick shortest length between video and the amen break instead of longest.\n\n",
+                    "<code>keepspeed</code>: Don't match speed of video to make its length a whole integer of the amen break. ",
+                    "This is done by default to ensure the result is a perfect loop.",
+                ),
             Task::LayerAudio{meta: _, shortest: _, match_length: _ } =>
                 concat!(
                     "<b>Possible parameters for this command:</b>\n",
@@ -634,12 +640,24 @@ impl Task {
                 }
             }
             Task::Ocr => Ok(Task::Ocr),
-            Task::AmenBreak => Ok(Task::AmenBreak),
-            Task::LayerAudio {
-                meta,
-                mut shortest,
-                mut match_length,
-            } => {
+            Task::AmenBreak { .. } | Task::LayerAudio { .. } => {
+                let (meta, mut shortest, mut match_length) = if let Task::AmenBreak {
+                    shortest,
+                    match_length,
+                } = self
+                {
+                    (None, *shortest, *match_length)
+                } else if let Task::LayerAudio {
+                    meta,
+                    shortest,
+                    match_length,
+                } = self
+                {
+                    (Some(meta), *shortest, *match_length)
+                } else {
+                    unreachable!();
+                };
+
                 for param in params {
                     parse_plain_param_with_parser_optional!(
                         param,
@@ -662,11 +680,19 @@ impl Task {
                     parse_keyval_param!(param, shortest, help);
                     parse_stop!(param, help);
                 }
-                Ok(Task::LayerAudio {
-                    meta: meta.clone(),
-                    shortest,
-                    match_length,
-                })
+
+                if let Some(meta) = meta {
+                    Ok(Task::LayerAudio {
+                        meta: meta.clone(),
+                        shortest,
+                        match_length,
+                    })
+                } else {
+                    Ok(Task::AmenBreak {
+                        shortest,
+                        match_length,
+                    })
+                }
             }
             Task::Transcribe {
                 temperature: _,

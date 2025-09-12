@@ -425,7 +425,15 @@ impl Task {
 
                 goodbye!(encode_text(&text).as_ref());
             }
-            Task::AmenBreak | Task::LayerAudio { .. } => {
+            Task::AmenBreak {
+                shortest,
+                match_length,
+            }
+            | Task::LayerAudio {
+                shortest,
+                match_length,
+                meta: _,
+            } => {
                 let media = data.message.get_media_info();
                 let media = match media {
                     Some(media) => {
@@ -453,14 +461,9 @@ impl Task {
                 let (path, file) =
                     unerror_download!(bot.download_file_to_temp_or_directly(media.file).await);
 
-                let (path_audio, file_audio, shortest, match_length) = if let Task::LayerAudio {
-                    meta,
-                    shortest,
-                    match_length,
-                } = self
-                {
+                let (path_audio, file_audio) = if let Task::LayerAudio { meta, .. } = self {
                     match bot.download_file_to_temp_or_directly(meta).await {
-                        Ok((path, file)) => (Some(path), file, *shortest, *match_length),
+                        Ok((path, file)) => (Some(path), file),
                         Err(_) => {
                             goodbye!(concat!(
                                 "Error: the picked audio file is unavailable for the bot. ",
@@ -470,10 +473,12 @@ impl Task {
                         }
                     }
                 } else {
-                    (None, None, false, true)
+                    (None, None)
                 };
 
                 let status_report_for_processing = status_report.clone();
+
+                let (shortest, match_length) = (*shortest, *match_length);
 
                 let result = tokio::task::spawn_blocking(move || {
                     media_processing::layer_audio_over_media(
