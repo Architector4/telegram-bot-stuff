@@ -453,21 +453,25 @@ impl Task {
                 let (path, file) =
                     unerror_download!(bot.download_file_to_temp_or_directly(media.file).await);
 
-                let (path_audio, file_audio, shortest) =
-                    if let Task::LayerAudio { meta, shortest: s } = self {
-                        match bot.download_file_to_temp_or_directly(meta).await {
-                            Ok((path, file)) => (Some(path), file, *s),
-                            Err(_) => {
-                                goodbye!(concat!(
-                                    "Error: the picked audio file is unavailable for the bot. ",
-                                    "Try picking it again and/or reuploading it and ",
-                                    "performing the command again."
-                                ));
-                            }
+                let (path_audio, file_audio, shortest, match_length) = if let Task::LayerAudio {
+                    meta,
+                    shortest,
+                    match_length,
+                } = self
+                {
+                    match bot.download_file_to_temp_or_directly(meta).await {
+                        Ok((path, file)) => (Some(path), file, *shortest, *match_length),
+                        Err(_) => {
+                            goodbye!(concat!(
+                                "Error: the picked audio file is unavailable for the bot. ",
+                                "Try picking it again and/or reuploading it and ",
+                                "performing the command again."
+                            ));
                         }
-                    } else {
-                        (None, None, false)
-                    };
+                    }
+                } else {
+                    (None, None, false, true)
+                };
 
                 let status_report_for_processing = status_report.clone();
 
@@ -478,6 +482,7 @@ impl Task {
                         media.is_video,
                         path_audio.as_deref(),
                         shortest,
+                        match_length,
                     )
                 })
                 .await

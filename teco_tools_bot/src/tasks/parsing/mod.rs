@@ -237,10 +237,13 @@ impl Task {
             },
             Task::Ocr => "",
             Task::AmenBreak => "",
-            Task::LayerAudio{meta: _, shortest: _ } =>
+            Task::LayerAudio{meta: _, shortest: _, match_length: _ } =>
                 concat!(
                     "<b>Possible parameters for this command:</b>\n",
                     "<code>shortest</code>: Pick shortest length between video and audio instead of longest.\n\n",
+                    "<code>keepspeed</code>: Don't match speed of video to make its length a whole integer of audio. ",
+                    "This is done by default to ensure the result is a perfect loop.",
+                    "\n\n",
                     "To pick an audio, reply to a message that has some with /pickaudio.",
                 ),
 
@@ -632,21 +635,37 @@ impl Task {
             }
             Task::Ocr => Ok(Task::Ocr),
             Task::AmenBreak => Ok(Task::AmenBreak),
-            Task::LayerAudio { meta, shortest: _ } => {
-                let mut shortest = false;
-
+            Task::LayerAudio {
+                meta,
+                mut shortest,
+                mut match_length,
+            } => {
                 for param in params {
                     parse_plain_param_with_parser_optional!(
                         param,
                         shortest,
-                        |x| if x == "shortest" { Ok(true) } else { Err(()) }
+                        |x| if x == "shortest" {
+                            Ok(true)
+                        } else if x == "longest" {
+                            Ok(false)
+                        } else {
+                            Err(())
+                        }
                     );
+                    parse_plain_param_with_parser_optional!(param, match_length, |x| if x
+                        == "keepspeed"
+                    {
+                        Ok(false)
+                    } else {
+                        Err(())
+                    });
                     parse_keyval_param!(param, shortest, help);
                     parse_stop!(param, help);
                 }
                 Ok(Task::LayerAudio {
                     meta: meta.clone(),
                     shortest,
+                    match_length,
                 })
             }
             Task::Transcribe {

@@ -297,6 +297,7 @@ pub enum Task {
     LayerAudio {
         meta: FileMeta,
         shortest: bool,
+        match_length: bool,
     },
     Reencode,
 }
@@ -416,11 +417,27 @@ impl Task {
             }
             Task::Ocr => Ok(()),
             Task::AmenBreak => Ok(()),
-            Task::LayerAudio { meta: _, shortest } => {
-                if *shortest {
-                    writeln!(output, "Pick <b>shortest</b> length")?;
+            Task::LayerAudio {
+                meta: _,
+                shortest,
+                match_length,
+            } => {
+                let text_shortest = if *shortest { "shortest" } else { "longest" };
+                writeln!(
+                    output,
+                    "Make result <b>{text_shortest}</b> length between video and audio"
+                )?;
+
+                if *match_length {
+                    writeln!(
+                        output,
+                        "<b>Don't</b> keep speed and instead match video for a perfect loop"
+                    )?;
                 } else {
-                    writeln!(output, "Pick <b>longest</b> length")?;
+                    writeln!(
+                        output,
+                        "<b>Keep speed</b>, making result not a perfect loop"
+                    )?;
                 }
 
                 Ok(())
@@ -594,6 +611,7 @@ impl Task {
         Task::LayerAudio {
             meta,
             shortest: false,
+            match_length: true,
         }
     }
     pub fn default_reencode() -> Task {

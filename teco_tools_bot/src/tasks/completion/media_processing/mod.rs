@@ -1177,6 +1177,7 @@ pub fn layer_audio_over_media(
     is_video: bool,
     audiofile: Option<&Path>,
     shortest: bool,
+    match_length: bool,
 ) -> Result<VideoOutput, String> {
     macro_rules! unfail {
         ($thing: expr) => {
@@ -1214,9 +1215,38 @@ pub fn layer_audio_over_media(
     );
 
     let _ = status_report.send("Checking video length...".to_string());
-    let (_input_frame_count, _input_frame_rate, _has_audio, input_length) = unfail!(
+    let (_input_frame_count, _input_frame_rate, _has_audio, mut input_length) = unfail!(
         count_video_frames_and_framerate_and_audio_and_length(inputfile, false)
     );
+
+    let one_over_speed: f64 =
+        if match_length && is_video && !input_length.is_zero() && !audio_length.is_zero() {
+            if audio_length > input_length {
+                // Factor of audio length over input length.
+                let audio_length_factor = audio_length.div_duration_f64(input_length);
+
+                // Same factor, but rounded to nearest whole value.
+                let audio_length_factor_multiple = audio_length_factor.round();
+
+                // What we want is a speed value such that if we multiply input_length by it we get ta
+                // whole number. So, divide current factor by desired factor to get the speed.
+                audio_length_factor / audio_length_factor_multiple
+            } else {
+                // Factor of input length over audio length.
+                let input_length_factor = input_length.div_duration_f64(audio_length);
+
+                // Same factor, but rounded to nearest whole value.
+                let input_length_factor_multiple = input_length_factor.round();
+
+                // What we want is a speed value such that if we multiply input_length by it we get ta
+                // whole number. So, divide current factor by desired factor to get the speed.
+                input_length_factor_multiple / input_length_factor
+            }
+        } else {
+            1.0
+        };
+
+    input_length = input_length.mul_f64(one_over_speed);
 
     let target_length = if shortest {
         audio_length.min(input_length)
@@ -1236,6 +1266,8 @@ pub fn layer_audio_over_media(
         // For some reason, using -stream_loop for images makes ffmpeg hang.
         [OsStr::new("-loop"), OsStr::new("1")]
     };
+
+    let video_filter = format!("pad=ceil(iw/2)*2:ceil(ih/2)*2, setpts=PTS*{one_over_speed}");
 
     let converter = Command::new("ffmpeg")
         .args([
@@ -1260,7 +1292,7 @@ pub fn layer_audio_over_media(
             OsStr::new("-map"),
             OsStr::new("1:a"),
             OsStr::new("-vf"), // Pad uneven pixels with black.
-            OsStr::new("pad=ceil(iw/2)*2:ceil(ih/2)*2"),
+            video_filter.as_ref(),
             // I'd prefer the crop filter instead, but it leaves
             // a chance of cropping to 0 width/height and stuff breaking :(
             //OsStr::new("crop=trunc(iw/2)*2:trunc(ih/2)*2"),
