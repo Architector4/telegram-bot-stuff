@@ -69,7 +69,7 @@ impl Taskman {
             spawntask(false);
             spawntask(true);
         }
-        if parallelisms % 2 > 0 {
+        if !parallelisms.is_multiple_of(2) {
             // If we have an odd amount of parallelisms, spawn an extra task for that one
             spawntask(true);
         }
