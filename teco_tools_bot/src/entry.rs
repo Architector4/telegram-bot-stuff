@@ -36,21 +36,30 @@ pub async fn entry() {
         bot
     };
 
-    if !whisper::check_if_available().await {
-        let _ = bot
-            .send_message(
-                crate::OWNER_ID,
-                "
+    // Check if Whisper server is up with delay of 5 seconds. The delay is useful in case the
+    // server has just started up and this bot might have started earlier than the whisper server,
+    // in which case checking for it might be a false positive.
+    //
+    // This isn't fool-proof, obviously, but it should help nonetheless.
+    let bot_for_whisper_check = bot.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        if !whisper::check_if_available().await {
+            let _ = bot_for_whisper_check
+                .send_message(
+                    crate::OWNER_ID,
+                    "
 Whisper API broke. Not good!
 This bot is expected to run with whisper.cpp's \"server\" example running. See this:
 https://github.com/ggerganov/whisper.cpp/tree/master/examples/server
 Specifically, the expected parameters for the server are:
 <code>whisper-server -m ggml-small-q8_0.bin -l auto --host 127.0.0.1 --port 9447</code>
         ",
-            )
-            .parse_mode(teloxide::types::ParseMode::Html)
-            .await;
-    }
+                )
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await;
+        }
+    });
 
     let db = Arc::new(Database::new().await.expect("Could not init the database!"));
 
