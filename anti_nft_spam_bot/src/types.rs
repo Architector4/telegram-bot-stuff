@@ -1,306 +1,311 @@
 use std::fmt::Display;
 
-use sqlx::Error;
-use teloxide::types::Message;
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 use url::Url;
 
-use crate::{
-    database::{self, Database},
-    parse_url_like_telegram,
-};
+use super::sanitized_url::SanitizedUrl;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IsSpam {
-    No = 0,
-    Yes = 1,
-    Maybe = 2,
+/// A designation for a URL. Designates how to treat it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum UrlDesignation {
+    /// This URL is not spam. Ignore it and anything under it in automatic checking. But, if anyone
+    /// indicates that a URL matching this rule is spam, and it wasn't manually reviewed to be not
+    /// spam, send it for review.
+    ///
+    /// So, if `example.com/abc` is designated as this, then `example.com/abc/def` is also not spam.
+    NotSpam = 0,
+    /// This URL is an aggregator. It is not spam, but some things under it may or may not be spam.
+    ///
+    /// So, if `example.com/abc` is designated as this, then `example.com/abc/def` needs separate
+    /// checking to be determined if it's spam or not.
+    Aggregator = 1,
+    /// This URL is spam. Everything under it is spam too.
+    ///
+    /// So, if `example.com/abc` is designated as this, then `example.com/abc/def` is also spam.
+    Spam = 2,
 }
 
-impl IsSpam {
-    /// Picks the option that is most condemning,
-    /// along with a boolean that is true if `b` was picked, false otherwise.
-    pub fn pick_most_condemning(a: Option<Self>, b: Option<Self>) -> Option<(Self, bool)> {
-        match (a, b) {
-            (Some(Self::Yes), _) => Some((Self::Yes, false)),
-            (_, Some(Self::Yes)) => Some((Self::Yes, true)),
-            (Some(Self::Maybe), _) => Some((Self::Maybe, false)),
-            (_, Some(Self::Maybe)) => Some((Self::Maybe, true)),
-            (_, Some(Self::No)) => Some((Self::No, true)),
-            (Some(Self::No), _) => Some((Self::No, false)),
-            (None, _) => None,
-        }
-    }
-}
-
-impl From<u8> for IsSpam {
-    fn from(value: u8) -> Self {
-        use IsSpam::*;
+impl TryFrom<u8> for UrlDesignation {
+    type Error = ();
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            value if value == No as u8 => No,
-            value if value == Yes as u8 => Yes,
-            value if value == Maybe as u8 => Maybe,
-            _ => panic!("Unknown value: {value}"),
+            x if x == UrlDesignation::NotSpam as u8 => Ok(UrlDesignation::NotSpam),
+            x if x == UrlDesignation::Aggregator as u8 => Ok(UrlDesignation::Aggregator),
+            x if x == UrlDesignation::Spam as u8 => Ok(UrlDesignation::Spam),
+            _ => Err(()),
         }
     }
 }
 
-impl From<IsSpam> for u8 {
-    fn from(value: IsSpam) -> Self {
-        value as u8
-    }
-}
-
-/// A single domain name.
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct Domain(String);
-
-impl Domain {
-    pub fn from_url(url: &Url) -> Option<Self> {
-        url.domain().map(|x| Self(x.to_lowercase()))
-    }
-    /// Convenience function to try and parse a string directly to a domain name.
-    #[allow(unused)]
-    pub fn from_str(string: &str) -> Option<Self> {
-        parse_url_like_telegram(string)
-            .ok()
-            .as_ref()
-            .and_then(Self::from_url)
-    }
-
-    pub fn as_str(&self) -> &str {
-        self.as_ref()
-    }
-
-    pub(crate) fn new_invalid_unchecked() -> Domain {
-        Domain(String::new())
-    }
-}
-
-impl AsRef<str> for Domain {
-    fn as_ref(&self) -> &str {
-        self.0.as_ref()
-    }
-}
-
-impl Display for Domain {
+impl Display for UrlDesignation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self.0, f)
+        let tha_string = match self {
+            Self::NotSpam => "Not spam",
+            Self::Aggregator => "Aggregator",
+            Self::Spam => "Spam",
+        };
+
+        f.write_str(tha_string)
     }
 }
 
-#[derive(Debug)]
-pub enum ReviewResponse {
-    UrlSpam(Option<Domain>, Url),
-    DomainSpam(Domain, Url),
-    NotSpam(Option<Domain>, Url),
-    Skip,
+/// Review callback data. As per telegram API for callback queries, must be serialized to below 64
+/// bytes.
+#[derive(Clone, Copy, Debug)]
+pub struct ReviewCallbackData {
+    /// ID of the URL in the review queue.
+    pub review_entry_id: i64,
+    /// CRC32 hash of the URL in the review queue.
+    pub url_crc32: u32,
+    /// New designation in the review.
+    pub designation: UrlDesignation,
+    /// How many times the URL in this review queue should be destructured before applying this
+    /// review. Use as argument to [`SanitizedUrl::destructure_to_number`].
+    pub destructure: u64,
 }
 
-impl ReviewResponse {
-    /// True if this response marks something as spam.
-    #[allow(dead_code)]
-    pub fn marks_as_spam(&self) -> bool {
-        match self {
-            ReviewResponse::Skip => false,
-            ReviewResponse::UrlSpam(_, _) => true,
-            ReviewResponse::DomainSpam(_, _) => true,
-            ReviewResponse::NotSpam(_, _) => false,
-        }
+impl ReviewCallbackData {
+    // Manually written serialize/deserialize.
+    // Doing it with derived traits with Serde and JSON or whatever would be more "proper",
+    // but that typically involves allocation (can't beat a constant-size array),
+    // and the serialized result is always over 64 bytes, which isn't allowed.
+    //
+    // I could probably still squeeze it into JSON with a bunch of effort, but this is easier lol
+
+    /// Serialize this data. Output is valid ASCII (i.e. valid UTF-8).
+    #[must_use]
+    pub fn serialize(&self) -> [u8; 46] {
+        let mut output = [0u8; 46];
+        output[0] = b'I';
+        hex::encode_to_slice(self.review_entry_id.to_le_bytes(), &mut output[1..17])
+            .expect("Slice size guaranteed to be valid");
+        output[17] = b'C';
+        hex::encode_to_slice(self.url_crc32.to_le_bytes(), &mut output[18..26])
+            .expect("Slice size guaranteed to be valid");
+        output[26] = b'D';
+        hex::encode_to_slice((self.designation as u8).to_le_bytes(), &mut output[27..29])
+            .expect("Slice size guaranteed to be valid");
+        output[29] = b'S';
+        hex::encode_to_slice(self.destructure.to_le_bytes(), &mut output[30..46])
+            .expect("Slice size guaranteed to be valid");
+
+        output
     }
 
-    #[allow(dead_code)]
-    pub fn as_ref_url_domain(&self) -> Option<(Option<&Domain>, &Url)> {
-        match self {
-            ReviewResponse::Skip => None,
-            ReviewResponse::UrlSpam(d, u) => Some((d.as_ref(), u)),
-            ReviewResponse::DomainSpam(d, u) => Some((Some(d), u)),
-            ReviewResponse::NotSpam(d, u) => Some((d.as_ref(), u)),
+    /// Deserialize data. Should initially have been generated by [`Self::serialize`].
+    #[must_use]
+    pub fn deserialize(input: &[u8; 46]) -> Option<Self> {
+        if !(input[0] == b'I' && input[17] == b'C' && input[26] == b'D' && input[29] == b'S') {
+            return None;
         }
-    }
 
-    pub fn deconstruct(self) -> Option<(Option<Domain>, Url)> {
-        match self {
-            ReviewResponse::Skip => None,
-            ReviewResponse::UrlSpam(d, u) => Some((d, u)),
-            ReviewResponse::DomainSpam(d, u) => Some((Some(d), u)),
-            ReviewResponse::NotSpam(d, u) => Some((d, u)),
-        }
-    }
+        let mut scratch = [0u8; 8];
 
-    /// Returns true if ingesting this into the database
-    /// would cause a change that we are interested in.
-    pub async fn conflicts_with_db(&self, database: &Database) -> Result<bool, database::Error> {
-        Ok(match self {
-            ReviewResponse::Skip => false,
-            ReviewResponse::UrlSpam(_, url) => database
-                .is_url_spam(url, false)
-                .await?
-                .is_none_or(|x| x.0 != IsSpam::Yes || !x.1),
-            ReviewResponse::DomainSpam(domain, _url) => database
-                .is_domain_spam(domain, false)
-                .await?
-                .is_none_or(|x| x.0 != IsSpam::Yes || !x.2),
-            ReviewResponse::NotSpam(domain, url) => database
-                .is_spam(url, domain.as_ref(), true)
-                .await?
-                .is_none_or(|x| x.0 != IsSpam::No || !x.1),
+        hex::decode_to_slice(&input[1..17], &mut scratch[0..8])
+            .expect("Slice size guaranteed to be valid");
+        let review_entry_id = i64::from_le_bytes(scratch);
+
+        hex::decode_to_slice(&input[18..26], &mut scratch[0..4])
+            .expect("Slice size guaranteed to be valid");
+        let url_crc32 = u32::from_le_bytes(
+            scratch[0..4]
+                .try_into()
+                .expect("Slice size guaranteed to be valid"),
+        );
+
+        hex::decode_to_slice(&input[27..29], &mut scratch[0..1])
+            .expect("Slice size guaranteed to be valid");
+        let designation: UrlDesignation = scratch[0].try_into().ok()?;
+
+        hex::decode_to_slice(&input[30..46], &mut scratch[0..8])
+            .expect("Slice size guaranteed to be valid");
+        let destructure = u64::from_le_bytes(scratch);
+
+        Some(Self {
+            review_entry_id,
+            url_crc32,
+            designation,
+            destructure,
         })
     }
 
-    /// Parse a string (callback query) into review responses,
-    /// with supplementary data.
-    ///
-    /// All responses returned from one call of this function
-    /// are guaranteed to be of the same type.
-    pub async fn from_str(
-        value: &str,
-        database: &Database,
-        message: Option<&Message>,
-    ) -> Result<Vec<Self>, Box<dyn std::error::Error + Send + Sync>> {
-        let mut iter = value.split_ascii_whitespace();
-        let action = iter.next().ok_or("Empty response")?;
-
-        if action == "SKIP" {
-            if iter.next().is_some() {
-                Err("Extraneous data in response")?;
-            }
-            return Ok(vec![ReviewResponse::Skip]);
-        }
-
-        let table = iter.next().ok_or("No table name")?;
-
-        // May be a "figure it out yourself" review response. Figure that out.
-        if table == "derive" {
-            let Some(message) = message else {
-                Err("Message too old")?
-            };
-
-            let Some(text) = message.text() else {
-                Err("Message has no text???")?
-            };
-
-            let mut responses = Vec::new();
-            for line in text.lines() {
-                if let Some(url_text) = line.strip_prefix("URL: ") {
-                    let url: Url = url_text.parse().map_err(|_| "Failed to parse URL")?;
-
-                    let response = match action {
-                        "URL_SPAM" => ReviewResponse::UrlSpam(None, url),
-                        "DOMAIN_SPAM" => {
-                            let domain = Domain::from_url(&url)
-                                .ok_or("Failed to extract domain from a URL")?;
-
-                            ReviewResponse::DomainSpam(domain, url)
-                        }
-                        "NOT_SPAM" => ReviewResponse::NotSpam(None, url),
-                        //"SKIP" => ReviewResponse::Skip, // Was handled above
-                        _ => Err("Unknown action type")?,
-                    };
-
-                    responses.push(response);
-                }
-            }
-
-            return Ok(responses);
-        }
-
-        let rowid: i64 = iter
-            .next()
-            .ok_or("No rowid")?
-            .parse()
-            .map_err(|_| "Failed to parse rowid")?;
-
-        let crc32hash: u32 = iter
-            .next()
-            .ok_or("No hash")?
-            .parse()
-            .map_err(|_| "Failed to parse hash")?;
-
-        if iter.next().is_some() {
-            Err("Extraneous data in response")?;
-        }
-
-        let Some((url, domain_from_db)) =
-            database.get_url_from_table_and_rowid(table, rowid).await?
-        else {
-            Err("Specified data is not in database")?
-        };
-
-        if crc32fast::hash(url.as_str().as_bytes()) != crc32hash {
-            Err("Hash does not match! Please mark with a command instead and press Skip.")?;
-        }
-
-        let domain = match domain_from_db {
-            Some(d) => Ok(d),
-            None => Domain::from_url(&url).ok_or("Failed extracting domain from URL"),
-        };
-
-        let response = match action {
-            "URL_SPAM" => ReviewResponse::UrlSpam(domain.ok(), url),
-            "DOMAIN_SPAM" => ReviewResponse::DomainSpam(domain?, url),
-            "NOT_SPAM" => ReviewResponse::NotSpam(domain.ok(), url),
-            //"SKIP" => ReviewResponse::Skip, // Was handled above
-            _ => Err("Unknown action type")?,
-        };
-
-        Ok(vec![response])
+    /// Convenience wrapper around [`Self::serialize`] that then converts the result into a string.
+    #[must_use]
+    pub fn serialize_to_string(&self) -> String {
+        let serialized = self.serialize().to_vec();
+        String::from_utf8(serialized)
+            .expect("Serialized review callback is guaranteed to be valid ASCII.")
     }
 
-    /// If this review response would mark a protected domain as spam, this method returns a
-    /// reference to it, otherwise returns `None`.
+    /// Convenience wrapper around [`Self::deserialize`] that tries to deserialize from a string.
+    #[must_use]
+    pub fn deserialize_from_str(input: &str) -> Option<Self> {
+        let input: &[u8; 46] = input.as_bytes().try_into().ok()?;
+        Self::deserialize(input)
+    }
+
+    /// Generates a keyboard with callback buttons for reviewing this URL with this review queue
+    /// entry ID.
     ///
-    /// This function takes a mutable reference because it might fill out the domain field of
-    /// [`ReviewResponse::UrlSpam`] variant, if this is one.
-    pub async fn conflicts_with_protected_domains(
-        &mut self,
-        db: &Database,
-    ) -> Result<Option<&Domain>, Error> {
-        let domain_to_check = match self {
-            ReviewResponse::DomainSpam(domain, _) => Some(domain),
-            ReviewResponse::UrlSpam(domain, url) => {
-                if url.path().is_empty() || url.path() == "/" {
-                    // We're marking just the plain link to the domain as spam. We want to ensure that
-                    // it's not protected for this too.
+    /// If `destructure_down_to` is provided, buttons are only generated down to that.
+    #[must_use]
+    pub fn callback_buttons_from_url(
+        review_entry_id: i64,
+        url: &SanitizedUrl,
+        destructure_down_to: Option<&SanitizedUrl>,
+    ) -> InlineKeyboardMarkup {
+        fn format_as_spam_text(a: &str, trim_from_start: bool) -> String {
+            static LENGTH: usize = 25;
 
-                    // First fetch it out, if needed.
-                    if domain.is_none() {
-                        let domain_new = Domain::from_url(url);
-                        *domain = domain_new;
-                    }
+            let start = if trim_from_start {
+                a.char_indices().nth_back(LENGTH).unwrap_or((0, 'g')).0
+            } else {
+                0
+            };
+            let ellipsis_start = if start > 0 { "…" } else { "" };
+            let end = if trim_from_start {
+                a.len()
+            } else {
+                a.char_indices().nth(LENGTH).unwrap_or((a.len(), 'g')).0
+            };
+            let ellipsis_end = if end < a.len() { "…" } else { "" };
 
-                    domain.as_mut()
-                } else {
-                    None
+            format!(
+                "⛔️ {ellipsis_start}{}{ellipsis_end}",
+                &a[start..end].trim_matches('.')
+            )
+        }
+
+        let url_crc32 = crc32fast::hash(url.as_str().as_bytes());
+
+        let mut output: Vec<Vec<InlineKeyboardButton>> =
+            vec![vec![InlineKeyboardButton::callback(
+                "✅ Not spam".to_string(),
+                ReviewCallbackData {
+                    review_entry_id,
+                    url_crc32,
+                    designation: UrlDesignation::NotSpam,
+                    destructure: 0,
+                }
+                .serialize_to_string(),
+            )]];
+
+        if url.query().is_some() {
+            output.push(vec![InlineKeyboardButton::callback(
+                format!("⛔️ {url}"),
+                ReviewCallbackData {
+                    review_entry_id,
+                    url_crc32,
+                    designation: UrlDesignation::Spam,
+                    destructure: 0,
+                }
+                .serialize_to_string(),
+            )]);
+        }
+
+        for (i, (host, path)) in url.destructure().enumerate() {
+            if let Some(down_to) = destructure_down_to {
+                if host == down_to.host_str() && path == down_to.path() {
+                    break;
                 }
             }
-            ReviewResponse::NotSpam(..) | ReviewResponse::Skip => None,
-        };
 
-        if let Some(domain_to_check) = domain_to_check {
-            db.is_domain_protected(domain_to_check)
-                .await
-                .map(|x| x.then_some(&*domain_to_check))
-        } else {
-            Ok(None)
+            let the_str = if path.len() > 1 { path } else { host };
+            let trim_from_start = path.len() > 1;
+
+            output.push(vec![InlineKeyboardButton::callback(
+                format_as_spam_text(the_str, trim_from_start),
+                ReviewCallbackData {
+                    review_entry_id,
+                    url_crc32,
+                    designation: UrlDesignation::Spam,
+                    destructure: i as u64 + 1,
+                }
+                .serialize_to_string(),
+            )]);
+
+            if output.len() >= 50 {
+                //   Maximum limit is 100 buttons iirc, but eh.
+                break;
+            }
         }
+
+        InlineKeyboardMarkup {
+            inline_keyboard: output,
+        }
+    }
+
+    /// Given a review queue entry ID, and the URL in that entry, produces text and buttons for a
+    /// review keyboard. Buttons are produced with [`Self::callback_buttons_from_url`].
+    #[must_use]
+    pub fn produce_review_keyboard_text_buttons(
+        review_entry_id: i64,
+        sanitized_url: &SanitizedUrl,
+        original_url: &Url,
+        destructure_down_to: Option<&SanitizedUrl>,
+    ) -> (String, InlineKeyboardMarkup) {
+        let text = format!("<b>REVIEW:</b>\n\n{original_url}\n\nWhat is spam here?");
+        let buttons =
+            Self::callback_buttons_from_url(review_entry_id, sanitized_url, destructure_down_to);
+
+        (text, buttons)
     }
 }
 
-impl Display for ReviewResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+/// Use like this:
+///
+/// `format!("Deleted a message from someuser {}", delete_reason);`
+#[derive(Clone, Copy, Debug)]
+pub enum MessageDeleteReason {
+    /// Contains a spam link.
+    ContainsSpamLink,
+    /// It's in an album with a message that was deemed as spam.
+    OfAlbumWithSpamMessage,
+}
+
+impl MessageDeleteReason {
+    /// Turn this into a string, or nothing if this reason shouldn't be printed at all.
+    ///
+    /// For a value like [`Self::ContainsSpamLink`] this returns "containing a spam link".
+    ///
+    /// For best grammar, it's recommended to prepend the output string with "Removed a message from
+    /// someuser "
+    ///
+    ///
+    #[must_use]
+    pub fn to_str(self) -> Option<&'static str> {
         match self {
-            ReviewResponse::Skip => write!(f, "Skip"),
-            ReviewResponse::UrlSpam(_, url) => write!(f, "URL is spam: {url}"),
-            ReviewResponse::DomainSpam(_, url) => write!(f, "Domain and URL is spam: {url}"),
-            ReviewResponse::NotSpam(_, url) => write!(f, "Neither domain nor URL is spam: {url}"),
+            Self::ContainsSpamLink => Some("containing a spam link"),
+            Self::OfAlbumWithSpamMessage => None,
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MarkSusResult {
-    Marked,
-    AlreadyMarkedSus,
-    AlreadyMarkedSpam,
-    ManuallyReviewedNotSpam,
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn callback_data_ser_de() {
+        #[allow(clippy::cast_possible_wrap)]
+        let data = ReviewCallbackData {
+            review_entry_id: 0xAAAAAAAAAAAAAAAAu64 as i64,
+            url_crc32: 0xBBBBBBBB,
+            designation: UrlDesignation::Aggregator,
+            destructure: 0xCCCCCCCCCCCCCCCC,
+        };
+
+        let serialized = data.serialize();
+
+        assert!(serialized.is_ascii());
+
+        let deserialized = ReviewCallbackData::deserialize(&serialized).unwrap();
+
+        assert_eq!(data.review_entry_id, deserialized.review_entry_id);
+        assert_eq!(data.url_crc32, deserialized.url_crc32);
+        assert_eq!(data.designation, deserialized.designation);
+        assert_eq!(data.destructure, deserialized.destructure);
+    }
 }

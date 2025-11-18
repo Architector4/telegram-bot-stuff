@@ -9,11 +9,15 @@ edition = "2021"
 arch_bot_commons = { version = "0.6.5", path = "../arch_bot_commons" }
 chrono = "0.4.34"
 crc32fast = "1.4.2"
+flume = "0.11.1"
+futures-util = "0.3.31"
+hex = "0.4.3"
 html-escape = "0.2.13"
 log = "0.4.17"
 # This seems to depend on OpenSSL 3.3.0, but Fedora Server 40 only has 3.2.1.
 # Use "vendored" feature to work around that lmao
 native-tls = { version = "0.2.12", features = ["vendored"] }
+percent-encoding = "2.3.2"
 reqwest = { version = "0.12.22", features = ["socks"] }
 sqlx = { version = "0.8.2", features = [
 	"sqlite",

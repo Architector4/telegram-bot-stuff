@@ -1,48 +1,38 @@
 use std::{
-    collections::HashSet,
     str::FromStr,
     sync::{atomic::AtomicBool, Arc},
 };
 
 use chrono::Utc;
-pub use sqlx::Error;
+use futures_util::{stream::BoxStream, TryStreamExt};
 use sqlx::{
     error::ErrorKind,
     migrate::MigrateDatabase,
-    sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
-    Executor, Row, Sqlite,
+    sqlite::{Sqlite, SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
+    Executor, Row, Transaction,
 };
-use teloxide::types::{ChatId, Message, MessageId};
-use tokio::sync::{Mutex, Notify};
+use teloxide::types::{ChatId, MediaGroupId, MessageId};
 use url::Url;
 
-use crate::{
-    parse_url_like_telegram, sender_name_prettyprint,
-    spam_checker::SPAM_CHECKER_VERSION,
-    types::{MarkSusResult, ReviewResponse},
-};
+use crate::{misc::parse_url_like_telegram, sanitized_url::SanitizedUrl, types::UrlDesignation};
 
-use super::types::{Domain, IsSpam};
+pub use sqlx::Error;
+
+mod types;
+pub use types::*;
 
 type Pool = sqlx::Pool<Sqlite>;
-const DB_PATH: &str = "sqlite:spam_domains.sqlite";
+const DB_PATH: &str = "sqlite:anti_nft_spam_bot.sqlite";
 static WAS_CONSTRUCTED: AtomicBool = AtomicBool::new(false);
 
+/// The database.
 pub struct Database {
+    /// The connection pool.
     pool: Pool,
-    // Mutexes are bad. However, this will only be used for reviews,
-    // which can only be done by a few people in the control chat.
-    review_lock: Mutex<()>,
-    /// A list of domains that are currently being visited by other tasks.
-    /// For the reason the Mutex is used, see code of [`Self::domain_visit_debounce`]
-    // I'd make this a std::sync::Mutex but Rust incorrectly assumes it lives after
-    // the drop and doesn't let it compile lol
-    domains_currently_being_visited: Mutex<HashSet<Domain>>,
-    /// A [`Notify`] used to wake up tasks waiting on other tasks to visit some domain.
-    domains_visit_notify: Notify,
 }
 
 impl Database {
+    /// Create a new database.
     pub fn new() -> impl std::future::Future<Output = Result<Arc<Database>, Error>> + Send {
         Self::new_by_path(DB_PATH, true)
     }
@@ -71,1206 +61,1383 @@ impl Database {
             .max_connections(32)
             .connect_with(
                 SqliteConnectOptions::from_str(path)
-                    .unwrap()
+                    .expect("SQLite connect options should be valid")
                     .pragma("cache_size", "-32768")
+                    .foreign_keys(true) // Already  default, but doesn't hurt being explicit.
                     .busy_timeout(std::time::Duration::from_secs(600)),
             )
             .await?;
 
-        // Do some init. Create the tables...
-
-        // DOMAINS:
-        // domain (unique primary key, string)
-        // example_url (string)
-        // is_spam (0 for no, 1 for yes, 2 for unknown and needs review)
-        //          (2 should NOT usually happen here, but eh)
-        // last_sent_to_review (date+time in UTC timezone in ISO 8601 format)
+        // URLS:
+        // id (i64, unique primary key)
+        // host (text, a host of a `SanitizedUrl`)
+        // path (text, a path of a `SanitizedUrl`)
+        // query (text, a query of a `SanitizedUrl`, can be empty to mean no query)
+        // param_count (i64, amount of params in the URL query (stored in `url_params`); for example,"?a&b=50&c" is 3 params)
+        // original_url (text, full original URL with no lowercasing)
+        // designation (u8, representing a value in the enum `UrlDesignation`)
         // manually_reviewed (0 for no, 1 for yes)
-        // spam_checker_version (version of this program this was determined at)
-        pool.execute(sqlx::query(
-            "
-                CREATE TABLE IF NOT EXISTS domains (
-                    domain TEXT PRIMARY KEY NOT NULL COLLATE NOCASE,
-                    example_url TEXT NULL,
-                    is_spam INTEGER NOT NULL,
-                    last_sent_to_review TEXT NULL,
-                    manually_reviewed INTEGER NOT NULL DEFAULT 0,
-                    spam_checker_version INTEGER NOT NULL DEFAULT 0
-                ) STRICT;",
-        ))
+        pool.execute(
+            "CREATE TABLE IF NOT EXISTS urls (
+                id INTEGER PRIMARY KEY NOT NULL,
+                host TEXT NOT NULL,
+                path TEXT NOT NULL CHECK (SUBSTR(path, 1, 1)='/'),
+                query TEXT NOT NULL,
+                param_count INTEGER NOT NULL,
+                original_url TEXT NOT NULL,
+                designation INTEGER NOT NULL,
+                manually_reviewed INTEGER NOT NULL,
+                UNIQUE (host, path, query)
+            ) STRICT;",
+        )
         .await?;
 
-        // URLS:
-        // url (unique primary key, string)
-        // is_spam (0 for no, 1 for yes, 2 for unknown and needs review)
-        // last_sent_to_review (date+time in UTC timezone in ISO 8601 format)
-        // manually_reviewed (0 for no, 1 for yes)
-        // spam_checker_version (version of this program this was determined at)
-        pool.execute(sqlx::query(
-            "
-                CREATE TABLE IF NOT EXISTS urls (
-                    url TEXT PRIMARY KEY NOT NULL COLLATE NOCASE,
-                    is_spam INTEGER NOT NULL,
-                    last_sent_to_review TEXT NULL,
-                    manually_reviewed INTEGER NOT NULL DEFAULT 0,
-                    spam_checker_version INTEGER NOT NULL DEFAULT 0
-                ) STRICT;",
-        ))
+        // URL_PARAMS:
+        // url_id (i64, references `id` of table `urls`)
+        // param (text, a percent-encoded URL param itself; for example, "v=dQw4w9WgXcQ")
+        pool.execute(
+            "CREATE TABLE IF NOT EXISTS url_params (
+                url_id INTEGER NOT NULL,
+                param TEXT NOT NULL,
+                UNIQUE (url_id, param),
+                FOREIGN KEY (url_id) REFERENCES urls(id)
+            ) STRICT;",
+        )
         .await?;
 
         // HIDE_DELETES:
-        //      An admin of chats listed here asked to hide
+        //      Admins of chats listed here asked to hide
         //      bot's notifications about deleting a message.
-        // chatid (unique primary key, i64)
+        // chat_id (unique primary key, i64)
         pool.execute(sqlx::query(
-            "
-                CREATE TABLE IF NOT EXISTS hide_deletes (
-                    chatid INTEGER PRIMARY KEY NOT NULL
-                ) STRICT;",
+            "CREATE TABLE IF NOT EXISTS hide_deletes (
+                    chat_id INTEGER PRIMARY KEY NOT NULL
+            ) STRICT;",
         ))
+        .await?;
+
+        // LAST_DELETED_ALBUM_ID:
+        // chat_id (unique primary key, i64)
+        // media_group_id (text, album ID of the last deleted message)
+        pool.execute(sqlx::query(
+            "CREATE TABLE IF NOT EXISTS last_deleted_album_id (
+                chat_id INTEGER PRIMARY KEY NOT NULL,
+                media_group_id TEXT NOT NULL
+            ) STRICT;",
+        ))
+        .await?;
+
+        // review_queue:
+        // id (i64, unique primary key)
+        // sanitized_url (text, full `SanitizedUrl`)
+        // original_url (text, full original URL with no lowercasing)
+        // last_sent_to_review (date+time in UTC timezone in ISO 8601 format)
+        pool.execute(
+            "CREATE TABLE IF NOT EXISTS review_queue (
+                id INTEGER PRIMARY KEY NOT NULL,
+                sanitized_url TEXT NOT NULL UNIQUE,
+                original_url TEXT NOT NULL,
+                last_sent_to_review TEXT NULL,
+                UNIQUE (sanitized_url)
+            ) STRICT;",
+        )
         .await?;
 
         // SUS_LINK_SIGHTINGS:
-        //      List of messages where a link marked as sus was sighted.
+        //      List of messages where a link on review was sighted.
         //      Used to delete all of them if the link is marked as spam.
-        // chatid (i64)
-        // messageid (i32 (because telegram bot api is just like that))
-        // sendername (text)
-        // urlid (i64, references rowid of table `urls`)
+        // chat_id (i64)
+        // message_id (i32 (because telegram bot api is just like that))
+        // sender_name (text)
+        // url_id (i64, references rowid of table `review_queue`)
         pool.execute(sqlx::query(
-            "
-                CREATE TABLE IF NOT EXISTS sus_link_sightings (
-                    chatid INTEGER NOT NULL,
-                    messageid INTEGER NOT NULL,
-                    sendername TEXT NOT NULL,
-                    urlid INTEGER NOT NULL,
-                    UNIQUE (chatid, messageid)
+            "CREATE TABLE IF NOT EXISTS sus_link_sightings (
+                    chat_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    sender_name TEXT NOT NULL,
+                    url_id INTEGER NOT NULL,
+                    UNIQUE (chat_id, message_id, url_id),
+                    FOREIGN KEY (url_id) REFERENCES review_queue(id)
                 ) STRICT;",
         ))
         .await?;
 
-        // Transparent database migration lololol
-        // Will fail harmlessly if the column already exists.
-        let _ = sqlx::query(
-            "ALTER TABLE domains
-        ADD COLUMN manually_reviewed INTEGER NOT NULL DEFAULT 0;",
-        )
-        .execute(&pool)
-        .await;
-        let _ = sqlx::query(
-            "ALTER TABLE domains
-        ADD COLUMN spam_checker_version INTEGER NOT NULL DEFAULT 0;",
-        )
-        .execute(&pool)
-        .await;
-        let _ = sqlx::query(
-            "ALTER TABLE urls
-        ADD COLUMN spam_checker_version INTEGER NOT NULL DEFAULT 0;",
-        )
-        .execute(&pool)
-        .await;
+        // REVIEW_KEYBOARDS:
+        // chat_id (i64)
+        // message_id (i32 (because telegram bot api is just like that))
+        // url_id (i64, references rowid of table `review_queue`)
+        pool.execute(sqlx::query(
+            "CREATE TABLE IF NOT EXISTS review_keyboards (
+                    chat_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    url_id INTEGER NOT NULL,
+                    UNIQUE (chat_id, message_id),
+                    FOREIGN KEY (url_id) REFERENCES review_queue(id)
+                    ) STRICT;",
+        ))
+        .await?;
 
-        let _ = sqlx::query("ALTER TABLE domains DROP COLUMN from_spam_list;")
-            .execute(&pool)
+        // Two automated indices suggested by sqlite3_expert
+        let _ = pool
+            .execute(sqlx::query(
+                "CREATE INDEX url_params_idx ON url_params(param);",
+            ))
             .await;
-        let _ = sqlx::query("ALTER TABLE urls DROP COLUMN from_spam_list;")
-            .execute(&pool)
+        let _ = pool
+            .execute(sqlx::query(
+                "CREATE INDEX urls_host_path_id_idx ON urls(host, path, id DESC);",
+            ))
             .await;
 
-        let db_arc = Arc::new(Database {
-            pool,
-            review_lock: Mutex::new(()),
-            domains_currently_being_visited: Mutex::new(HashSet::with_capacity(4)),
-            domains_visit_notify: Notify::new(),
-        });
-
-        Ok(db_arc)
+        Ok(Arc::new(Database { pool }))
     }
 
-    /// Check if a domain is a spam domain or not, according to the database.
-    /// Returns [`None`] if it's not in the database.
+    /// If the input URL has no query, provide empty string for that argument.
     ///
-    /// Note that [`Self::is_url_spam`] should take priority over this,
-    /// unless its return result is [`IsSpam::Maybe`].
+    /// # Panics
     ///
-    /// "No" and "Maybe" results that were automatically determined by
-    /// an old spam checker are ignored unless `return_old_checker_results` is set to true.
-    ///
-    /// Also returns an example URL stored with the database, and a
-    /// boolean that is true if this result is manually reviewed.
-    pub async fn is_domain_spam(
-        &self,
-        domain: &Domain,
-        return_old_checker_results: bool,
-    ) -> Result<Option<(IsSpam, Option<Url>, bool)>, Error> {
-        // The "NOT" condition is to exclude results that says anything other than `IsSpam::Yes`
-        // and are automatically determined by an older spam check version.
-        // We DON'T want to delete those, because they should still be useful for review.
-        sqlx::query(
-            "SELECT is_spam, example_url, manually_reviewed FROM domains
-            WHERE domain=? AND NOT (is_spam!=1 AND spam_checker_version<?);",
-        )
-        .bind(domain.as_str())
-        .bind(if return_old_checker_results {
-            0
-        } else {
-            SPAM_CHECKER_VERSION
-        })
-        .map(|row: SqliteRow| {
-            (
-                IsSpam::from(row.get::<u8, _>("is_spam")),
-                row.get::<Option<String>, _>("example_url")
-                    .map(|x| Url::parse(&x).unwrap()),
-                row.get::<bool, _>("manually_reviewed"),
-            )
-        })
-        .fetch_optional(&self.pool)
-        .await
-    }
-
-    /// Check if a URL is a spam URL or not, according to the database.
-    /// Returns [`None`] if it's not in the database.
-    ///
-    /// Note that this should take priority over [`Self::is_domain_spam`],
-    /// unless this function's return result is [`IsSpam::Maybe`].
-    ///
-    /// "No" and "Maybe" results that were automatically determined by
-    /// an old spam checker are ignored unless `return_old_checker_results` is set to true.
-    ///
-    /// Also returns a boolean that is true if this result is manually reviewed.
-    pub async fn is_url_spam(
-        &self,
-        url: &Url,
-        return_old_checker_results: bool,
-    ) -> Result<Option<(IsSpam, bool)>, Error> {
-        // The "NOT" condition is to exclude results that says anything other than `IsSpam::Yes`
-        // and are automatically determined by an older spam check version.
-        // We DON'T want to delete those, because they should still be useful for review.
-        sqlx::query(
-            "SELECT is_spam, manually_reviewed FROM urls
-            WHERE url=? AND NOT (is_spam!=1 AND spam_checker_version<?);",
-        )
-        .bind(url.as_str())
-        .bind(if return_old_checker_results {
-            0
-        } else {
-            SPAM_CHECKER_VERSION
-        })
-        .map(|row: SqliteRow| {
-            (
-                IsSpam::from(row.get::<u8, _>("is_spam")),
-                row.get::<bool, _>("manually_reviewed"),
-            )
-        })
-        .fetch_optional(&self.pool)
-        .await
-    }
-
-    /// Check if a given URL (or its domain) is spam or not, according to the database.
-    /// Convenience method for [`Self::is_domain_spam`] and [`Self::is_url_spam`]
-    /// Returns [`None`] if it's not in the database.
-    ///
-    /// Argument `domain` is optional and, if `url` check is indecisive,
-    /// is used if provided, or extracted from URL if not.
-    ///
-    /// "No" and "Maybe" results that were automatically determined by
-    /// an old spam checker are ignored unless `return_old_checker_results` is set to true.
-    ///
-    /// Also returns a boolean that is true if this result is manually reviewed.
-    pub async fn is_spam(
-        &self,
-        url: &Url,
-        domain: impl Into<Option<&Domain>>,
-        return_old_checker_results: bool,
-    ) -> Result<Option<(IsSpam, bool)>, Error> {
-        let mut domain = domain.into();
-        // Look for URL match...
-        let url_result = self.is_url_spam(url, return_old_checker_results).await?;
-
-        if let Some((IsSpam::Yes, _)) = url_result {
-            return Ok(url_result);
-        }
-
-        // If no provided domain, try to get one from the URL.
-        // Otherwise, use provided domain, to not do an extraneous allocation.
-        let domain_inner;
-        if domain.is_none() {
-            domain_inner = Domain::from_url(url);
-            domain = domain_inner.as_ref();
-        }
-
-        // Look for domain match...
-        let domain_result = if let Some(domain) = domain {
-            self.is_domain_spam(domain, return_old_checker_results)
-                .await?
-        } else {
-            None
-        };
-
-        // Pick the most condemning one.
-        let most_condeming = IsSpam::pick_most_condemning(
-            url_result.map(|x| x.0),
-            domain_result.as_ref().map(|x| x.0),
+    /// Panics if an invalid [`UrlDesignation`] is found in the database.
+    async fn get_url_exact_destructured(
+        executor: impl Executor<'_, Database = Sqlite>,
+        host: &str,
+        path: &str,
+        query: &str,
+    ) -> Result<Option<UrlInfoShort>, Error> {
+        assert!(
+            path.starts_with('/'),
+            "Provided path must correspond to one of a URL"
         );
 
-        if let Some(most_condeming) = most_condeming {
-            let manually_reviewed = if most_condeming.1 {
-                domain_result.unwrap().2
-            } else {
-                url_result.unwrap().1
-            };
-
-            Ok(Some((most_condeming.0, manually_reviewed)))
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Inserts a domain into the database and tags it as spam or not.
-    /// Overwrites the domain if it already exists.
-    pub async fn add_domain(
-        &self,
-        domain: &Domain,
-        example_url: impl Into<Option<&Url>>,
-        is_spam: IsSpam,
-        manually_reviewed: bool,
-    ) -> Result<(), Error> {
-        let example_url = example_url.into();
-        sqlx::query(
-            "INSERT INTO domains(
-                domain,
-                example_url,
-                is_spam,
-                manually_reviewed,
-                spam_checker_version)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT DO UPDATE SET
-                example_url=COALESCE(?, example_url),
-                is_spam=?,
-                manually_reviewed=?,
-                spam_checker_version=?;",
+        let Some(row) = sqlx::query(
+            "SELECT id, param_count, designation, manually_reviewed FROM urls
+            WHERE host=? AND path=? AND query=?;",
         )
-        .bind(domain.as_str())
-        .bind(example_url.map(Url::as_str))
-        .bind::<u8>(is_spam.into())
-        .bind(manually_reviewed)
-        .bind(SPAM_CHECKER_VERSION)
-        // On conflict...
-        .bind(example_url.map(Url::as_str))
-        .bind::<u8>(is_spam.into())
-        .bind(manually_reviewed)
-        .bind(SPAM_CHECKER_VERSION)
-        .execute(&self.pool)
-        .await?;
-
-        if let Some(url) = example_url {
-            // If we know for a fact that this URL and its domain is
-            // spam, we don't need an entry in the `urls` table for it.
-            if is_spam == IsSpam::Yes {
-                sqlx::query("DELETE FROM urls WHERE url=? AND is_spam=?;")
-                    .bind(url.as_str())
-                    .bind::<u8>(is_spam.into())
-                    .execute(&self.pool)
-                    .await?;
-            }
-            // And delete all sightings.
-            // If this was marked as spam, the sightings would have already been processed.
-            // This here is mostly just to catch stragglers that could have gotten
-            // in after they were, but before the link was marked here.
-            self.delete_all_sightings_of(url).await?;
-        }
-
-        Ok(())
-    }
-
-    /// Inserts a URL into the database and tags it as spam or not.
-    /// Overwrites the URL if it already exists.
-    pub async fn add_url(
-        &self,
-        url: &Url,
-        is_spam: IsSpam,
-        manually_reviewed: bool,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO urls(
-                url,
-                is_spam,
-                manually_reviewed,
-                spam_checker_version)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT DO UPDATE SET
-                is_spam=?,
-                manually_reviewed=?,
-                spam_checker_version=?;",
-        )
-        .bind(url.as_str())
-        .bind::<u8>(is_spam.into())
-        .bind(manually_reviewed)
-        .bind(SPAM_CHECKER_VERSION)
-        // On conflict...
-        .bind::<u8>(is_spam.into())
-        .bind(manually_reviewed)
-        .bind(SPAM_CHECKER_VERSION)
-        .execute(&self.pool)
-        .await?;
-
-        // And delete all sightings.
-        // If this was marked as spam, the sightings would have already been processed.
-        // This here is mostly just to catch stragglers that could have gotten
-        // in after they were, but before the link was marked here.
-        self.delete_all_sightings_of(url).await?;
-
-        Ok(())
-    }
-
-    /// Mark a URL as maybe spam, if it's not already marked as spam
-    /// and wasn't manually reviewed. Returns true if anything is actually done.
-    ///
-    /// Note that this adds a URL entry if one doesn't exist,
-    /// even if there's a meaningful domain entry.
-    async fn mark_url_sus(&self, url: &Url) -> Result<bool, Error> {
-        let result = sqlx::query(
-            "
-            INSERT INTO urls(
-                    url,
-                    is_spam,
-                    spam_checker_version
-            ) VALUES (?, 2, ?)
-            ON CONFLICT DO
-                UPDATE SET is_spam=2, spam_checker_version=?
-                WHERE is_spam=0 AND manually_reviewed=0;",
-        )
-        .bind(url.as_str())
-        .bind(SPAM_CHECKER_VERSION)
-        .bind(SPAM_CHECKER_VERSION)
-        .execute(&self.pool)
+        .bind(host)
+        .bind(path)
+        .bind(query)
+        .fetch_optional(executor)
         .await?
-        .rows_affected()
-            > 0;
-        Ok(result)
+        else {
+            return Ok(None);
+        };
+        let id: i64 = row.get(0);
+        let param_count: i64 = row.get(1);
+        let designation = UrlDesignation::try_from(row.get::<u8, _>(2))
+            .expect("Invalid URL designation found in database!");
+        let manually_reviewed: bool = row.get(3);
+
+        Ok(Some(UrlInfoShort {
+            id,
+            param_count,
+            designation,
+            manually_reviewed,
+        }))
     }
 
-    /// Convenience function to mark both a URL and its domain as maybe spam.
-    pub async fn mark_sus(
+    /// # Panics
+    ///
+    /// Panics if an invalid [`UrlDesignation`] is found in the database.
+    pub fn get_url_exact<'a>(
+        &'a self,
+        url: &'a SanitizedUrl,
+    ) -> impl std::future::Future<Output = Result<Option<UrlInfoShort>, Error>> + Send + 'a {
+        Self::get_url_exact_destructured(
+            &self.pool,
+            url.host_str(),
+            url.path(),
+            url.query().unwrap_or(""),
+        )
+    }
+
+    /// # Panics
+    ///
+    /// Panics if an invalid [`UrlDesignation`] is found in the database.
+    async fn get_url_inexact_with_query(
         &self,
-        url: &Url,
-        mut domain: Option<&Domain>,
-    ) -> Result<MarkSusResult, Error> {
-        // We only want to deal with entries in the database that exist.
+        url: &SanitizedUrl,
+    ) -> Result<Option<UrlInfoShort>, Error> {
+        // The query is needed a bit later in the code, but it's a good idea to let `.expect` panic
+        // here early if needed.
+        let query = url
+            .query()
+            .expect("This function expects URLs with query to be passed");
 
-        // Check the URL one.
-        if let Some(is_spam_url) = self.is_url_spam(url, false).await? {
-            let result = match is_spam_url.0 {
-                IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
-                IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
-                IsSpam::No => {
-                    let mark_result = !is_spam_url.1 && self.mark_url_sus(url).await?;
-                    if mark_result {
-                        MarkSusResult::Marked
-                    } else {
-                        MarkSusResult::ManuallyReviewedNotSpam
-                    }
+        // Try to find an exact match first real quick?
+        if let Some(exact_match) = self.get_url_exact(url).await? {
+            return Ok(Some(exact_match));
+        }
+
+        let params = query.split('&');
+        let param_count = params.clone().count();
+
+        // The idea behind this query is:
+        // 1. Inner join urls with params
+        // 2. Filter by host and path.
+        // 3. If `exact` function argument is true, filter by exact amount of parameter count too.
+        // 4. Filter params to only those that appear in input URL.
+        // 5. Group params by URL ID; COUNT(*) is now the amount of matched params per matched URL
+        // 6. Filter URLs for which the amount of matching params is not equal to amount of
+        //    total params that URL has. This excludes URLs with more params than input.
+        // 7. Order filtered URLs by param count; the one matching the most wins.
+        //    If there's a conflict... ¯\_ (ツ)_/¯
+
+        let sql_query_str = {
+            // SQLx doesn't do array inserts of any kinds yet, so this is the best we can do for
+            // now with SQLite, aside from maybe making a temp table and inserting each param into
+            // it.
+
+            let sql_query_template = "
+            SELECT
+                urls.id,
+                urls.param_count,
+                urls.designation,
+                urls.manually_reviewed
+            FROM
+                url_params,
+                urls
+            WHERE
+                urls.id=url_params.url_id AND
+                urls.host=$1 AND
+                urls.path=$2 AND
+                param IN (!!!THE_PARAMS!!!)
+            GROUP BY urls.id HAVING COUNT(*) == urls.param_count
+            ORDER BY urls.param_count DESC
+            LIMIT 1;";
+
+            // We want to replace "!!!THE_PARAMS!!!" with something like "$3, $4, $5", with one
+            // number for each param.
+
+            let (pre_params, post_params) = sql_query_template
+                .split_once("!!!THE_PARAMS!!!")
+                .expect("The params must exist in the string");
+
+            let mut sql_query = String::with_capacity(sql_query_template.len());
+            sql_query.push_str(pre_params);
+
+            let mut pushed_a_param = false;
+            for i in 0..param_count {
+                use std::fmt::Write;
+
+                if pushed_a_param {
+                    sql_query.push(',');
                 }
-            };
-
-            return Ok(result);
-        }
-
-        // If no provided domain, try to get one from the URL.
-        // Otherwise, use provided domain, to not do an extraneous allocation.
-        let domain_inner;
-        if domain.is_none() {
-            domain_inner = Domain::from_url(url);
-            domain = domain_inner.as_ref();
-        }
-        if let Some(domain) = domain {
-            // Check the domain one.
-            if let Some(is_spam_domain) = self.is_domain_spam(domain, false).await? {
-                let result = match is_spam_domain.0 {
-                    IsSpam::Yes => MarkSusResult::AlreadyMarkedSpam,
-                    IsSpam::Maybe => MarkSusResult::AlreadyMarkedSus,
-                    IsSpam::No => {
-                        let mark_result = self.mark_url_sus(url).await?;
-                        if mark_result {
-                            MarkSusResult::Marked
-                        } else {
-                            MarkSusResult::ManuallyReviewedNotSpam
-                        }
-                    }
-                };
-
-                return Ok(result);
+                write!(sql_query, "${}", i + 3).expect("Writing to a String never fails");
+                pushed_a_param = true;
             }
+
+            sql_query.push_str(post_params);
+
+            sql_query
+        };
+
+        let mut sql_query = sqlx::query(&sql_query_str)
+            .bind(url.as_ref().host_str())
+            .bind(url.as_ref().path());
+
+        for param in params {
+            sql_query = sql_query.bind(param);
         }
 
-        // It is in neither URL nor Domain tables.
-        // Add it in as a URL entry.
-        self.mark_url_sus(url).await?;
-        Ok(MarkSusResult::Marked)
-    }
-
-    /// Count and return the amount of links left to review.
-    pub async fn get_review_count(&self) -> Result<u32, Error> {
-        sqlx::query(
-            "SELECT SUM(A) FROM
-                (
-                    SELECT COUNT(*) AS A FROM urls WHERE is_spam=2
-                UNION ALL
-                    SELECT COUNT(*) AS A FROM domains WHERE is_spam=2
-                );",
-        )
-        .map(|x: SqliteRow| x.get(0))
-        .fetch_one(&self.pool)
-        .await
-    }
-
-    /// Get a URL, and its database table and ID, for review, and its state in the database.
-    pub async fn get_url_for_review(&self) -> Result<Option<(Url, &str, i64, IsSpam)>, Error> {
-        // Get the mutex. It'll be unlocked at the end of the function
-        // automatically due to RAII.
-        let _the_mutex = self.review_lock.lock();
-
-        // We heard you like database queries UwU
-        let db_result: Option<(Url, IsSpam, i64, bool)> = sqlx::query(
-            "SELECT * FROM
-                (
-                    SELECT url, is_spam, rowid, 1 AS from_urls_table,
-                    manually_reviewed, last_sent_to_review
-                    FROM urls
-                UNION
-                    SELECT COALESCE(example_url, domain) AS url, is_spam,
-                    rowid, 0 AS from_urls_table,
-                    manually_reviewed, last_sent_to_review
-                    FROM domains
-                )
-            ORDER BY manually_reviewed, is_spam DESC, last_sent_to_review, rowid DESC LIMIT 1;",
-        )
-        .map(|row: SqliteRow| {
-            (
-                parse_url_like_telegram(row.get("url")).expect("Database has invalid URL data!"),
-                IsSpam::from(row.get::<u8, _>("is_spam")),
-                row.get::<i64, _>("rowid"),
-                row.get::<bool, _>("from_urls_table"),
-            )
-        })
-        .fetch_optional(&self.pool)
-        .await?;
-
-        let Some((url, is_spam, rowid, from_urls_table)) = db_result else {
-            // Well dang.
+        let Some(row) = sql_query.fetch_optional(&self.pool).await? else {
             return Ok(None);
         };
 
-        // Write the time at which this entry was sent to review...
-        {
-            let db_query = if from_urls_table {
-                "UPDATE urls SET last_sent_to_review=? WHERE rowid=?;"
-            } else {
-                "UPDATE domains SET last_sent_to_review=? WHERE rowid=?;"
-            };
+        let id: i64 = row.get(0);
+        let param_count: i64 = row.get(1);
+        let designation = UrlDesignation::try_from(row.get::<u8, _>(2))
+            .expect("Invalid URL designation found in database!");
+        let manually_reviewed: bool = row.get(3);
 
-            // Mark this URL or domain in the database as sent to review.
-            let time = Utc::now();
+        Ok(Some(UrlInfoShort {
+            id,
+            param_count,
+            designation,
+            manually_reviewed,
+        }))
+    }
 
-            sqlx::query(db_query)
-                .bind(time)
-                .bind(rowid.to_string())
-                .execute(&self.pool)
-                .await?;
+    async fn get_url_inexact_assuming_no_query(
+        &self,
+        url: &SanitizedUrl,
+    ) -> Result<Option<UrlInfoShort>, Error> {
+        for (host, path) in url.destructure() {
+            if let Some(result) =
+                Self::get_url_exact_destructured(&self.pool, host, path, "").await?
+            {
+                return Ok(Some(result));
+            }
         }
 
-        let table_name = match from_urls_table {
-            false => "domains",
-            true => "urls",
+        // Nothing matched. Oops.
+        Ok(None)
+    }
+
+    /// Find and get short info for a URL designations entry matching the given URL, if any.
+    pub async fn get_url(&self, url: &SanitizedUrl) -> Result<Option<UrlInfoShort>, Error> {
+        // Try matching on query.
+        if url.as_ref().query().is_some() {
+            if let Some(result) = self.get_url_inexact_with_query(url).await? {
+                return Ok(Some(result));
+            }
+        }
+
+        // Nothing found or no query. Either way,
+        self.get_url_inexact_assuming_no_query(url).await
+    }
+
+    /// Find and get short info from the URL designations table for an entry with this ID, if any.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an invalid [`UrlDesignation`] is found in the database.
+    #[allow(unused)] // Used in tests, actually.
+    pub async fn get_url_by_id_short(&self, id: i64) -> Result<Option<UrlInfoShort>, Error> {
+        let Some(row) =
+            sqlx::query("SELECT param_count, designation, manually_reviewed FROM urls WHERE id=?;")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?
+        else {
+            return Ok(None);
+        };
+        let param_count: i64 = row.get(0);
+        let designation = UrlDesignation::try_from(row.get::<u8, _>(1))
+            .expect("Invalid URL designation found in database!");
+        let manually_reviewed: bool = row.get(2);
+
+        Ok(Some(UrlInfoShort {
+            id,
+            param_count,
+            designation,
+            manually_reviewed,
+        }))
+    }
+
+    /// Find and get full info from the URL designations table for an entry with this ID, if any.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an invalid [`UrlDesignation`], [`Url`], or [`SanitizedUrl`] is found in the database.
+    pub async fn get_url_by_id_full(&self, id: i64) -> Result<Option<UrlInfoFull>, Error> {
+        let Some(row) = sqlx::query(
+            "SELECT
+                urls.param_count,
+                urls.original_url,
+                urls.designation,
+                urls.manually_reviewed
+            FROM
+                urls
+            WHERE urls.id=?;",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(None);
         };
 
-        // Pass it on.
-        Ok(Some((url, table_name, rowid, is_spam)))
+        // Extract to variables.
+        let param_count: i64 = row.get(0);
+        let original_url: &str = row.get(1);
+        let designation: u8 = row.get(2);
+        let manually_reviewed: bool = row.get(3);
+
+        // Now combine to concrete types.
+        // Sanitized URL can be derived from original URL.
+        let (sanitized_url, original_url) = SanitizedUrl::from_str_with_original(original_url)
+            .expect("Invalid URL found in database!");
+        let designation = UrlDesignation::try_from(designation)
+            .expect("Invalid URL designation found in database!");
+
+        Ok(Some(UrlInfoFull {
+            short: UrlInfoShort {
+                id,
+                param_count,
+                designation,
+                manually_reviewed,
+            },
+            sanitized_url,
+            original_url,
+        }))
     }
 
-    /// Get a URL from a database table name and rowid.
-    pub async fn get_url_from_table_and_rowid(
+    /// Find and get full info for a URL designations entry matching the given URL, if any.
+    pub async fn get_url_full(&self, url: &SanitizedUrl) -> Result<Option<UrlInfoFull>, Error> {
+        match self.get_url(url).await? {
+            Some(short) => self.get_url_by_id_full(short.id).await,
+            None => Ok(None),
+        }
+    }
+
+    /// Returns ID of the inserted URL.
+    async fn insert_url_unchecked(
+        transaction: &mut Transaction<'_, Sqlite>,
+        sanitized_url: &SanitizedUrl,
+        original_url: &Url,
+        designation: UrlDesignation,
+        manually_reviewed: bool,
+    ) -> Result<i64, Error> {
+        let params = sanitized_url
+            .as_ref()
+            .query()
+            .into_iter()
+            .flat_map(|x| x.split('&'));
+        let param_count = params.clone().count();
+
+        let new_id = sqlx::query(
+            "INSERT INTO urls (
+                host,
+                path,
+                query,
+                param_count,
+                original_url,
+                designation,
+                manually_reviewed)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+                ",
+        )
+        .bind(sanitized_url.host_str())
+        .bind(sanitized_url.as_ref().path())
+        .bind(sanitized_url.query().unwrap_or(""))
+        .bind(param_count.cast_signed() as i64)
+        .bind(original_url.as_str())
+        .bind(designation as u8)
+        .bind(manually_reviewed)
+        .execute(&mut **transaction)
+        .await?
+        .last_insert_rowid();
+
+        if param_count > 0 {
+            let mut query = String::from("INSERT INTO url_params(url_id, param) VALUES ");
+            for i in 0..param_count {
+                use std::fmt::Write;
+                write!(query, "({new_id}, ?)").expect("Writing to a String never fails");
+                if i != param_count - 1 {
+                    query.push(',');
+                }
+            }
+            query.push(';');
+
+            let mut query = sqlx::query(&query);
+
+            for param in params {
+                query = query.bind(param);
+            }
+
+            query.execute(&mut **transaction).await?;
+        }
+
+        Ok(new_id)
+    }
+
+    async fn update_url_unchecked(
+        transaction: &mut Transaction<'_, Sqlite>,
+        id: i64,
+        designation: UrlDesignation,
+        manually_reviewed: bool,
+    ) -> Result<(), Error> {
+        sqlx::query("UPDATE urls SET designation=?, manually_reviewed=? WHERE id=?;")
+            .bind(designation as u8)
+            .bind(manually_reviewed)
+            .bind(id)
+            .execute(&mut **transaction)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Insert this into the database, or update an existing entry if one exists.
+    ///
+    /// You most likely want to call [`crate::actions::insert_or_update_url_with_log`] instead.
+    ///
+    /// If there is an entry already present in the database, then it's possible no change is
+    /// enacted. Specifically, that happens if the new info is not manually reviewed but existing
+    /// info is (i.e. an automatic review would be overwriting an old one; in this case, a warning
+    /// is emitted), or if both old and new designation and manual review status match.
+    pub async fn insert_or_update_url(
         &self,
-        table: &str,
-        rowid: i64,
-    ) -> Result<Option<(Url, Option<Domain>)>, Error> {
-        match table {
-            "domains" => {
-                sqlx::query("SELECT domain, example_url FROM domains WHERE rowid=?")
-                    .bind(rowid)
-                    .map(|row: SqliteRow| {
-                        let example_url: Option<&str> = row.get("example_url");
-                        let example_url = example_url.map(|x| {
-                            parse_url_like_telegram(x).expect("Unparsable example URL in database!")
-                        });
+        sanitized_url: &SanitizedUrl,
+        original_url: &Url,
+        designation: UrlDesignation,
+        manually_reviewed: bool,
+    ) -> Result<InsertOrUpdateResult, Error> {
+        // Just try inserting as is! If it fails, we'll get a UNIQUE violation error.
 
-                        let domain: &str = row.get("domain");
-                        let domain_url = parse_url_like_telegram(domain)
-                            .expect("Unparsable domain as URL in database!");
-                        let domain =
-                            Domain::from_url(&domain_url).expect("Unparsable domain in database!");
-                        (example_url.unwrap_or(domain_url), Some(domain))
-                    })
-                    .fetch_optional(&self.pool)
-                    .await
+        let mut trans = self.pool.begin().await?;
+
+        let insert_result = Self::insert_url_unchecked(
+            &mut trans,
+            sanitized_url,
+            original_url,
+            designation,
+            manually_reviewed,
+        )
+        .await;
+
+        match insert_result {
+            Ok(new_id) => {
+                // nice.
+                trans.commit().await?;
+                return Ok(InsertOrUpdateResult::Inserted { new_id });
             }
-            "urls" => {
-                sqlx::query("SELECT url FROM urls WHERE rowid=?")
-                    .bind(rowid)
-                    .map(|row: SqliteRow| {
-                        let url: &str = row.get("url");
-                        let url =
-                            parse_url_like_telegram(url).expect("Unparsable URL in database!");
-
-                        (url, None)
-                    })
-                    .fetch_optional(&self.pool)
-                    .await
+            Err(Error::Database(e)) if e.kind() == ErrorKind::UniqueViolation => {
+                // An entry exists. Continue to code below.
             }
-            _ => Ok(None),
-        }
-    }
-
-    /// Remove a domain from the database, if it exists.
-    #[allow(dead_code)]
-    pub async fn remove_domain(&self, domain: &Domain) -> Result<(), Error> {
-        sqlx::query("DELETE FROM domains WHERE domain=?;")
-            .bind(domain.as_str())
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    /// Remove a URL from the database, if it exists.
-    pub async fn remove_url(&self, url: &Url) -> Result<(), Error> {
-        sqlx::query("DELETE FROM urls WHERE url=?;")
-            .bind(url.as_str())
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn read_review_response(&self, response: &ReviewResponse) -> Result<(), Error> {
-        match response {
-            ReviewResponse::Skip => (),
-            ReviewResponse::UrlSpam(_domain, url) => {
-                self.add_url(url, IsSpam::Yes, true).await?;
-            }
-            ReviewResponse::DomainSpam(domain, url) => {
-                self.add_domain(domain, Some(url), IsSpam::Yes, true)
-                    .await?;
-                // Implicitly this means that this specific URL is also spam,
-                // as part of this domain.
-                self.remove_url(url).await?;
-            }
-            ReviewResponse::NotSpam(domain, url) => {
-                // Neither domain nor URL are spam.
-
-                // Write the result about the URL unconditionally.
-                self.add_url(url, IsSpam::No, true).await?;
-
-                // If not provided, try to get it from the URL.
-                let mut domain = domain;
-                let domain_tmp;
-                if domain.is_none() {
-                    domain_tmp = Domain::from_url(url);
-                    domain = &domain_tmp;
-                }
-
-                if let Some(domain) = &domain {
-                    // Write about the domain even if there's no domain-specific record.
-                    self.add_domain(domain, Some(url), IsSpam::No, true).await?;
-                }
+            Err(e) => {
+                // Some other error. Uh-oh!
+                // Dropping trans rolls the transaction back.
+                return Err(e);
             }
         }
 
-        Ok(())
+        // If we're here, that means a unique violation has happened i.e. an entry exists.
+        // ...Find it???
+
+        let exact_match = Self::get_url_exact_destructured(
+            &mut *trans,
+            sanitized_url.host_str(),
+            sanitized_url.path(),
+            sanitized_url.query().unwrap_or(""),
+        )
+        .await?
+        .expect("Quantum state URL detected!! What?!?!");
+
+        // Ok yes good. Update it?
+
+        if !manually_reviewed && exact_match.manually_reviewed() {
+            // This will overwrite a manually reviewed entry with an automatically determined
+            // one. Bad!
+            log::warn!(
+                "Automatic review tried to overwrite data on manual review for {}",
+                sanitized_url.as_str()
+            );
+            return Ok(InsertOrUpdateResult::NoChange {
+                existing_info: exact_match,
+            });
+        }
+
+        if designation == exact_match.designation() {
+            // Both old and new have the same designation. At this point, the only change
+            // that could be enacted is changing the "manually reviewed" flag.
+            if manually_reviewed == exact_match.manually_reviewed() {
+                // ...But even that matches. No change can be enacted.
+                return Ok(InsertOrUpdateResult::NoChange {
+                    existing_info: exact_match,
+                });
+            }
+        }
+
+        // Above checks passed. This will enact a change.
+        Self::update_url_unchecked(&mut trans, exact_match.id, designation, manually_reviewed)
+            .await?;
+
+        Ok(InsertOrUpdateResult::Updated {
+            old_info: exact_match,
+        })
     }
 
     /// Gets whether or not admins of this chat want the bot to not show
     /// notifications about deleting a message.
-    pub async fn get_hide_deletes(&self, chatid: ChatId) -> Result<bool, Error> {
-        sqlx::query("SELECT 1 FROM hide_deletes WHERE chatid=?")
-            .bind(chatid.0)
+    ///
+    /// True if they don't want them to show, false otherwise.
+    pub async fn get_hide_deletes(&self, chat_id: ChatId) -> Result<bool, Error> {
+        sqlx::query("SELECT 1 FROM hide_deletes WHERE chat_id=?")
+            .bind(chat_id.0)
             .fetch_optional(&self.pool)
             .await
             .map(|x| x.is_some())
     }
 
-    /// Sets whether or not admins of this chat want the bot to not show
-    /// notifications about deleting a message. Returns the previous state.
-    pub async fn set_hide_deletes(&self, chatid: ChatId, hide: bool) -> Result<bool, Error> {
-        let old_state = self.get_hide_deletes(chatid).await?;
-
-        if old_state == hide {
-            // It's already set to that. Do nothing, return true.
-            return Ok(hide);
-        }
-
-        // Aw, we actually have to do things now :(
-
+    /// Sets whether or not admins of this chat want the bot to not show notifications about
+    /// deleting a message. Returns the previous state.
+    pub async fn set_hide_deletes(&self, chat_id: ChatId, hide: bool) -> Result<bool, Error> {
         if hide {
             sqlx::query(
-                "INSERT INTO hide_deletes (chatid)
+                "INSERT INTO hide_deletes (chat_id)
                     VALUES (?)
                     ON CONFLICT DO NOTHING;",
             )
-            .bind(chatid.0)
+            .bind(chat_id.0)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map(|x| x.rows_affected() == 0) // If true, this means it was set already.
         } else {
-            sqlx::query("DELETE FROM hide_deletes WHERE chatid=?;")
-                .bind(chatid.0)
+            sqlx::query("DELETE FROM hide_deletes WHERE chat_id=?;")
+                .bind(chat_id.0)
                 .execute(&self.pool)
-                .await?;
+                .await
+                .map(|x| x.rows_affected() > 0) // If true, this means it was set previously.
         }
-
-        Ok(old_state)
     }
 
-    /// Tells the database that this sus link is sighted in this message and with this sender name.
+    /// Inform the database of the ID of the last album which's message was deleted within a chat.
     ///
-    /// If sender name is not provided, it is derived from the message. If a record for this URL
-    /// exists, it's not inserted; duplicate runs of this function are allowed.
-    pub async fn sus_link_sighted(
+    /// Used in conjunction with [`Self::get_last_deleted_album_id`].
+    pub async fn set_last_deleted_album_id(
         &self,
-        message: &Message,
-        sendername: Option<&str>,
-        link: &Url,
+        chat_id: ChatId,
+        album_id: &MediaGroupId,
     ) -> Result<(), Error> {
-        let sendername_string;
-
-        let sendername = if let Some(sendername) = sendername {
-            sendername
-        } else {
-            sendername_string = sender_name_prettyprint(message, false);
-            &sendername_string
-        };
-
-        // First, if it's so sus, find it in the database.
-        let Some(rowid) = sqlx::query("SELECT rowid FROM urls WHERE is_spam=2 AND url=?")
-            .bind(link.as_str())
-            .map(|row: SqliteRow| row.get::<i64, _>(0))
-            .fetch_optional(&self.pool)
-            .await?
-        else {
-            // It's not in the database marked as sus? Huh. Whatever.
-            return Ok(());
-        };
-
-        let err = sqlx::query(
-            "INSERT INTO sus_link_sightings (chatid, messageid, sendername, urlid)
-            VALUES (?, ?, ?, ?)",
-        )
-        .bind(message.chat.id.0)
-        .bind(message.id.0)
-        .bind(sendername)
-        .bind(rowid)
-        .execute(&self.pool)
-        .await;
-
-        match err {
-            Err(Error::Database(dbe)) if dbe.kind() == ErrorKind::UniqueViolation => {
-                // That means we already have this. Good!
-            }
-            _ => {
-                err?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Deletes from database and returns all sightings of this URL,
-    /// plus all sightings of other spam URLs, if any.
-    pub async fn drain_all_sightings_of_spam(
-        &self,
-        link: &Url,
-    ) -> Result<Vec<(ChatId, MessageId, String)>, Error> {
         sqlx::query(
-            "DELETE FROM sus_link_sightings
-        WHERE urlid IN (
-            SELECT rowid FROM urls WHERE url=? OR is_spam=1
+            "INSERT INTO last_deleted_album_id (chat_id, media_group_id)
+            VALUES ($1, $2)
+            ON CONFLICT DO UPDATE SET media_group_id=$2;",
         )
-        RETURNING chatid, messageid, sendername;",
-        )
-        .bind(link.as_str())
-        .map(|row: SqliteRow| (ChatId(row.get(0)), MessageId(row.get(1)), row.get(2)))
-        .fetch_all(&self.pool)
-        .await
-    }
-
-    pub async fn delete_all_sightings_of(&self, link: &Url) -> Result<(), Error> {
-        sqlx::query(
-            "DELETE FROM sus_link_sightings
-        WHERE urlid IN (
-            SELECT rowid FROM urls WHERE url=?
-        );",
-        )
-        .bind(link.as_str())
+        .bind(chat_id.0)
+        .bind(&album_id.0)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
-    /// Check if this domain is protected against accidentally marking as spam.
+    /// Get the last deleted album ID in this chat. Used to delete other messages in the same
+    /// album.
     ///
-    /// Currently a stub with hardcoded checks.
-    pub async fn is_domain_protected(&self, domain: &Domain) -> Result<bool, Error> {
-        match domain.as_ref() {
-            "youtube.com" | "youtu.be" | "t.me" => Ok(true),
-            _ => Ok(false),
+    /// Used in conjunction with [`Self::set_last_deleted_album_id`].
+    pub async fn get_last_deleted_album_id(
+        &self,
+        chat_id: ChatId,
+    ) -> Result<Option<MediaGroupId>, Error> {
+        sqlx::query("SELECT media_group_id FROM last_deleted_album_id WHERE chat_id=? LIMIT 1;")
+            .bind(chat_id.0)
+            .map(|row: SqliteRow| MediaGroupId(row.get(0)))
+            .fetch_optional(&self.pool)
+            .await
+    }
+
+    /// Send this URL into the review queue.
+    pub async fn send_to_review(
+        &self,
+        sanitized_url: &SanitizedUrl,
+        original_url: &Url,
+    ) -> Result<SendToReviewResult, Error> {
+        // A naive implementation of this method would be:
+        //
+        // 1. Check if there's URL already in the database due to which this should be rejected.
+        // 2. If not, insert into review queue.
+        //
+        // But if other code inserts a new URL inbetween these two steps, a
+        // time-of-check-time-of-use bug might occur. Not a big deal, but worth avoiding.
+        //
+        // So, fancy-pants plan:
+        // 1. Create a transaction.
+        // 2. Insert into review queue in the transaction; on conflict, reject.
+        //    This write-locks the database, so new URLs can be inserted.
+        // 3. Check if there's a conflicting URL in the database right now. If so, rollback and
+        //    reject.
+        //
+        // Shouldn't cause a TOCTOU in this case, I think.
+
+        let mut trans = self.pool.begin().await?;
+
+        let result = sqlx::query(
+            "INSERT INTO review_queue
+                (sanitized_url, original_url)
+            VALUES
+                (?, ?)
+            ON CONFLICT DO NOTHING;",
+        )
+        .bind(sanitized_url.as_str())
+        .bind(original_url.as_str())
+        .execute(&mut *trans)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            // Dropping a transaction rolls it back.
+            return Ok(SendToReviewResult::AlreadyOnReview);
         }
-    }
-}
 
-pub struct DomainVisitDebounceGuard {
-    database: Arc<Database>,
-    domain: Domain,
-}
+        // Check for conflicting existing entries.
+        // Note: the check is done on the main database connection.
+        // This is fine with SQLite because the transaction made above is blocking all writes.
+        if let Some(existing) = self.get_url_full(sanitized_url).await? {
+            if existing.designation() == UrlDesignation::Spam {
+                // If this marks it as spam, reject.
+                return Ok(SendToReviewResult::AlreadyInDatabase(existing));
+            }
 
-impl Drop for DomainVisitDebounceGuard {
-    fn drop(&mut self) {
-        let tokio_handle = tokio::runtime::Handle::current();
-        let database = self.database.clone();
-        let mut domain = Domain::new_invalid_unchecked();
-
-        std::mem::swap(&mut self.domain, &mut domain);
-
-        tokio_handle.spawn(async move {
-            database
-                .domains_currently_being_visited
-                .lock()
-                .await
-                .remove(&domain);
-            database.domains_visit_notify.notify_waiters();
-        });
-    }
-}
-
-impl Database {
-    /// Returns [`DomainVisitDebounceGuard`] if this domain isn't being visited,
-    /// or, if it is, blocks until that is done and then returns [`None`].
-    pub async fn domain_visit_debounce(
-        self: &Arc<Database>,
-        domain: Domain,
-    ) -> Option<DomainVisitDebounceGuard> {
-        // This is set to true if this domain was spotted to be in the process of being visited.
-        let mut was_visited = false;
-
-        // Check if it's already being visited on loop until it's no longer being visited.
-        loop {
-            // Code below looks a bit weird, but it's to avoid a race condition.
-            // Consider the following scenario:
-            // 1. Task A is currently visiting a domain.
-            // 2. Task B runs this function to check it.
-            // 3. Task B finds the domain in the hash set in the check below.
-            // 4. Task A finishes visiting the domain and removes it from the
-            // hash set.
-            // 5. Task A then punts the Notify.
-            // 6. Task B, awaits the Notify *after* that.
-            // 7. Task B locks up until something else happens to punt the Notify.
-            //
-            // For this reason, task B has to ensure that task A can't punt the Notify
-            // after task B checked the hash set but before it awaits the Notify.
-            //
-            // This is accomplished with the visited_lock: the hash set is locked
-            // for checking, then Notify is awaited on, and only then it's unlocked.
-
-            let mut visited_lock = self.domains_currently_being_visited.lock().await;
-
-            let contains = visited_lock.contains(&domain);
-            if contains {
-                // It's being visited. Wait on notify and check again.
-                was_visited = true;
-                // Notified immediately starts listening as it is created.
-                let notify_waiter = self.domains_visit_notify.notified();
-                drop(visited_lock);
-                notify_waiter.await;
-            } else {
-                // It is not or no longer being visited.
-                // Add it to the list and return the guard.
-
-                if was_visited {
-                    break None;
-                }
-
-                visited_lock.insert(domain.clone());
-                drop(visited_lock);
-
-                break Some(DomainVisitDebounceGuard {
-                    database: self.clone(),
-                    domain,
-                });
+            if existing.manually_reviewed() && existing.sanitized_url() == sanitized_url {
+                // If it's a perfect match and manually reviewed, reject.
+                return Ok(SendToReviewResult::AlreadyInDatabase(existing));
             }
         }
+
+        // None! Commit transaction.
+        trans.commit().await?;
+
+        Ok(SendToReviewResult::Sent {
+            review_entry_id: result.last_insert_rowid(),
+        })
+    }
+
+    /// Returns database ID of the URL sent on review, and the URL itself.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an invalid [`Url`] or [`SanitizedUrl`] is found in the database.
+    pub async fn get_url_for_review(&self) -> Result<Option<(i64, SanitizedUrl, Url)>, Error> {
+        Ok(sqlx::query(
+            "UPDATE review_queue
+            SET last_sent_to_review=?
+            WHERE id in
+                (SELECT id FROM review_queue ORDER BY last_sent_to_review LIMIT 1)
+            RETURNING id, sanitized_url, original_url;",
+        )
+        .bind(Utc::now())
+        .fetch_optional(&self.pool)
+        .await?
+        .map(|row| {
+            (
+                row.get(0),
+                SanitizedUrl::from_str(row.get(1)).expect("Invalid URL found in database!"),
+                Url::parse(row.get(2)).expect("Invalid URL found in database!"),
+            )
+        }))
+    }
+
+    /// Inform the database that this URL was sighted in this message in this chat and with this
+    /// name of the sender.
+    ///
+    /// This is done to later get them with [`Self::pop_review_link_sightings`] and remove them
+    /// if the review concludes that the link is spam.
+    pub async fn link_sighted(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        sender_name: &str,
+        link: &SanitizedUrl,
+    ) -> Result<(), Error> {
+        // Check if this is a sus link; if so, write down this sighting.
+
+        let result = sqlx::query(
+            "INSERT INTO sus_link_sightings
+                (chat_id, message_id, sender_name, url_id)
+            VALUES
+                (?, ?, ?, (SELECT id FROM review_queue WHERE sanitized_url=?))
+            ON CONFLICT DO NOTHING;",
+        )
+        .bind(chat_id.0)
+        .bind(message_id.0)
+        .bind(sender_name)
+        .bind(link.as_str())
+        .execute(&self.pool)
+        .await;
+
+        match result {
+            Err(Error::Database(e)) if e.kind() == ErrorKind::NotNullViolation => {
+                // This means the SELECT statement has returned nothing/NULL,
+                // which means this URL is not on review. That's fine, just ignore.
+            }
+            x => {
+                x?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Delete a link from review with this ID.
+    ///
+    /// If there are existing sightings or keyboards for this URL, an error of
+    /// [`ErrorKind::ForeignKeyViolation`] is returned.
+    pub async fn delete_from_review(&self, id: i64) -> Result<(), Error> {
+        sqlx::query("DELETE FROM review_queue WHERE id=?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Remove and return all sightings of a URL in the review queue at this ID.
+    ///
+    /// A sighting is a chat ID, a message ID, and name of the sender.
+    ///
+    /// If no matching URL is found, [`Error::RowNotFound`] is returned.
+    pub fn pop_review_link_sightings(
+        &self,
+        review_entry_id: i64,
+    ) -> BoxStream<'_, Result<(ChatId, MessageId, String), Error>> {
+        sqlx::query(
+            "DELETE FROM sus_link_sightings WHERE url_id=? RETURNING chat_id, message_id, sender_name;",
+        )
+        .bind(review_entry_id)
+        .map(|row: SqliteRow| {
+            (
+                ChatId(row.get(0)),
+                MessageId(row.get(1)),
+                row.get::<String, _>(2),
+            )
+        })
+        .fetch(&self.pool)
+    }
+
+    /// Find up to one entry still in the review queue for which the best match in the URL
+    /// designations table is the an entry with this ID.
+    pub async fn find_one_matching_review_queue_entry(
+        &self,
+        url_entry_to_match_id: i64,
+    ) -> Result<Option<i64>, Error> {
+        let mut stream = sqlx::query(
+            "SELECT
+                id,
+                sanitized_url
+            FROM review_queue;",
+        )
+        .map(|row: SqliteRow| {
+            (
+                row.get::<i64, _>(0),
+                SanitizedUrl::from_str(row.get(1)).expect("Invalid SanitizedUrl in database!"),
+            )
+        })
+        .fetch(&self.pool);
+
+        while let Some((review_entry_id, sanitized_url)) = stream.try_next().await? {
+            let Some(info) = self.get_url(&sanitized_url).await? else {
+                // No existing entry. Probably still in review.
+                continue;
+            };
+
+            if info.id() == url_entry_to_match_id {
+                // That's it!
+                return Ok(Some(review_entry_id));
+            }
+        }
+
+        // None.
+        Ok(None)
+    }
+
+    /// Inform the database that a review keyboard was made for a review queue entry at this ID,
+    /// and that it's a message at this message ID and chat ID.
+    pub async fn review_keyboard_made(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        review_entry_id: i64,
+    ) -> Result<(), Error> {
+        sqlx::query(
+            "INSERT INTO review_keyboards
+            (chat_id, message_id, url_id)
+            VALUES ($1, $2, $3)
+            ON CONFLICT DO UPDATE SET url_id=$3;",
+        )
+        .bind(chat_id.0)
+        .bind(message_id.0)
+        .bind(review_entry_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Inform the database that there is no longer a review keyboard at this message ID and chat
+    /// ID.
+    pub async fn review_keyboard_removed(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<(), Error> {
+        sqlx::query("DELETE FROM review_keyboards WHERE chat_id=? AND message_id=?;")
+            .bind(chat_id.0)
+            .bind(message_id.0)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Remove review keyboards for this review queue entry and return them one by one.
+    pub fn pop_review_keyboards(
+        &self,
+        review_entry_id: i64,
+    ) -> BoxStream<'_, Result<(ChatId, MessageId), Error>> {
+        sqlx::query("DELETE FROM review_keyboards WHERE url_id=? RETURNING chat_id, message_id")
+            .bind(review_entry_id)
+            .map(|row: SqliteRow| (ChatId(row.get(0)), MessageId(row.get(1))))
+            .fetch(&self.pool)
+    }
+
+    /// Get total count of review queue entries.
+    pub fn get_review_count(&self) -> impl std::future::Future<Output = Result<u32, Error>> + '_ {
+        sqlx::query("SELECT COUNT(*) FROM review_queue;")
+            .map(|row: SqliteRow| row.get(0))
+            .fetch_one(&self.pool)
+    }
+
+    /// Imports data from the old, pre-rewrite version of this bot.
+    ///
+    /// For database schema of the old bot, see:
+    /// <https://github.com/Architector4/telegram-bot-stuff/blob/6205ce670f6625a0754e04d534a16b137122d3ff/anti_nft_spam_bot/src/database/mod.rs>
+    pub async fn import_from_old_database(self: &Arc<Self>) -> Result<(), Error> {
+        enum IsSpamOld {
+            No = 0,
+            Yes = 1,
+            Maybe = 2,
+        }
+        impl From<u8> for IsSpamOld {
+            fn from(value: u8) -> Self {
+                use IsSpamOld::*;
+                match value {
+                    value if value == No as u8 => No,
+                    value if value == Yes as u8 => Yes,
+                    value if value == Maybe as u8 => Maybe,
+                    _ => panic!("Unknown value: {value}"),
+                }
+            }
+        }
+
+        async fn receiver_task(
+            database: Arc<Database>,
+            receiver: flume::Receiver<(SanitizedUrl, Url, UrlDesignation)>,
+        ) {
+            while let Ok((sanitized_url, url, designation)) = receiver.recv() {
+                database
+                    .insert_or_update_url(&sanitized_url, &url, designation, false)
+                    .await
+                    .expect("Failed to insert into database!");
+            }
+        }
+
+        let (sender, receiver) = flume::bounded(64);
+
+        let receiver_task = tokio::spawn(receiver_task(self.clone(), receiver));
+
+        let oldpool = SqlitePoolOptions::new()
+            .max_connections(32)
+            .connect_with(
+                SqliteConnectOptions::from_str("sqlite:spam_domains.sqlite")
+                    .expect("SQLite connect options should be valid")
+                    .pragma("cache_size", "-32768")
+                    .foreign_keys(true) // Already  default, but doesn't hurt being explicit.
+                    .busy_timeout(std::time::Duration::from_secs(600)),
+            )
+            .await;
+
+        let oldpool = match oldpool {
+            Ok(oldpool) => oldpool,
+            Err(e) => {
+                log::warn!("Could not open old database: {e}");
+                return Ok(());
+            }
+        };
+
+        let oldpool_for_hide_deletes = oldpool.clone();
+        let database_for_hide_deletes = self.clone();
+
+        let hide_deletes_task = tokio::spawn(async move {
+            let mut hide_deletes_stream = sqlx::query("SELECT chatid FROM hide_deletes")
+                .map(|row: SqliteRow| ChatId(row.get(0)))
+                .fetch(&oldpool_for_hide_deletes);
+
+            while let Some(chatid) = hide_deletes_stream
+                .try_next()
+                .await
+                .expect("Old database died!")
+            {
+                database_for_hide_deletes
+                    .set_hide_deletes(chatid, true)
+                    .await
+                    .expect("Database died!");
+            }
+        });
+
+        let old_domains_stream = sqlx::query("SELECT domain, example_url, is_spam FROM domains;")
+            .map(|row: SqliteRow| {
+                let domain =
+                    SanitizedUrl::from_str(row.get(0)).expect("Invalid domain in database!");
+                let example_url =
+                    parse_url_like_telegram(row.get(1)).expect("Invalid example URL in database!");
+                let is_spam = IsSpamOld::from(row.get::<u8, _>(2));
+
+                (domain, example_url, is_spam)
+            })
+            .fetch(&oldpool);
+
+        let old_urls_stream = sqlx::query("SELECT url, is_spam FROM urls")
+            .map(|row: SqliteRow| {
+                let (sanitized_url, url) = SanitizedUrl::from_str_with_original(row.get(0))
+                    .expect("Invalid example URL in database!");
+                let is_spam = IsSpamOld::from(row.get::<u8, _>(1));
+
+                (sanitized_url, url, is_spam)
+            })
+            .fetch(&oldpool);
+
+        let mut old_urls_chain =
+            futures_util::StreamExt::chain(old_domains_stream, old_urls_stream);
+
+        let mut counter = 0usize;
+
+        while let Some((sanitized_url, url, is_spam)) = old_urls_chain.try_next().await? {
+            let designation = match is_spam {
+                IsSpamOld::Yes => UrlDesignation::Spam,
+                IsSpamOld::No => UrlDesignation::NotSpam,
+                IsSpamOld::Maybe => continue,
+            };
+
+            sender
+                .send((sanitized_url, url, designation))
+                .expect("Send channel died!");
+
+            counter += 1;
+
+            if counter.is_multiple_of(10000) {
+                log::info!("Migrated {counter} URLs from old database...");
+            }
+        }
+
+        log::info!("Done sending URLs for insertion...");
+        drop(sender);
+
+        receiver_task.await.expect("Receiver task failed!");
+        log::info!("Waiting for hide deletes sending to be done...");
+        hide_deletes_task.await.expect("Hide deletes task failed!");
+
+        log::info!("Old database imported.");
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
+    use UrlDesignation::*;
 
-    type Ret = Result<(), Error>;
+    // Convenience testing methods for Database
+    impl Database {
+        /// Returns IDs of an inexact and an exact match.
+        async fn get_result(&self, url: &str) -> (Option<i64>, Option<i64>) {
+            let url: SanitizedUrl = url.parse().unwrap();
+            let inexact = self.get_url(&url).await.unwrap().map(|x| x.id());
+            let exact = self.get_url_exact(&url).await.unwrap().map(|x| x.id());
 
-    #[tokio::test]
-    async fn create_db() -> Ret {
-        Database::new_test().await?;
-        Ok(())
+            (inexact, exact)
+        }
+
+        async fn insert(&self, url: &str) -> i64 {
+            let (sanitized, original) = SanitizedUrl::from_str_with_original(url).unwrap();
+            self.insert_or_update_url(&sanitized, &original, NotSpam, true)
+                .await
+                .unwrap()
+                .id()
+        }
+    }
+
+    async fn new_db() -> Arc<Database> {
+        let db = Database::new_test().await.unwrap();
+
+        // Tests hardcode URL IDs here.
+        assert_eq!(1, db.insert("ftp://amogus.com/?b&a&a&c").await);
+        assert_eq!(2, db.insert("http://amogus.com/?a&d").await);
+        assert_eq!(3, db.insert("http://amogus.com/?e&a&b&c&d&e").await);
+        assert_eq!(4, db.insert("ftp://amogus.com/").await);
+        assert_eq!(5, db.insert("ftp://amogus.com/testpath/woot/").await);
+
+        db
     }
 
     #[tokio::test]
-    async fn is_url_spam() -> Ret {
-        let db = Database::new_test().await?;
-        let spam: Url = parse_url_like_telegram("amogus.com/badspam").unwrap();
+    async fn create_db() {
+        new_db().await;
+    }
 
-        assert_eq!(db.is_url_spam(&spam, false).await?, None);
-        assert_eq!(db.is_spam(&spam, None, false).await?, None);
+    /// Should match exactly to 1
+    #[tokio::test]
+    async fn match_params_exact() {
+        let db = new_db().await;
+        let (inexact, exact) = db.get_result("https://amogus.com/?a&c&b").await;
+        assert_eq!(inexact, Some(1));
+        assert_eq!(exact, Some(1));
+    }
 
-        db.add_url(&spam, IsSpam::Yes, false).await?;
-        assert_eq!(
-            db.is_url_spam(&spam, false).await?,
-            Some((IsSpam::Yes, false))
-        );
+    /// Has extraneous params but should match to 2
+    #[tokio::test]
+    async fn match_params_with_extraneous() {
+        let db = new_db().await;
+        let (inexact, exact) = db.get_result("https://amogus.com/?a&d&c").await;
+        assert_eq!(inexact, Some(2));
+        assert_eq!(exact, None);
+    }
 
-        let other: Url = parse_url_like_telegram("amogus.com/otherurl").unwrap();
-        assert_eq!(db.is_url_spam(&other, false).await?, None);
+    /// Has params that make it match both 1 and 2; the match with more params should win
+    #[tokio::test]
+    async fn match_params_with_multiple_matches() {
+        let db = new_db().await;
+        let (inexact, exact) = db.get_result("https://amogus.com/?b&a&c&d").await;
+        assert_eq!(inexact, Some(1));
+        assert_eq!(exact, None);
+    }
 
-        let spamdomain: Domain = Domain::from_url(&spam).unwrap();
-        // This checks if the domain specifically is a spam, so it will return None.
-        assert_eq!(db.is_domain_spam(&spamdomain, false).await?, None);
-        Ok(())
+    /// Has params but does not match anything with them; should match the URL without params.
+    #[tokio::test]
+    async fn match_params_none() {
+        let db = new_db().await;
+        let (inexact, exact) = db.get_result("https://amogus.com/?b&a").await;
+        assert_eq!(inexact, Some(4));
+        assert_eq!(exact, None);
+    }
+
+    /// Has no params, but should be exact matches.
+    #[tokio::test]
+    async fn match_no_params_exact() {
+        let db = new_db().await;
+        let (inexact, exact) = db.get_result("https://amogus.com/").await;
+        assert_eq!(inexact, Some(4));
+        assert_eq!(exact, Some(4));
+    }
+
+    /// Has no params, but should be exact matches.
+    #[tokio::test]
+    async fn match_no_params_exact_with_longer_path() {
+        let db = new_db().await;
+        let (inexact, exact) = db.get_result("https://amogus.com/testpath/woot/").await;
+        assert_eq!(inexact, Some(5));
+        assert_eq!(exact, Some(5));
+    }
+
+    /// Has no exact match, but should eventually descend and match 4.
+    #[tokio::test]
+    async fn match_no_params_inexact() {
+        let db = new_db().await;
+        let (inexact, exact) = db.get_result("https://amogus.com/testpath/").await;
+        assert_eq!(inexact, Some(4));
+        assert_eq!(exact, None);
+    }
+
+    /// Has no exact match, but should eventually descend and match 4.
+    #[tokio::test]
+    async fn match_no_params_inexact_longer() {
+        let db = new_db().await;
+        let (inexact, exact) = db
+            .get_result("https://amogus.com/testpath/woot/aawagggga")
+            .await;
+        assert_eq!(inexact, Some(5));
+        assert_eq!(exact, None);
+    }
+
+    /// Has no exact match, but should eventually descend and match 4.
+    #[tokio::test]
+    async fn match_no_params_inexact_with_input_params() {
+        let db = new_db().await;
+        let (inexact, exact) = db
+            .get_result("https://amogus.com/aawagga/amogus/?woot=3")
+            .await;
+        assert_eq!(inexact, Some(4));
+        assert_eq!(exact, None);
     }
 
     #[tokio::test]
-    async fn is_domain_spam() -> Ret {
-        let db = Database::new_test().await?;
-        let spamurl: Url = parse_url_like_telegram("amogus.com/badspam").unwrap();
-        let spamdomain: Domain = Domain::from_url(&spamurl).unwrap();
-
-        assert_eq!(db.is_url_spam(&spamurl, false).await?, None);
-        assert_eq!(db.is_domain_spam(&spamdomain, false).await?, None);
-        assert_eq!(db.is_spam(&spamurl, None, false).await?, None);
-        assert_eq!(db.is_spam(&spamurl, Some(&spamdomain), false).await?, None);
-
-        db.add_domain(&spamdomain, Some(&spamurl), IsSpam::Yes, false)
-            .await?;
-        // This checks if the URL specifically is a spam, so it will return None.
-        assert_eq!(db.is_url_spam(&spamurl, false).await?, None);
-        assert_eq!(
-            db.is_domain_spam(&spamdomain, false).await?,
-            Some((IsSpam::Yes, Some(spamurl.clone()), false))
-        );
-        assert_eq!(
-            db.is_spam(&spamurl, None, false).await?,
-            Some((IsSpam::Yes, false))
-        );
-        assert_eq!(
-            db.is_spam(&spamurl, Some(&spamdomain), false).await?,
-            Some((IsSpam::Yes, false))
-        );
-
-        let other: Url = parse_url_like_telegram("amogus.com/otherurl").unwrap();
-        let otherdomain: Domain = Domain::from_url(&other).unwrap();
-        assert_eq!(spamdomain, otherdomain);
-        // This checks if the URL specifically is a spam, so it will return None.
-        assert_eq!(db.is_url_spam(&other, false).await?, None);
-        assert_eq!(
-            db.is_spam(&other, None, false).await?,
-            Some((IsSpam::Yes, false))
-        );
-        assert_eq!(
-            db.is_spam(&other, Some(&otherdomain), false).await?,
-            Some((IsSpam::Yes, false))
-        );
-        Ok(())
+    async fn get_url_short_with_params() {
+        let db = new_db().await;
+        let UrlInfoShort {
+            id,
+            param_count,
+            designation,
+            manually_reviewed,
+        } = db.get_url_by_id_short(3).await.unwrap().unwrap();
+        assert_eq!(id, 3);
+        assert_eq!(param_count, 5);
+        assert_eq!(designation, NotSpam);
+        assert!(manually_reviewed);
     }
 
     #[tokio::test]
-    async fn mark_sus_workflow() -> Ret {
-        let db = Database::new_test().await?;
-        let link = parse_url_like_telegram("example.com/notspam").unwrap();
-        let domain = Domain::from_url(&link).unwrap();
+    async fn get_url_short_with_path() {
+        let db = new_db().await;
+        let UrlInfoShort {
+            id,
+            param_count,
+            designation,
+            manually_reviewed,
+        } = db.get_url_by_id_short(5).await.unwrap().unwrap();
+        assert_eq!(id, 5);
+        assert_eq!(param_count, 0);
+        assert_eq!(designation, NotSpam);
+        assert!(manually_reviewed);
+    }
 
-        // Let's say the link is posted in a chat.
-        // First, check `crate::spam_checker::check` is run, which defers to the db.
-        assert_eq!(db.is_spam(&link, None, false).await?, None);
+    #[tokio::test]
+    async fn get_url_full_with_params() {
+        let db = new_db().await;
+        let UrlInfoFull {
+            short:
+                UrlInfoShort {
+                    id,
+                    param_count,
+                    designation,
+                    manually_reviewed,
+                },
+            sanitized_url,
+            original_url,
+        } = db.get_url_by_id_full(3).await.unwrap().unwrap();
 
-        // Then, the checker determines it as not spam and adds it to
-        // the database.
-        db.add_domain(&domain, &link, IsSpam::No, false)
+        assert_eq!(id, 3);
+        assert_eq!(param_count, 5);
+        assert_eq!(designation, NotSpam);
+        assert!(manually_reviewed);
+        assert_eq!(sanitized_url.as_str(), "https://amogus.com/?a&b&c&d&e");
+        assert_eq!(original_url.as_str(), "http://amogus.com/?e&a&b&c&d&e");
+    }
+
+    #[tokio::test]
+    async fn get_url_full_with_path() {
+        let db = new_db().await;
+        let UrlInfoFull {
+            short:
+                UrlInfoShort {
+                    id,
+                    param_count,
+                    designation,
+                    manually_reviewed,
+                },
+            sanitized_url,
+            original_url,
+        } = db.get_url_by_id_full(5).await.unwrap().unwrap();
+
+        assert_eq!(id, 5);
+        assert_eq!(param_count, 0);
+        assert_eq!(designation, NotSpam);
+        assert!(manually_reviewed);
+        assert_eq!(sanitized_url.as_str(), "https://amogus.com/testpath/woot");
+        assert_eq!(original_url.as_str(), "ftp://amogus.com/testpath/woot/");
+    }
+
+    #[tokio::test]
+    async fn review_push_results() {
+        let db = new_db().await;
+
+        let urls = SanitizedUrl::from_str_with_original("amogus.com").unwrap();
+        let result = db.send_to_review(&urls.0, &urls.1).await.unwrap();
+        assert!(matches!(result, SendToReviewResult::AlreadyInDatabase(_)));
+
+        let urls = SanitizedUrl::from_str_with_original("somenewurl.com").unwrap();
+
+        let result = db.send_to_review(&urls.0, &urls.1).await.unwrap();
+        assert!(matches!(
+            result,
+            SendToReviewResult::Sent { review_entry_id: 1 }
+        ));
+
+        let result = db.send_to_review(&urls.0, &urls.1).await.unwrap();
+        assert!(matches!(result, SendToReviewResult::AlreadyOnReview));
+    }
+
+    #[tokio::test]
+    async fn review_push_get() {
+        let db = new_db().await;
+
+        let urls = SanitizedUrl::from_str_with_original("somenewurl.com").unwrap();
+        let send_result = db.send_to_review(&urls.0, &urls.1).await.unwrap();
+        assert!(matches!(
+            send_result,
+            SendToReviewResult::Sent { review_entry_id: 1 }
+        ));
+
+        let get_result = db.get_url_for_review().await.unwrap().map(|x| (x.1, x.2));
+        assert_eq!(get_result, Some(urls.clone()));
+
+        let get_result = db.get_url_for_review().await.unwrap().map(|x| (x.1, x.2));
+        assert_eq!(get_result, Some(urls));
+    }
+
+    /// When requesting a URL for review, it should return the oldest sent, so all URLs are cycled
+    /// through.
+    #[tokio::test]
+    async fn review_push_get_multiple() {
+        let db = new_db().await;
+
+        let urls_a = SanitizedUrl::from_str_with_original("a.com").unwrap();
+        let send_result = db.send_to_review(&urls_a.0, &urls_a.1).await.unwrap();
+        assert!(matches!(
+            send_result,
+            SendToReviewResult::Sent { review_entry_id: 1 }
+        ));
+
+        let urls_b = SanitizedUrl::from_str_with_original("b.com").unwrap();
+        let send_result = db.send_to_review(&urls_b.0, &urls_b.1).await.unwrap();
+        assert!(matches!(
+            send_result,
+            SendToReviewResult::Sent { review_entry_id: 2 }
+        ));
+
+        let get_a = db.get_url_for_review().await.unwrap().map(|x| (x.1, x.2));
+        assert_eq!(get_a, Some(urls_a.clone()));
+
+        let get_b = db.get_url_for_review().await.unwrap().map(|x| (x.1, x.2));
+        assert_eq!(get_b, Some(urls_b.clone()));
+
+        let get_a = db.get_url_for_review().await.unwrap().map(|x| (x.1, x.2));
+        assert_eq!(get_a, Some(urls_a.clone()));
+
+        let get_b = db.get_url_for_review().await.unwrap().map(|x| (x.1, x.2));
+        assert_eq!(get_b, Some(urls_b.clone()));
+    }
+
+    /// Basically test that it doesn't crash lol
+    #[tokio::test]
+    async fn sus_link_sighting() {
+        let db = new_db().await;
+        let urls = SanitizedUrl::from_str_with_original("example.com").unwrap();
+
+        // This URL is not in the database. Should do nothing.
+        db.link_sighted(ChatId(0), MessageId(0), "hi", &urls.0)
             .await
-            .expect("Database died!");
-
-        // Then, someone marks it as sus.
-        assert_eq!(db.mark_sus(&link, None).await?, MarkSusResult::Marked);
-
-        // Check if this is what it is in the database.
-        assert_eq!(
-            db.is_spam(&link, None, false).await?,
-            Some((IsSpam::Maybe, false))
-        );
-
-        // Someone gets it in review...
-        let (review_url, review_table, review_id, db_state) =
-            db.get_url_for_review().await?.unwrap();
-        assert_eq!(review_url, link);
-        assert_eq!(db_state, IsSpam::Maybe);
-
-        // They mark it as not spam...
-        let from_db = db
-            .get_url_from_table_and_rowid(review_table, review_id)
-            .await?
             .unwrap();
-        assert_eq!(from_db.0, link);
-        let response = ReviewResponse::NotSpam(from_db.1, from_db.0);
-        db.read_review_response(&response).await?;
 
-        // Someone later posts the link again.
-        // Check if this is what it is in the database.
-        assert_eq!(
-            db.is_spam(&link, None, false).await?,
-            Some((IsSpam::No, true))
-        );
+        let send_result = db.send_to_review(&urls.0, &urls.1).await.unwrap();
+        assert!(matches!(
+            send_result,
+            SendToReviewResult::Sent { review_entry_id: 1 }
+        ));
 
-        // Someone marks it as sus again...
-        assert_eq!(
-            db.mark_sus(&link, None).await?,
-            MarkSusResult::ManuallyReviewedNotSpam
-        );
-        //db.mark_url_sus(&link).await?;
+        // This URL is now in the database. Should do something now.
+        db.link_sighted(ChatId(0), MessageId(0), "hi", &urls.0)
+            .await
+            .unwrap();
+    }
 
-        //// It should still be not spam.
-        //assert_eq!(db.is_spam(&link, None, false).await?, Some(IsSpam::No));
+    // Simple boolean logic, but yeag.
+    #[tokio::test]
+    async fn hide_deletes() {
+        let db = new_db().await;
 
-        Ok(())
+        let chat_id = ChatId(1312);
+
+        // false by default
+        assert!(!db.get_hide_deletes(chat_id).await.unwrap());
+        assert!(!db.get_hide_deletes(chat_id).await.unwrap());
+        // setting to false does nothing
+        assert!(!db.set_hide_deletes(chat_id, false).await.unwrap());
+        assert!(!db.set_hide_deletes(chat_id, false).await.unwrap());
+        // setting to true, well, sets to true
+        assert!(!db.set_hide_deletes(chat_id, true).await.unwrap());
+        assert!(db.set_hide_deletes(chat_id, true).await.unwrap());
+        assert!(db.get_hide_deletes(chat_id).await.unwrap());
+        assert!(db.get_hide_deletes(chat_id).await.unwrap());
+        // setting to false sets to false lol
+        assert!(db.set_hide_deletes(chat_id, false).await.unwrap());
+        assert!(!db.set_hide_deletes(chat_id, false).await.unwrap());
     }
 
     #[tokio::test]
-    async fn adding_links_actually_adds() -> Ret {
-        let url = parse_url_like_telegram("example.com/notspam").unwrap();
-        let domain = Domain::from_url(&url).unwrap();
+    async fn last_deleted_album_id() {
+        let db = new_db().await;
+        let chat_id = ChatId(1312);
 
-        for spam_status in [IsSpam::No, IsSpam::Maybe, IsSpam::Yes] {
-            let db = Database::new_test().await?;
-            db.add_domain(&domain, &url, spam_status, false).await?;
-            assert_eq!(
-                db.is_spam(&url, &domain, true).await?,
-                Some((spam_status, false))
-            );
-            let db = Database::new_test().await?;
-            db.add_url(&url, spam_status, false).await?;
-            assert_eq!(
-                db.is_spam(&url, &domain, true).await?,
-                Some((spam_status, false))
-            );
-        }
+        let album_id = MediaGroupId(String::from("amogus"));
 
-        Ok(())
-    }
+        assert_eq!(db.get_last_deleted_album_id(chat_id).await.unwrap(), None);
 
-    #[tokio::test]
-    async fn review_response_conflicts_with_db() -> Ret {
-        // Check all possible cases of `ReviewResponse` in
-        // relation to the database's state.
-        let url = parse_url_like_telegram("example.com/notspam").unwrap();
-        let domain = Domain::from_url(&url).unwrap();
+        db.set_last_deleted_album_id(chat_id, &album_id)
+            .await
+            .unwrap();
 
-        // Test cases.
-        let skip = ReviewResponse::Skip;
-        let notspam = ReviewResponse::NotSpam(Some(domain.clone()), url.clone());
-        let urlspam = ReviewResponse::UrlSpam(Some(domain.clone()), url.clone());
-        let domainspam = ReviewResponse::DomainSpam(domain.clone(), url.clone());
-
-        // Neither URL nor domain is in the database.
-        let db = Database::new_test().await?;
-        assert!(!skip.conflicts_with_db(&db).await?);
-        assert!(notspam.conflicts_with_db(&db).await?);
-        assert!(urlspam.conflicts_with_db(&db).await?);
-        assert!(domainspam.conflicts_with_db(&db).await?);
-
-        //
-
-        // The URL is marked as not spam.
-        let db = Database::new_test().await?;
-        db.add_url(&url, IsSpam::No, true).await?;
-        assert!(!skip.conflicts_with_db(&db).await?);
-        assert!(!notspam.conflicts_with_db(&db).await?);
-        assert!(urlspam.conflicts_with_db(&db).await?);
-        assert!(domainspam.conflicts_with_db(&db).await?);
-
-        // The URL is marked as maybe spam.
-        let db = Database::new_test().await?;
-        db.add_url(&url, IsSpam::Maybe, true).await?;
-        assert!(!skip.conflicts_with_db(&db).await?);
-        assert!(notspam.conflicts_with_db(&db).await?);
-        assert!(urlspam.conflicts_with_db(&db).await?);
-        assert!(domainspam.conflicts_with_db(&db).await?);
-
-        // The URL is marked as yes spam.
-        let db = Database::new_test().await?;
-        db.add_url(&url, IsSpam::Yes, true).await?;
-        assert!(!skip.conflicts_with_db(&db).await?);
-        assert!(notspam.conflicts_with_db(&db).await?);
-        assert!(!urlspam.conflicts_with_db(&db).await?);
-        assert!(domainspam.conflicts_with_db(&db).await?);
-
-        //
-
-        // The domain is marked as not spam.
-        let db = Database::new_test().await?;
-        db.add_domain(&domain, &url, IsSpam::No, true).await?;
-        assert!(!skip.conflicts_with_db(&db).await?);
-        assert!(!notspam.conflicts_with_db(&db).await?);
-        assert!(urlspam.conflicts_with_db(&db).await?);
-        assert!(domainspam.conflicts_with_db(&db).await?);
-
-        // The domain is marked as maybe spam.
-        let db = Database::new_test().await?;
-        db.add_domain(&domain, &url, IsSpam::Maybe, true).await?;
-        assert!(!skip.conflicts_with_db(&db).await?);
-        assert!(notspam.conflicts_with_db(&db).await?);
-        assert!(urlspam.conflicts_with_db(&db).await?);
-        assert!(domainspam.conflicts_with_db(&db).await?);
-
-        // The domain is marked as yes spam.
-        let db = Database::new_test().await?;
-        db.add_domain(&domain, &url, IsSpam::Yes, true).await?;
-        assert!(!skip.conflicts_with_db(&db).await?);
-        assert!(notspam.conflicts_with_db(&db).await?);
-        assert!(urlspam.conflicts_with_db(&db).await?);
-        assert!(!domainspam.conflicts_with_db(&db).await?);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn marking_telegram_as_spam_by_accident() -> Ret {
-        // Scenario:
-        // 1. Someone puts a normal non-spam telegram link in review.
-        // 2. Admin marks it as not spam.
-        // 3. Someone puts a spam telegram link in review.
-        // 4. Admin accidentally responds that telegram's entire domain is spam.
-        //
-        // The make_a_db() function below creates a database in this state.
-
-        let spam: Url = parse_url_like_telegram("t.me/badspam").unwrap();
-        let normal: Url = parse_url_like_telegram("t.me/channels").unwrap();
-        let tg = parse_url_like_telegram("t.me").unwrap();
-        let tgdomain = Domain::from_url(&tg).unwrap();
-
-        /// Make a database with initial state.
-        async fn make_a_db() -> Result<Arc<Database>, Error> {
-            let db = Database::new_test().await?;
-            let spam: Url = parse_url_like_telegram("t.me/badspam").unwrap();
-            let normal: Url = parse_url_like_telegram("t.me/channels").unwrap();
-            let tg = parse_url_like_telegram("t.me").unwrap();
-            let tgdomain = Domain::from_url(&tg).unwrap();
-
-            // Let's say someone marks Telegram itself as spam on accident.
-
-            // Someone gets the normal link in review...
-            assert_eq!(db.mark_sus(&normal, None).await?, MarkSusResult::Marked);
-
-            // Someone gets it in review...
-            let (_, review_table, review_id, _) = db.get_url_for_review().await?.unwrap();
-
-            // They mark it as not spam...
-            let from_db = db
-                .get_url_from_table_and_rowid(review_table, review_id)
-                .await?
-                .unwrap();
-            assert_eq!(from_db.0, normal);
-            let response = ReviewResponse::NotSpam(from_db.1, from_db.0);
-            db.read_review_response(&response).await?;
-
-            // Someone gets the spam link in review...
-            assert_eq!(db.mark_sus(&spam, None).await?, MarkSusResult::Marked);
-
-            // Someone gets it in review...
-            let (_, review_table, review_id, _) = db.get_url_for_review().await?.unwrap();
-
-            // They mark the DOMAIN as spam on accident...
-            let from_db = db
-                .get_url_from_table_and_rowid(review_table, review_id)
-                .await?
-                .unwrap();
-            assert_eq!(from_db.0, spam);
-            let response = ReviewResponse::DomainSpam(tgdomain.clone(), from_db.0);
-            db.read_review_response(&response).await?;
-
-            // Oh no. The normal link is spam too.
-            assert_eq!(
-                db.is_spam(&normal, None, false).await.unwrap(),
-                Some((IsSpam::Yes, true))
-            );
-
-            // How will our heroes get out of this one? Find out on next episode of...
-            Ok(db)
-        }
-
-        // Scenario continuation:
-        // 5. Admin tries to fix this by marking "t.me" as not spam.
-        let db = make_a_db().await?;
-        let response = ReviewResponse::NotSpam(Some(tgdomain.clone()), tg);
-        db.read_review_response(&response).await?;
-
-        // Normal link shouldn't be spam now.
         assert_eq!(
-            db.is_spam(&normal, None, false).await.unwrap(),
-            Some((IsSpam::No, true))
+            db.get_last_deleted_album_id(chat_id).await.unwrap(),
+            Some(album_id)
         );
-        // In this case the spam link isn't either though.
-        assert_eq!(
-            db.is_spam(&spam, None, false).await.unwrap(),
-            Some((IsSpam::No, true))
-        );
-
-        // Scenario continuation (skill issue case):
-        // 5. Admin tries to fix this by marking the spam link as URL spam.
-        let db = make_a_db().await?;
-        let response = ReviewResponse::UrlSpam(Some(tgdomain), spam.clone());
-        db.read_review_response(&response).await?;
-
-        // Normal link should still be spam: marking a
-        // particular link as spam shouldn't unmark the domain.
-        assert_eq!(
-            db.is_spam(&normal, None, false).await.unwrap(),
-            Some((IsSpam::Yes, true))
-        );
-        // In this case the spam link should still be considered spam.
-        assert_eq!(
-            db.is_spam(&spam, None, false).await.unwrap(),
-            Some((IsSpam::Yes, true))
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn mark_url_sus_if_domain_marked() -> Ret {
-        // Scenario:
-        // 1. A domain example.org is marked as spam.
-        // 2. Someone tries to mark example.org/12345 as sus.
-        //
-        // They should get the "is already marked as spam" response.
-
-        let db = Database::new_test().await?;
-
-        let spam_url = parse_url_like_telegram("example.org/12345").unwrap();
-        let spam_domain = Domain::from_url(&spam_url).unwrap();
-
-        db.add_domain(&spam_domain, None, IsSpam::Yes, true).await?;
-        let sus_result = db.mark_sus(&spam_url, None).await?;
-        assert_eq!(sus_result, MarkSusResult::AlreadyMarkedSpam);
-
-        // However, if it's marked as *not* spam,
-        // then trying to mark sus *should* succeed.
-
-        db.add_domain(&spam_domain, None, IsSpam::No, true).await?;
-        let sus_result = db.mark_sus(&spam_url, None).await?;
-        assert_eq!(sus_result, MarkSusResult::Marked);
-
-        Ok(())
     }
 }
