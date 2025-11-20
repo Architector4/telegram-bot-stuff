@@ -7,7 +7,7 @@ use teloxide::{
     prelude::*,
     sugar::request::{RequestLinkPreviewExt, RequestReplyExt},
     types::{BotCommand, MaybeInaccessibleMessage, Me},
-    RequestError,
+    ApiError, RequestError,
 };
 
 use crate::{
@@ -33,6 +33,35 @@ pub async fn handle_message_new_or_edit(
     message: Message,
     database: Arc<Database>,
 ) -> Result<(), RequestError> {
+    let result = handle_message_new_or_edit_raw(&bot, &me, &message, &database).await;
+
+    match result {
+        Err(RequestError::Api(ApiError::Unknown(reason)))
+            if reason.contains("CHAT_ADMIN_REQUIRED") =>
+        {
+            // Bot is not an admin and the handler failed because of this. Be a bit more graceful
+            // about it than to just send it back.
+
+            bot.archsendmsg_no_link_preview(message.chat.id, concat!(
+                    "Failed to perform an operation because this bot is not an admin in this chat.\n\n",
+                    "For proper functioning, please make this bot an admin with ability to remove messages, ",
+                    "or remove it from this chat."
+            ), None).await?;
+
+            Ok(())
+        }
+        _ => result,
+    }
+}
+
+/// Handler for events of new or edited messages.
+/// Assumes the bot is admin and might return an error otherwise.
+async fn handle_message_new_or_edit_raw(
+    bot: &Bot,
+    me: &Me,
+    message: &Message,
+    database: &Database,
+) -> Result<(), RequestError> {
     if let Some(sender) = &message.from {
         if sender.id == me.id {
             // Ignore messages sent by ourselves.
@@ -41,7 +70,7 @@ pub async fn handle_message_new_or_edit(
         }
     }
 
-    let sender_name = sender_name_prettyprint(&message, false);
+    let sender_name = sender_name_prettyprint(message, false);
 
     // Whether or not the sender of this message is an admin, if checked.
     // This variable is used to have to check this at most once across this function.
@@ -62,9 +91,9 @@ pub async fn handle_message_new_or_edit(
             if last_deleted.as_ref() == Some(album_id) {
                 // Matches album ID of last deleted spam message. Delete this too.
                 delete_message_as_spam(
-                    &bot,
-                    &database,
-                    &message,
+                    bot,
+                    database,
+                    message,
                     Some(&sender_name),
                     MessageDeleteReason::OfAlbumWithSpamMessage,
                 )
@@ -74,8 +103,8 @@ pub async fn handle_message_new_or_edit(
             }
         }
 
-        if !deleted_this_message && does_message_have_spam_links(&message, &database).await {
-            if is_sender_admin_with_cache(&bot, &message, &mut sent_by_admin_cache).await? {
+        if !deleted_this_message && does_message_have_spam_links(message, database).await {
+            if is_sender_admin_with_cache(bot, message, &mut sent_by_admin_cache).await? {
                 if message.chat.id != CONTROL_CHAT_ID {
                     bot.archsendmsg_no_link_preview(
                         message.chat.id,
@@ -86,9 +115,9 @@ pub async fn handle_message_new_or_edit(
                 }
             } else {
                 delete_message_as_spam(
-                    &bot,
-                    &database,
-                    &message,
+                    bot,
+                    database,
+                    message,
                     Some(&sender_name),
                     MessageDeleteReason::ContainsSpamLink,
                 )
@@ -102,12 +131,12 @@ pub async fn handle_message_new_or_edit(
             // spam links too. Probably a second time over. A link in that message might have been
             // marked as spam since then.
             if message.chat.id == reply_to.chat.id
-                && does_message_have_spam_links(reply_to, &database).await
-                && !is_sender_admin(&bot, reply_to).await?
+                && does_message_have_spam_links(reply_to, database).await
+                && !is_sender_admin(bot, reply_to).await?
             {
                 delete_message_as_spam(
-                    &bot,
-                    &database,
+                    bot,
+                    database,
                     reply_to,
                     None,
                     MessageDeleteReason::ContainsSpamLink,
@@ -128,10 +157,10 @@ pub async fn handle_message_new_or_edit(
         // are elegible for deletion.
         //
         // Therefore, tell the database about the links.
-        for (sanitized_url, _original_url) in iterate_over_all_links(&message) {
+        for (sanitized_url, _original_url) in iterate_over_all_links(message) {
             // Only if this is *not* sent by a chat admin. We don't want to delete admin messages
             // containing spam links.
-            if !is_sender_admin_with_cache(&bot, &message, &mut sent_by_admin_cache).await? {
+            if !is_sender_admin_with_cache(bot, message, &mut sent_by_admin_cache).await? {
                 if let Err(e) = database
                     .link_sighted(message.chat.id, message.id, &sender_name, &sanitized_url)
                     .await
@@ -148,10 +177,10 @@ pub async fn handle_message_new_or_edit(
     if !is_edited {
         // Handle commands, potentially.
         handle_command(
-            &bot,
-            &me,
-            &message,
-            &database,
+            bot,
+            me,
+            message,
+            database,
             &sender_name,
             sent_by_admin_cache,
         )

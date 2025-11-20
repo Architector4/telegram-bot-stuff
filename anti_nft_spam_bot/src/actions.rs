@@ -87,18 +87,6 @@ pub async fn delete_message_as_spam_raw(
     sender_name: &str,
     reason: MessageDeleteReason,
 ) -> Result<(), RequestError> {
-    let send_fail_message_closure = || {
-        bot.archsendmsg_no_link_preview(
-            chat_id,
-            concat!(
-                "Tried to delete a spam message, but failed. ",
-                "This might be because this bot is not an admin with ability to ",
-                "delete messages, or the message is older than 48 hours.",
-            ),
-            None,
-        )
-    };
-
     match teloxide_retry!(bot.delete_message(chat_id, message_id).await) {
         Ok(_) => {
             if let Some(album_id) = album_id {
@@ -147,14 +135,16 @@ pub async fn delete_message_as_spam_raw(
 
         Err(RequestError::Api(ApiError::MessageCantBeDeleted)) => {
             // No rights? Older than 48 hours?
-            send_fail_message_closure().await?;
-            Ok(())
-        }
-        Err(RequestError::Api(ApiError::Unknown(reason)))
-            if reason == "Bad Request: CHAT_ADMIN_REQUIRED" =>
-        {
-            // No rights, most probably.
-            send_fail_message_closure().await?;
+            bot.archsendmsg_no_link_preview(
+                chat_id,
+                concat!(
+                    "Tried to delete a spam message, but failed. ",
+                    "This might be because this bot is not an admin with ability to ",
+                    "delete messages, or the message is older than 48 hours.",
+                ),
+                None,
+            )
+            .await?;
             Ok(())
         }
         Err(e) => Err(e),
