@@ -237,7 +237,7 @@ pub async fn handle_command(
     }
 
     match command {
-        "/start" if is_private => {
+        "/start" | "/help" if is_private => {
             bot.archsendmsg_no_link_preview(
                 message.chat.id, concat!(
 "This bot is made to combat various types of spam experienced by chats across Telegram.\n\n",
@@ -296,7 +296,10 @@ pub async fn handle_command(
         _ if is_private => {
             bot.archsendmsg_no_link_preview(
                 message.chat.id,
-                "Unknown command. Try /help for a list of commands.",
+                concat!(
+                    "Unknown command. Try /start for bot info, or use bot commands button ",
+                    "on your message entry bar to see commands."
+                ),
                 message.id,
             )
             .await?;
