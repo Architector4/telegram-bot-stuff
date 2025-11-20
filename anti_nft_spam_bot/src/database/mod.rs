@@ -631,6 +631,9 @@ impl Database {
         Self::update_url_unchecked(&mut trans, exact_match.id, designation, manually_reviewed)
             .await?;
 
+        // Actually apply this lmao
+        trans.commit().await?;
+
         Ok(InsertOrUpdateResult::Updated {
             old_info: exact_match,
         })
@@ -1250,6 +1253,56 @@ mod tests {
         assert_eq!(param_count, 0);
         assert_eq!(designation, NotSpam);
         assert!(manually_reviewed);
+    }
+
+    #[tokio::test]
+    async fn update_result() {
+        let db = new_db().await;
+        let (sanitized_url, original_url) =
+            SanitizedUrl::from_str_with_original("example.com").unwrap();
+        let result = db
+            .insert_or_update_url(
+                &sanitized_url,
+                &original_url,
+                UrlDesignation::NotSpam,
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            result,
+            InsertOrUpdateResult::Inserted { new_id: _ }
+        ));
+        let result = db
+            .insert_or_update_url(&sanitized_url, &original_url, UrlDesignation::Spam, true)
+            .await
+            .unwrap();
+        assert!(matches!(
+            result,
+            InsertOrUpdateResult::Updated {
+                old_info: UrlInfoShort {
+                    id: _,
+                    param_count: _,
+                    designation: UrlDesignation::NotSpam,
+                    manually_reviewed: false
+                }
+            }
+        ));
+        let result = db
+            .insert_or_update_url(&sanitized_url, &original_url, UrlDesignation::Spam, true)
+            .await
+            .unwrap();
+        assert!(matches!(
+            dbg!(result),
+            InsertOrUpdateResult::NoChange {
+                existing_info: UrlInfoShort {
+                    id: _,
+                    param_count: _,
+                    designation: UrlDesignation::Spam,
+                    manually_reviewed: true
+                }
+            }
+        ));
     }
 
     #[tokio::test]
