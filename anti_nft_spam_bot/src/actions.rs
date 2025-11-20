@@ -109,7 +109,7 @@ pub async fn delete_message_as_spam_raw(
             // Now we shall notify. Should we show the reason?
             if let Some(reason) = reason.to_str() {
                 // We should. Do we *need* to?
-                let deletes_hidden = !database
+                let deletes_hidden = database
                     .get_hide_deletes(chat_id)
                     .await
                     .expect("Database died!");
