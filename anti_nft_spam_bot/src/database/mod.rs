@@ -969,6 +969,7 @@ impl Database {
     ///
     /// For database schema of the old bot, see:
     /// <https://github.com/Architector4/telegram-bot-stuff/blob/6205ce670f6625a0754e04d534a16b137122d3ff/anti_nft_spam_bot/src/database/mod.rs>
+    #[allow(unused)]
     pub async fn import_from_old_database(self: &Arc<Self>) -> Result<(), Error> {
         enum IsSpamOld {
             No = 0,

@@ -26,9 +26,10 @@ pub async fn entry() {
 
     let database: Arc<Database> = Database::new().await.expect("Failed to create database!");
 
-    if let Err(e) = database.import_from_old_database().await {
-        log::warn!("Failed to import from old database: {e}");
-    };
+    // Already imported.
+    //if let Err(e) = database.import_from_old_database().await {
+    //    log::warn!("Failed to import from old database: {e}");
+    //};
 
     tokio::spawn(remind_about_reviews_spinloop(
         bot.clone(),
