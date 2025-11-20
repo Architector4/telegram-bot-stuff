@@ -26,7 +26,7 @@ pub async fn authenticate_control(bot: &Bot, user: &User) -> Result<bool, Reques
         .await?
         .is_present();
     if !control {
-        let username = user_name_prettyprint(user, true);
+        let username = user_name_prettyprint(user, true, false);
         log::info!("Unauthorized user trying to access reviews: {username}");
 
         // Not a member.

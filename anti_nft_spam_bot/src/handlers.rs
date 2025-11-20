@@ -813,7 +813,7 @@ pub async fn handle_callback_query(
     insert_or_update_url_with_log(
         &bot,
         &database,
-        Some(&user_name_prettyprint(&user, true)),
+        Some(&user_name_prettyprint(&user, true, true)),
         &sanitized_url,
         &original_url,
         query_data.designation,
@@ -832,7 +832,7 @@ pub async fn handle_callback_query(
             &bot,
             message.chat.id,
             message.id,
-            &user_name_prettyprint(&user, true),
+            &user_name_prettyprint(&user, true, true),
             query_data.designation,
             &sanitized_url,
         )
