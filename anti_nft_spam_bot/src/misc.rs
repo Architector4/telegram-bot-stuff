@@ -36,23 +36,28 @@ pub fn parse_url_like_telegram(string: &str) -> Result<Url, url::ParseError> {
 }
 
 /// Tries to print the user in the prettiest way possible, with either `@username` or full name
-/// that hopefully links to the user. Optionally allows including user ID.
+/// that hopefully links to the user if `with_link_formatting` is `true`. Optionally allows including user ID.
 #[must_use]
-pub fn user_name_prettyprint(user: &User, with_id: bool) -> String {
+pub fn user_name_prettyprint(user: &User, with_id: bool, with_link_formatting: bool) -> String {
     let mut name = {
         if let Some(username) = &user.username {
             format!("@{username}")
         } else {
-            let mut full_name = format!("<a href=\"tg://user?id={}\">{}", user.id, user.first_name);
+            if with_link_formatting {
+                let mut full_name =
+                    format!("<a href=\"tg://user?id={}\">{}", user.id, user.first_name);
 
-            if let Some(last_name) = &user.last_name {
-                full_name.push(' ');
-                full_name.push_str(last_name);
+                if let Some(last_name) = &user.last_name {
+                    full_name.push(' ');
+                    full_name.push_str(last_name);
+                }
+
+                full_name.push_str("</a>");
+
+                full_name
+            } else {
+                user.full_name()
             }
-
-            full_name.push_str("</a>");
-
-            full_name
         }
     };
 
@@ -100,7 +105,8 @@ pub fn sender_name_prettyprint(message: &Message, with_id: bool) -> String {
     if let Some(chat) = &message.sender_chat {
         chat_name_prettyprint(chat, with_id)
     } else if let Some(user) = &message.from {
-        user_name_prettyprint(user, with_id)
+        // Assume we want link formatting only if we also want the ID.
+        user_name_prettyprint(user, with_id, with_id)
     } else {
         // Shouldn't happen, but eh.
         "a private sender".to_string()
