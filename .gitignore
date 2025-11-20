@@ -1,7 +1,9 @@
 */target
 */key
 */key_debug
-*/*sqlite*
+*/*sqlite
+*/*sqlite-shm
+*/*sqlite-wal
 */deploy*.sh
 anti_nft_spam_bot/proxies.txt
 .cache
