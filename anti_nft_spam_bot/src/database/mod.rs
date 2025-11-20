@@ -1012,15 +1012,7 @@ impl Database {
                     .foreign_keys(true) // Already  default, but doesn't hurt being explicit.
                     .busy_timeout(std::time::Duration::from_secs(600)),
             )
-            .await;
-
-        let oldpool = match oldpool {
-            Ok(oldpool) => oldpool,
-            Err(e) => {
-                log::warn!("Could not open old database: {e}");
-                return Ok(());
-            }
-        };
+            .await?;
 
         let oldpool_for_hide_deletes = oldpool.clone();
         let database_for_hide_deletes = self.clone();
