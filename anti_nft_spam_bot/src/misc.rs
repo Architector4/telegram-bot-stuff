@@ -42,22 +42,19 @@ pub fn user_name_prettyprint(user: &User, with_id: bool, with_link_formatting: b
     let mut name = {
         if let Some(username) = &user.username {
             format!("@{username}")
-        } else {
-            if with_link_formatting {
-                let mut full_name =
-                    format!("<a href=\"tg://user?id={}\">{}", user.id, user.first_name);
+        } else if with_link_formatting {
+            let mut full_name = format!("<a href=\"tg://user?id={}\">{}", user.id, user.first_name);
 
-                if let Some(last_name) = &user.last_name {
-                    full_name.push(' ');
-                    full_name.push_str(last_name);
-                }
-
-                full_name.push_str("</a>");
-
-                full_name
-            } else {
-                user.full_name()
+            if let Some(last_name) = &user.last_name {
+                full_name.push(' ');
+                full_name.push_str(last_name);
             }
+
+            full_name.push_str("</a>");
+
+            full_name
+        } else {
+            user.full_name()
         }
     };
 
