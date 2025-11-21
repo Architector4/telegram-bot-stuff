@@ -209,7 +209,7 @@ pub async fn insert_or_update_url_with_log(
     // Change was enacted. Log it.
 
     let command = match designation {
-        UrlDesignation::Spam => "/mark_spam",
+        UrlDesignation::Spam => "/mark_url_spam",
         UrlDesignation::NotSpam => "/mark_not_spam",
         UrlDesignation::Aggregator => "/mark_aggregator",
     };
