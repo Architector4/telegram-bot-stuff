@@ -74,7 +74,8 @@ impl Database {
         // path (text, a path of a `SanitizedUrl`)
         // query (text, a query of a `SanitizedUrl`, can be empty to mean no query)
         // param_count (i64, amount of params in the URL query (stored in `url_params`); for example,"?a&b=50&c" is 3 params)
-        // original_url (text, full original URL with no lowercasing)
+        // original_url (text, original URL this sanitized URL is derived from.
+        //               NOT GUARANTEED TO BE THE SAME URL!!!)
         // designation (u8, representing a value in the enum `UrlDesignation`)
         // manually_reviewed (0 for no, 1 for yes)
         pool.execute(
@@ -421,6 +422,9 @@ impl Database {
     pub async fn get_url_by_id_full(&self, id: i64) -> Result<Option<UrlInfoFull>, Error> {
         let Some(row) = sqlx::query(
             "SELECT
+                urls.host,
+                urls.path,
+                urls.query,
                 urls.param_count,
                 urls.original_url,
                 urls.designation,
@@ -437,17 +441,27 @@ impl Database {
         };
 
         // Extract to variables.
-        let param_count: i64 = row.get(0);
-        let original_url: &str = row.get(1);
-        let designation: u8 = row.get(2);
-        let manually_reviewed: bool = row.get(3);
+        let host: &str = row.get(0);
+        let path: &str = row.get(1);
+        let query: &str = row.get(2);
+        let param_count: i64 = row.get(3);
+        let original_url: &str = row.get(4);
+        let designation: u8 = row.get(5);
+        let manually_reviewed: bool = row.get(6);
 
         // Now combine to concrete types.
-        // Sanitized URL can be derived from original URL.
-        let (sanitized_url, original_url) = SanitizedUrl::from_str_with_original(original_url)
-            .expect("Invalid URL found in database!");
+        // Sanitized URL can NOT be derived from original URL.
+        // Original URL might be a whole ass
+        // different thing the review is made from.
+        let sanitized_url = SanitizedUrl::from_str(&format!("https://{host}{path}?{query}")).expect("Invalid sanitized URL found in database!");
+        let original_url = Url::from_str(original_url).expect("Invalid original URL found in database!");
+
+        //let (sanitized_url, original_url) = SanitizedUrl::from_str_with_original(original_url)
+        //    .expect("Invalid URL found in database!");
         let designation = UrlDesignation::try_from(designation)
             .expect("Invalid URL designation found in database!");
+
+
 
         Ok(Some(UrlInfoFull {
             short: UrlInfoShort {
@@ -1293,7 +1307,7 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(
-            dbg!(result),
+            result,
             InsertOrUpdateResult::NoChange {
                 existing_info: UrlInfoShort {
                     id: _,
