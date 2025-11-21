@@ -166,13 +166,20 @@ impl SanitizedUrl {
                     // Query params don't matter much for Telegram links.
                     url.set_query(None);
 
-                    // Strip all path stuff after the first path segment.
-                    // So, for example, turn a link like "https://t.me/Architector_4/blah/blah"
-                    // into "https://t.me/Architector_4"
-                    let path_segments_count = url.path().chars().filter(|x| *x == '/').count();
-                    let mut segments = url.path_segments_mut().expect(CAN_BE_A_BASE);
-                    for _ in 1..path_segments_count {
-                        segments.pop();
+                    // Telegram usernames are at least 4 characters long.
+                    // If something is a username, we want to strip everything after it.
+
+                    let first_path_segment = url.path()[1..].split_once('/').map(|x| x.0);
+
+                    if first_path_segment.map(|x| x.len() >= 4).unwrap_or(false) {
+                        // Strip all path stuff after the first path segment.
+                        // So, for example, turn a link like "https://t.me/Architector_4/blah/blah"
+                        // into "https://t.me/Architector_4"
+                        let path_segments_count = url.path().chars().filter(|x| *x == '/').count();
+                        let mut segments = url.path_segments_mut().expect(CAN_BE_A_BASE);
+                        for _ in 1..path_segments_count {
+                            segments.pop();
+                        }
                     }
                 }
                 x if x.ends_with(".t.me") => {
@@ -577,6 +584,10 @@ mod tests {
 
         let url: SanitizedUrl = "https://foo.bar.amogus.t.me/".parse().unwrap();
         assert_eq!(url.as_str(), "https://t.me/foo.bar.amogus");
+
+        // We do NOT want to strip the tag thing after the /m/
+        let url: SanitizedUrl = "https://t.me/m/awawawawa".parse().unwrap();
+        assert_eq!(url.as_str(), "https://t.me/m/awawawawa");
     }
 
     #[test]
