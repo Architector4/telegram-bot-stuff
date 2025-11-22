@@ -206,7 +206,12 @@ impl ReviewCallbackData {
 
         for (i, (host, path)) in url.destructure().enumerate() {
             if let Some(down_to) = destructure_down_to {
-                if host == down_to.host_str() && path == down_to.path() {
+                if host == down_to.host_str() && path == down_to.path() && i > 0 {
+                    break;
+                }
+                // Possible case is that `url` and `destructure_down_to` are equal. In that
+                // case, we want to show at least the first button, and then break after it.
+                if i > 0 && url.host_str() == down_to.host_str() && url.path() == down_to.path() {
                     break;
                 }
             }

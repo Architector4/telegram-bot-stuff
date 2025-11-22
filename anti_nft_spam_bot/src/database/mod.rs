@@ -203,6 +203,7 @@ impl Database {
         host: &str,
         path: &str,
         query: &str,
+        manual_reviews_only: bool,
     ) -> Result<Option<UrlInfoShort>, Error> {
         assert!(
             path.starts_with('/'),
@@ -211,11 +212,12 @@ impl Database {
 
         let Some(row) = sqlx::query(
             "SELECT id, param_count, designation, manually_reviewed FROM urls
-            WHERE host=? AND path=? AND query=?;",
+            WHERE host=$1 AND path=$2 AND query=$3 AND ($4 = 0 OR manually_reviewed = $4);",
         )
         .bind(host)
         .bind(path)
         .bind(query)
+        .bind(manual_reviews_only)
         .fetch_optional(executor)
         .await?
         else {
@@ -247,6 +249,7 @@ impl Database {
             url.host_str(),
             url.path(),
             url.query().unwrap_or(""),
+            false,
         )
     }
 
@@ -256,6 +259,7 @@ impl Database {
     async fn get_url_inexact_with_query(
         &self,
         url: &SanitizedUrl,
+        manual_reviews_only: bool,
     ) -> Result<Option<UrlInfoShort>, Error> {
         // The query is needed a bit later in the code, but it's a good idea to let `.expect` panic
         // here early if needed.
@@ -300,12 +304,13 @@ impl Database {
                 urls.id=url_params.url_id AND
                 urls.host=$1 AND
                 urls.path=$2 AND
+                ($3 == 0 OR urls.manually_reviewed == $3) AND
                 param IN (!!!THE_PARAMS!!!)
             GROUP BY urls.id HAVING COUNT(*) == urls.param_count
             ORDER BY urls.param_count DESC
             LIMIT 1;";
 
-            // We want to replace "!!!THE_PARAMS!!!" with something like "$3, $4, $5", with one
+            // We want to replace "!!!THE_PARAMS!!!" with something like "$4, $5, $6", with one
             // number for each param.
 
             let (pre_params, post_params) = sql_query_template
@@ -322,7 +327,7 @@ impl Database {
                 if pushed_a_param {
                     sql_query.push(',');
                 }
-                write!(sql_query, "${}", i + 3).expect("Writing to a String never fails");
+                write!(sql_query, "${}", i + 4).expect("Writing to a String never fails");
                 pushed_a_param = true;
             }
 
@@ -333,7 +338,8 @@ impl Database {
 
         let mut sql_query = sqlx::query(&sql_query_str)
             .bind(url.as_ref().host_str())
-            .bind(url.as_ref().path());
+            .bind(url.as_ref().path())
+            .bind(manual_reviews_only);
 
         for param in params {
             sql_query = sql_query.bind(param);
@@ -360,10 +366,12 @@ impl Database {
     async fn get_url_inexact_assuming_no_query(
         &self,
         url: &SanitizedUrl,
+        manual_reviews_only: bool,
     ) -> Result<Option<UrlInfoShort>, Error> {
         for (host, path) in url.destructure() {
             if let Some(result) =
-                Self::get_url_exact_destructured(&self.pool, host, path, "").await?
+                Self::get_url_exact_destructured(&self.pool, host, path, "", manual_reviews_only)
+                    .await?
             {
                 return Ok(Some(result));
             }
@@ -374,16 +382,24 @@ impl Database {
     }
 
     /// Find and get short info for a URL designations entry matching the given URL, if any.
-    pub async fn get_url(&self, url: &SanitizedUrl) -> Result<Option<UrlInfoShort>, Error> {
+    pub async fn get_url(
+        &self,
+        url: &SanitizedUrl,
+        manual_reviews_only: bool,
+    ) -> Result<Option<UrlInfoShort>, Error> {
         // Try matching on query.
         if url.as_ref().query().is_some() {
-            if let Some(result) = self.get_url_inexact_with_query(url).await? {
+            if let Some(result) = self
+                .get_url_inexact_with_query(url, manual_reviews_only)
+                .await?
+            {
                 return Ok(Some(result));
             }
         }
 
         // Nothing found or no query. Either way,
-        self.get_url_inexact_assuming_no_query(url).await
+        self.get_url_inexact_assuming_no_query(url, manual_reviews_only)
+            .await
     }
 
     /// Find and get short info from the URL designations table for an entry with this ID, if any.
@@ -476,8 +492,12 @@ impl Database {
     }
 
     /// Find and get full info for a URL designations entry matching the given URL, if any.
-    pub async fn get_url_full(&self, url: &SanitizedUrl) -> Result<Option<UrlInfoFull>, Error> {
-        match self.get_url(url).await? {
+    pub async fn get_url_full(
+        &self,
+        url: &SanitizedUrl,
+        manual_reviews_only: bool,
+    ) -> Result<Option<UrlInfoFull>, Error> {
+        match self.get_url(url, manual_reviews_only).await? {
             Some(short) => self.get_url_by_id_full(short.id).await,
             None => Ok(None),
         }
@@ -612,6 +632,7 @@ impl Database {
             sanitized_url.host_str(),
             sanitized_url.path(),
             sanitized_url.query().unwrap_or(""),
+            false,
         )
         .await?
         .expect("Quantum state URL detected!! What?!?!");
@@ -767,7 +788,7 @@ impl Database {
         // Check for conflicting existing entries.
         // Note: the check is done on the main database connection.
         // This is fine with SQLite because the transaction made above is blocking all writes.
-        if let Some(existing) = self.get_url_full(sanitized_url).await? {
+        if let Some(existing) = self.get_url_full(sanitized_url, false).await? {
             if existing.designation() == UrlDesignation::Spam {
                 // If this marks it as spam, reject.
                 return Ok(SendToReviewResult::AlreadyInDatabase(existing));
@@ -910,7 +931,7 @@ impl Database {
         .fetch(&self.pool);
 
         while let Some((review_entry_id, sanitized_url)) = stream.try_next().await? {
-            let Some(info) = self.get_url(&sanitized_url).await? else {
+            let Some(info) = self.get_url(&sanitized_url, false).await? else {
                 // No existing entry. Probably still in review.
                 continue;
             };
@@ -1121,7 +1142,7 @@ mod tests {
         /// Returns IDs of an inexact and an exact match.
         async fn get_result(&self, url: &str) -> (Option<i64>, Option<i64>) {
             let url: SanitizedUrl = url.parse().unwrap();
-            let inexact = self.get_url(&url).await.unwrap().map(|x| x.id());
+            let inexact = self.get_url(&url, false).await.unwrap().map(|x| x.id());
             let exact = self.get_url_exact(&url).await.unwrap().map(|x| x.id());
 
             (inexact, exact)

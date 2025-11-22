@@ -370,18 +370,20 @@ pub async fn edit_message_into_a_review_keyboard(
     original_url: &Url,
     database: &Database,
 ) -> Result<(), RequestError> {
-    let best_match = database
-        .get_url_full(sanitized_url)
+    let best_manually_reviewed_match = database
+        .get_url_full(sanitized_url, true)
         .await
         .expect("Database died!");
 
-    let best_match_url = best_match.as_ref().map(UrlInfoFull::sanitized_url);
+    let best_manually_reviewed_match_url = best_manually_reviewed_match
+        .as_ref()
+        .map(UrlInfoFull::sanitized_url);
 
     let (text, buttons) = ReviewCallbackData::produce_review_keyboard_text_buttons(
         review_entry_id,
         sanitized_url,
         original_url,
-        best_match_url,
+        best_manually_reviewed_match_url,
     );
 
     let edit_result = bot
@@ -454,18 +456,20 @@ pub async fn send_review_keyboard(
     original_url: &Url,
     database: &Database,
 ) -> Result<Message, RequestError> {
-    let best_match = database
-        .get_url_full(sanitized_url)
+    let best_manually_reviewed_match = database
+        .get_url_full(sanitized_url, true)
         .await
         .expect("Database died!");
 
-    let best_match_url = best_match.as_ref().map(UrlInfoFull::sanitized_url);
+    let best_manually_reviewed_match_url = best_manually_reviewed_match
+        .as_ref()
+        .map(UrlInfoFull::sanitized_url);
 
     let (text, buttons) = ReviewCallbackData::produce_review_keyboard_text_buttons(
         review_entry_id,
         sanitized_url,
         original_url,
-        best_match_url,
+        best_manually_reviewed_match_url,
     );
 
     let mut request = bot

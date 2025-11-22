@@ -440,7 +440,7 @@ async fn handle_command_info(
         writeln!(response, "<b>For URL</b> {sanitized_url}:")
             .expect("Writing to a String never fails");
 
-        let short = match database.get_url(&sanitized_url).await {
+        let short = match database.get_url(&sanitized_url, false).await {
             Err(e) => {
                 write!(response, "DATABASE ERROR ON SHORT: {e:#?}\n\n")
                     .expect("Writing to a String never fails");
