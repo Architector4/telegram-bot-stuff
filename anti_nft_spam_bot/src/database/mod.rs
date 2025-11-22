@@ -453,15 +453,15 @@ impl Database {
         // Sanitized URL can NOT be derived from original URL.
         // Original URL might be a whole ass
         // different thing the review is made from.
-        let sanitized_url = SanitizedUrl::from_str(&format!("https://{host}{path}?{query}")).expect("Invalid sanitized URL found in database!");
-        let original_url = Url::from_str(original_url).expect("Invalid original URL found in database!");
+        let sanitized_url = SanitizedUrl::from_str(&format!("https://{host}{path}?{query}"))
+            .expect("Invalid sanitized URL found in database!");
+        let original_url =
+            Url::from_str(original_url).expect("Invalid original URL found in database!");
 
         //let (sanitized_url, original_url) = SanitizedUrl::from_str_with_original(original_url)
         //    .expect("Invalid URL found in database!");
         let designation = UrlDesignation::try_from(designation)
             .expect("Invalid URL designation found in database!");
-
-
 
         Ok(Some(UrlInfoFull {
             short: UrlInfoShort {
