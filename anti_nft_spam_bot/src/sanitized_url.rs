@@ -162,25 +162,6 @@ impl SanitizedUrl {
                     if host_str != "t.me" {
                         url.set_host(Some("t.me")).expect("t.me is a valid host");
                     }
-
-                    // Query params don't matter much for Telegram links.
-                    url.set_query(None);
-
-                    // Telegram usernames are at least 4 characters long.
-                    // If something is a username, we want to strip everything after it.
-
-                    let first_path_segment = url.path()[1..].split_once('/').map(|x| x.0);
-
-                    if first_path_segment.map(|x| x.len() >= 4).unwrap_or(false) {
-                        // Strip all path stuff after the first path segment.
-                        // So, for example, turn a link like "https://t.me/Architector_4/blah/blah"
-                        // into "https://t.me/Architector_4"
-                        let path_segments_count = url.path().chars().filter(|x| *x == '/').count();
-                        let mut segments = url.path_segments_mut().expect(CAN_BE_A_BASE);
-                        for _ in 1..path_segments_count {
-                            segments.pop();
-                        }
-                    }
                 }
                 x if x.ends_with(".t.me") => {
                     // It's a link like https://architector4.t.me/
@@ -566,21 +547,13 @@ mod tests {
 
     #[test]
     fn telegram_test() {
-        let expected_sanitized = "https://t.me/architector_4";
-
-        let url: SanitizedUrl = "t.me/Architector_4/?amogus#amogus".parse().unwrap();
-        assert_eq!(url.as_str(), expected_sanitized);
-
-        let url: SanitizedUrl = "http://Architector_4.t.me/".parse().unwrap();
-        assert_eq!(url.as_str(), expected_sanitized);
-
         let url: SanitizedUrl = "telegram.dog".parse().unwrap();
         assert_eq!(url.as_str(), "https://t.me/");
 
         let url: SanitizedUrl = "https://telegram.dog/Architector_4/amogus/amogus"
             .parse()
             .unwrap();
-        assert_eq!(url.as_str(), expected_sanitized);
+        assert_eq!(url.as_str(), "https://t.me/architector_4/amogus/amogus");
 
         let url: SanitizedUrl = "https://foo.bar.amogus.t.me/".parse().unwrap();
         assert_eq!(url.as_str(), "https://t.me/foo.bar.amogus");
