@@ -617,7 +617,7 @@ async fn handle_command_spam(
             break 'reject_from_admin;
         }
 
-        if !is_sender_admin_with_cache(bot, message, &mut replied_to_sent_by_admin_cache).await? {
+        if !is_sender_admin_with_cache(bot, reply_to, &mut replied_to_sent_by_admin_cache).await? {
             // The sender of the replied-to message isn't an admin.
             break 'reject_from_admin;
         }
