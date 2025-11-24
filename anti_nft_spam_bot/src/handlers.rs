@@ -50,7 +50,12 @@ pub async fn handle_message_new_or_edit(
 
             Ok(())
         }
-        _ => result,
+        Err(e) => {
+            log::error!("Error {e} when handling message:\n{message:#?}");
+
+            Err(e)
+        }
+        Ok(()) => Ok(()),
     }
 }
 
