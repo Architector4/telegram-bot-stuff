@@ -59,6 +59,7 @@ pub fn normalize(input: &str, output: &mut String) {
 
 /// Convenience wrapper around [`normalize`] that returns a new string with the result.
 #[must_use]
+#[allow(unused)]
 pub fn normalize_new_string(input: &str) -> String {
     let mut output = String::with_capacity(input.len());
     normalize(input, &mut output);
@@ -104,12 +105,23 @@ impl SanitizedUrl {
         }
 
         // Normalize the host.
+        //
+        // A hostname is guaranteed to only contain ASCII letters a through z (uppercase or
+        // lowercase), digits 0 through 9, and hyphen.
+        // Other possibilities are IPv4 and IPv6 addresses as the host: those are just digits,
+        // periods, and in IPv6's case, semicolons and square brackets.
+        //
+        // I assume that just lowercasing and removing "www" from start is enough here and the Url
+        // crate can normalize whatever else.
         {
             let host = url.host_str().expect("Check above ensures host is present");
-            let normalized = normalize_new_string(host);
-            let normalized = normalized.trim_start_matches("www.");
-            url.set_host(Some(normalized))
-                .expect("Normalizing host should not fail");
+
+            if host.starts_with("www.") || !host.chars().all(|x| x.is_ascii_lowercase()) {
+                let lowercased = host.to_ascii_lowercase();
+                let www_trimmed = lowercased.trim_start_matches("www.");
+                url.set_host(Some(www_trimmed))
+                    .expect("Lowercasing host should not fail");
+            }
         }
 
         // Some URLs like Signal's use fragments for security.
