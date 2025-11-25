@@ -652,7 +652,7 @@ async fn handle_command_spam(
     let sender_name_with_id = sender_name_prettyprint(message, true);
     let replied_to_sender_name_with_id = message
         .reply_to_message()
-        .map(|x| sender_name_prettyprint(x, true))
+        .map(|x| sender_name_prettyprint(x, false))
         .unwrap_or_default();
 
     // Keep track which categories of links have we seen.
