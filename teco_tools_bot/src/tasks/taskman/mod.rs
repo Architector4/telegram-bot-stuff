@@ -209,34 +209,58 @@ pub async fn task_completion_spinjob(taskman: Weak<Taskman>, premium: bool) {
             .await;
 
         if let Err(e) = result {
-            if let RequestError::Api(ApiError::MessageToReplyNotFound) = &e {
-                // The person requesting the command deleted their message or something.
-                // No need to care.
-            } else {
-                log::error!("ERROR when processing task: {e:#?}\nTask data: {task_data:#?}");
-                let _ = taskman
-                    .bot
-                    .archsendmsg(
-                        task_data.message.chat.id,
-                        concat!(
-                            "An error has occurred while processing this task. ",
-                            "The bot's owner will be notified to fix this."
-                        ),
-                        task_data.message.id,
-                    )
-                    .await;
-                sleep(Duration::from_secs(2)).await;
-                if let Err(e) = taskman
-                    .bot
-                    .archsendmsg(
-                        OWNER_ID,
-                        encode_text(&format!("ERROR: {e:#?}\n\nTask data: {task_data:#?}"))
-                            .as_ref(),
-                        None,
-                    )
-                    .await
+            match &e {
+                RequestError::Api(ApiError::MessageToReplyNotFound) => {
+                    // The person requesting the command deleted their message or something.
+                    // No need to care.
+                }
+                RequestError::Api(ApiError::BotKicked)
+                | RequestError::Api(ApiError::BotKickedFromSupergroup)
+                | RequestError::Api(ApiError::BotBlocked) => {
+                    // ah well.
+                }
+
+                RequestError::Api(ApiError::Unknown(x))
+                    if x.contains("not enough rights to send") =>
                 {
-                    log::error!("ERROR when sending the info above to the owner:\n{e:#?}");
+                    // Likely "not enough rights to send videos/photos/whatever to the chat".
+                    // Tell the user.
+                    let _ = taskman
+                        .bot
+                        .archsendmsg(
+                            task_data.message.chat.id,
+                            "Error: This bot is not allowed to send this type of media to this chat.",
+                            task_data.message.id,
+                        )
+                        .await;
+                }
+
+                _ => {
+                    log::error!("ERROR when processing task: {e:#?}\nTask data: {task_data:#?}");
+                    let _ = taskman
+                        .bot
+                        .archsendmsg(
+                            task_data.message.chat.id,
+                            concat!(
+                                "An error has occurred while processing this task. ",
+                                "The bot's owner will be notified to fix this."
+                            ),
+                            task_data.message.id,
+                        )
+                        .await;
+                    sleep(Duration::from_secs(2)).await;
+                    if let Err(e) = taskman
+                        .bot
+                        .archsendmsg(
+                            OWNER_ID,
+                            encode_text(&format!("ERROR: {e:#?}\n\nTask data: {task_data:#?}"))
+                                .as_ref(),
+                            None,
+                        )
+                        .await
+                    {
+                        log::error!("ERROR when sending the info above to the owner:\n{e:#?}");
+                    }
                 }
             }
         }
