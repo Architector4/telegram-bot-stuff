@@ -96,9 +96,24 @@ impl SanitizedUrl {
         static CAN_BE_A_BASE: &str =
             "URL shouldn't be cannot-be-a-base due to check at start of function";
 
-        if url.scheme() == "file" || !url.has_host() || url.cannot_be_a_base() {
+        // Reject a bunch of weird URLs.
+        if url.scheme() == "file" || url.cannot_be_a_base() {
             return None;
         }
+
+        if let Some(host) = url.host() {
+            if let Host::Domain(d) = host {
+                if !d.contains('.') {
+                    // If host is a hostname and has no period, then it's probably not a world wide web
+                    // link that could poossibly be a spam.
+                    return None;
+                }
+            }
+        } else {
+            // No host, no pass.
+            return None;
+        }
+
         if url.scheme() != "https" {
             // This discards a bunch of weird, likely invalid URLs while we're at it.
             url.set_scheme("https").ok()?;
@@ -706,5 +721,11 @@ mod tests {
             "https://example.com/"
         );
         assert_eq!(url.destructure_to_number(8), None);
+    }
+
+    #[test]
+    fn reject_with_no_period() {
+        let url = Url::parse("https://what/").unwrap();
+        assert_eq!(SanitizedUrl::new(url), None);
     }
 }
