@@ -302,6 +302,8 @@ pub async fn handle_command(
 "/mark_aggregator &lt;URL&gt; - Insert or update an entry for a URL as a link aggregator. ",
 "A link aggregator is considered to be not spam itself, but URLs below it will be automatically checked.\n\n",
 
+"/remove &lt;URL&gt; - Remove an URL from the database.\n\n",
+
 "/review - Initiate a review keyboard.\n\n",
 
 "/info &lt;URL&gt; - Find a database entry that matches this URL and print its contents.\n\n",
