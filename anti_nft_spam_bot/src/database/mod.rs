@@ -674,6 +674,40 @@ impl Database {
         })
     }
 
+    /// If the provided URL is found in the database, removes it and returns [`Some`]`(`[`UrlInfoShort`])`
+    /// describing the past entry, otherwise returns [`None`]
+    ///
+    /// You most likely want to call [`crate::actions::remove_url_with_log`] instead.
+    pub async fn remove_url(&self, url: &SanitizedUrl) -> Result<Option<UrlInfoShort>, Error> {
+        let mut trans = self.pool.begin().await?;
+
+        let Some(info) = Self::get_url_exact_destructured(
+            &mut *trans,
+            url.host_str(),
+            url.path(),
+            url.query().unwrap_or(""),
+            false,
+        )
+        .await?
+        else {
+            return Ok(None);
+        };
+
+        sqlx::query("DELETE FROM url_params WHERE url_id=?")
+            .bind(info.id)
+            .execute(&mut *trans)
+            .await?;
+
+        sqlx::query("DELETE FROM urls WHERE id=?")
+            .bind(info.id)
+            .execute(&mut *trans)
+            .await?;
+
+        trans.commit().await?;
+
+        Ok(Some(info))
+    }
+
     /// Gets whether or not admins of this chat want the bot to not show
     /// notifications about deleting a message.
     ///

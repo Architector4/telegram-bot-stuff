@@ -11,7 +11,7 @@ use teloxide::{
 use url::Url;
 
 use crate::{
-    database::{Database, InsertOrUpdateResult, UrlInfoFull},
+    database::{Database, InsertOrUpdateResult, UrlInfoFull, UrlInfoShort},
     misc::{chat_name_prettyprint, sender_name_prettyprint, user_name_prettyprint},
     sanitized_url::SanitizedUrl,
     types::{MessageDeleteReason, ReviewCallbackData, UrlDesignation},
@@ -286,6 +286,33 @@ pub async fn insert_or_update_url_with_log(
         .await?;
 
     Ok(result)
+}
+
+/// If the provided URL is found in the database, removes it and returns
+/// [`Some`]`(`[`UrlInfoShort`])` describing the past entry, and writes the fact of removal to the
+/// log, otherwise returns [`None`] with no logging.
+pub async fn remove_url_with_log(
+    bot: &Bot,
+    database: &Database,
+    reviewer_name: &str,
+    sanitized_url: &SanitizedUrl,
+) -> Result<Option<UrlInfoShort>, RequestError> {
+    let Some(past_info) = database
+        .remove_url(sanitized_url)
+        .await
+        .expect("Database died!")
+    else {
+        // We did nothing. Not worth logging.
+        return Ok(None);
+    };
+
+    // Change was enacted. Log it.
+    let log_message = format!("{reviewer_name}\n/remove\n{sanitized_url}");
+
+    bot.archsendmsg_no_link_preview(REVIEW_LOG_CHANNEL_ID, log_message.as_str(), None)
+        .await?;
+
+    Ok(Some(past_info))
 }
 
 /// Make a header in control chat. describing upcoming review keyboards. Should typically be

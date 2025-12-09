@@ -14,8 +14,8 @@ use crate::{
     actions::{
         authenticate_control, authenticate_control_of_sender, delete_message_as_spam,
         discard_review_keyboard, edit_message_into_a_new_review_keyboard,
-        insert_or_update_url_with_log, send_new_review_keyboard, send_review_header,
-        send_review_keyboard,
+        insert_or_update_url_with_log, remove_url_with_log, send_new_review_keyboard,
+        send_review_header, send_review_keyboard,
     },
     database::{Database, InsertOrUpdateResult, SendToReviewResult},
     misc::{
@@ -324,6 +324,7 @@ pub async fn handle_command(
         | "/mark_aggregator" => {
             handle_command_mark(bot, message, database, sender_name, command).await
         }
+        "/remove" => handle_command_remove(bot, message, database, sender_name).await,
         "/review" => handle_command_review(bot, message, database).await,
         "/info" => handle_command_info(bot, message, database).await,
         // NOTE: When adding new commands, also add them to `generate_bot_commands` function below.
@@ -571,6 +572,60 @@ async fn handle_command_mark(
         (false, false) => "\nPlease specify links. Replies don't count to avoid accidents.",
         (true, false) => "\nThese URLs are already marked as such.",
         (true, true) => "\nSome URLs are skipped as they are already marked as such.",
+        (false, true) => "",
+    };
+
+    response.push_str(footer);
+
+    bot.archsendmsg_no_link_preview(message.chat.id, response.as_str(), message.id)
+        .await?;
+
+    Ok(())
+}
+
+async fn handle_command_remove(
+    bot: &Bot,
+    message: &Message,
+    database: &Database,
+    sender_name: &str,
+) -> Result<(), RequestError> {
+    if !(message.chat.is_private() || message.chat.id == CONTROL_CHAT_ID) {
+        // Not an appropriate chat for this.
+        return Ok(());
+    }
+
+    if !authenticate_control_of_sender(bot, message).await? {
+        // Not someone who can remove stuff.
+        return Ok(());
+    }
+
+    let mut response = String::with_capacity(64);
+
+    // True if this has removed at least one link from the database.
+    let mut had_links_removed = false;
+    // True if at least one link, as specified, was not found in the database.
+    let mut had_links_not_found = false;
+
+    for (sanitized_url, _) in iterate_over_all_links(message) {
+        let past_info = remove_url_with_log(bot, database, sender_name, &sanitized_url)
+            .await
+            .expect("Database died!");
+
+        if past_info.is_some() {
+            response.push_str("Removed those URLs from the database:\n");
+            had_links_removed = true;
+        } else {
+            had_links_not_found = true;
+        }
+
+        response.push_str(sanitized_url.as_str());
+        response.push('\n');
+    }
+
+    let footer = match (had_links_not_found, had_links_removed) {
+        (false, false) => "\nPlease specify links. Replies don't count to avoid accidents.",
+        (true, false) => "\nLink(s) were not found in the database. Only exact matches are considered.",
+        (true, true) => "\nSome URLs were not found in the database. Only exact matches are considered.",
         (false, true) => "",
     };
 
