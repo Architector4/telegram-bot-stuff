@@ -181,12 +181,14 @@ async fn handle_message_new_or_edit_raw(
 
     if !is_edited {
         // Handle commands, potentially.
+        let sender_name_with_id = sender_name_prettyprint(message, true);
+
         handle_command(
             bot,
             me,
             message,
             database,
-            &sender_name,
+            &sender_name_with_id,
             sent_by_admin_cache,
         )
         .await?;
@@ -205,7 +207,7 @@ pub async fn handle_command(
     me: &Me,
     message: &Message,
     database: &Database,
-    sender_name: &str,
+    sender_name_with_id: &str,
     mut sent_by_admin_cache: Option<bool>,
 ) -> Result<(), RequestError> {
     let Some(mut text) = message.text_full() else {
@@ -322,9 +324,9 @@ pub async fn handle_command(
         "/spam" | "/scam" => handle_command_spam(bot, message, database, sent_by_admin_cache).await,
         "/mark_spam" | "/mark_url_spam" | "/mark_domain_spam" | "/mark_not_spam"
         | "/mark_aggregator" => {
-            handle_command_mark(bot, message, database, sender_name, command).await
+            handle_command_mark(bot, message, database, sender_name_with_id, command).await
         }
-        "/remove" => handle_command_remove(bot, message, database, sender_name).await,
+        "/remove" => handle_command_remove(bot, message, database, sender_name_with_id).await,
         "/review" => handle_command_review(bot, message, database).await,
         "/info" => handle_command_info(bot, message, database).await,
         // NOTE: When adding new commands, also add them to `generate_bot_commands` function below.
@@ -496,7 +498,7 @@ async fn handle_command_mark(
     bot: &Bot,
     message: &Message,
     database: &Database,
-    sender_name: &str,
+    sender_name_with_id: &str,
     command: &str,
 ) -> Result<(), RequestError> {
     if !(message.chat.is_private() || message.chat.id == CONTROL_CHAT_ID) {
@@ -536,7 +538,7 @@ async fn handle_command_mark(
         let result = insert_or_update_url_with_log(
             bot,
             database,
-            Some(sender_name),
+            Some(sender_name_with_id),
             &sanitized_url,
             &original_url,
             designation,
@@ -587,7 +589,7 @@ async fn handle_command_remove(
     bot: &Bot,
     message: &Message,
     database: &Database,
-    sender_name: &str,
+    sender_name_with_id: &str,
 ) -> Result<(), RequestError> {
     if !(message.chat.is_private() || message.chat.id == CONTROL_CHAT_ID) {
         // Not an appropriate chat for this.
@@ -607,19 +609,22 @@ async fn handle_command_remove(
     let mut had_links_not_found = false;
 
     for (sanitized_url, _) in iterate_over_all_links(message) {
-        let past_info = remove_url_with_log(bot, database, sender_name, &sanitized_url)
+        let past_info = remove_url_with_log(bot, database, sender_name_with_id, &sanitized_url)
             .await
             .expect("Database died!");
 
         if past_info.is_some() {
-            response.push_str("Removed those URLs from the database:\n");
-            had_links_removed = true;
+            if !had_links_removed {
+                response.push_str("Removed those URLs from the database:\n");
+                had_links_removed = true;
+            }
+
+            response.push_str(sanitized_url.as_str());
+            response.push('\n');
         } else {
             had_links_not_found = true;
         }
 
-        response.push_str(sanitized_url.as_str());
-        response.push('\n');
     }
 
     let footer = match (had_links_not_found, had_links_removed) {
