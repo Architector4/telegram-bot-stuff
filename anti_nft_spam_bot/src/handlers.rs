@@ -264,10 +264,16 @@ pub async fn handle_command(
     }
 
     let _params = &text[command_full_len..].trim_start();
+    
+    // Telegram "commands" are ASCII only and at most 32 characters long.
+    // We here don't *need* to apply those restrictions, but the length limit is worth having lol
+    if command.len() > 32 {
+        return Ok(());
+    }
 
     // Lowercase, if needed.
     let tmp;
-    if !command.chars().map(char::is_lowercase).any(|x| !x) {
+    if command.chars().any(|x| x.is_ascii_uppercase()) {
         tmp = command.to_lowercase();
         command = tmp.as_str();
     }
