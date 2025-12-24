@@ -308,7 +308,7 @@ pub async fn handle_command(
 "/mark_aggregator &lt;URL&gt; - Insert or update an entry for a URL as a link aggregator. ",
 "A link aggregator is considered to be not spam itself, but URLs below it will be automatically checked.\n\n",
 
-"/remove &lt;URL&gt; - Remove an URL from the database.\n\n",
+"/remove &lt;URL&gt; (or /forget) - Remove an URL entry from the database. Does not check on-review links.\n\n",
 
 "/review - Initiate a review keyboard.\n\n",
 
@@ -334,7 +334,7 @@ pub async fn handle_command(
         | "/mark_aggregator" => {
             handle_command_mark(bot, message, database, sender_name_with_id, command).await
         }
-        "/remove" => handle_command_remove(bot, message, database, sender_name_with_id).await,
+        "/remove" | "/forget" => handle_command_remove(bot, message, database, sender_name_with_id).await,
         "/review" => handle_command_review(bot, message, database).await,
         "/info" => handle_command_info(bot, message, database).await,
         // NOTE: When adding new commands, also add them to `generate_bot_commands` function below.
