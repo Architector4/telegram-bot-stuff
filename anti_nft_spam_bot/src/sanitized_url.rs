@@ -189,6 +189,15 @@ impl SanitizedUrl {
                     if host_str != "t.me" {
                         url.set_host(Some("t.me")).expect("t.me is a valid host");
                     }
+
+                    // Example URL: "https://t.me/joinchat/abc123"
+                    // We want to convert it to: "https://t.me/+abc123"
+                    // ...But to keep it consistent with path normalization code done above, it
+                    // should actually be: "https://t.me/%20abc123"
+                    if url.path().starts_with("/joinchat/") {
+                        let new_path = url.path().replace("/joinchat/", "/%20");
+                        url.set_path(&new_path);
+                    }
                 }
                 x if x.ends_with(".t.me") => {
                     // It's a link like https://architector4.t.me/
@@ -588,6 +597,9 @@ mod tests {
         // We do NOT want to strip the tag thing after the /m/
         let url: SanitizedUrl = "https://t.me/m/awawawawa".parse().unwrap();
         assert_eq!(url.as_str(), "https://t.me/m/awawawawa");
+
+        let url: SanitizedUrl = "https://t.me/joinchat/abc123".parse().unwrap();
+        assert_eq!(url.as_str(), "https://t.me/%20abc123");
     }
 
     #[test]
