@@ -271,7 +271,7 @@ impl SanitizedUrl {
                 }
                 "fixupx.com" | "fxtwitter.com" | "girlcockx.com" | "mobile.twitter.com"
                 | "mobile.x.com" | "stupidpenisx.com" | "twitter.com" | "vxtwitter.com"
-                | "x.com" | "hitlerx.com" | "cunnyx.com" | "fixvx.com" => {
+                | "x.com" | "hitlerx.com" | "cunnyx.com" | "fixvx.com" | "skibidix.com" => {
                     if host_str != "twitter.com" {
                         url.set_host(Some("twitter.com"))
                             .expect("twitter.com is a valid host");
