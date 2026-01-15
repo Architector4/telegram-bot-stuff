@@ -126,6 +126,7 @@ impl Task {
                 format: _,
                 resize_type,
                 quality,
+                spoiler,
             }
             | Task::VideoResize {
                 new_dimensions,
@@ -137,6 +138,7 @@ impl Task {
                 resize_curve: _,
                 type_pref: _,
                 quality,
+                spoiler,
             } => {
                 let media = data.message.get_media_info();
                 let media = match media {
@@ -212,7 +214,7 @@ impl Task {
                     if let ResizeType::ToSpoileredMedia { caption } = &mut resize_type {
                         (true, std::mem::take(caption))
                     } else {
-                        (false, String::new())
+                        (*spoiler, String::new())
                     };
 
                 let status_report_for_processing = status_report.clone();
@@ -428,11 +430,13 @@ impl Task {
             Task::AmenBreak {
                 shortest,
                 match_length,
+                spoiler,
             }
             | Task::LayerAudio {
                 shortest,
                 match_length,
                 meta: _,
+                spoiler,
             } => {
                 let media = data.message.get_media_info();
                 let media = match media {
@@ -529,6 +533,7 @@ impl Task {
                         .supports_streaming(true)
                         .width(send.final_width)
                         .height(send.final_height)
+                        .has_spoiler(*spoiler)
                         .reply_to(data.message.id);
                     request.thumbnail = send.thumbnail.map(InputFile::memory);
 

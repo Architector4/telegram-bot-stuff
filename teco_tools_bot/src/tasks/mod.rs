@@ -254,6 +254,8 @@ impl Display for VideoTypePreference {
     }
 }
 
+// Serde default tags are added for when new fields are added, to ensure tasks from an older
+// version of the bot still decode.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Task {
     Amogus {
@@ -269,6 +271,8 @@ pub enum Task {
         resize_type: ResizeType,
         /// Between 1 and 100.
         quality: NonZeroU8,
+        #[serde(default)]
+        spoiler: bool,
     },
     VideoResize {
         /// Signed integer to allow specifying negative resolutions
@@ -285,6 +289,8 @@ pub enum Task {
         type_pref: VideoTypePreference,
         /// Between 1 and 100.
         quality: NonZeroU8,
+        #[serde(default)]
+        spoiler: bool,
     },
     /// Optical Character Recognition, i.e. extracting text from an image
     Ocr,
@@ -296,11 +302,15 @@ pub enum Task {
     AmenBreak {
         shortest: bool,
         match_length: bool,
+        #[serde(default)]
+        spoiler: bool,
     },
     LayerAudio {
         meta: FileMeta,
         shortest: bool,
         match_length: bool,
+        #[serde(default)]
+        spoiler: bool,
     },
     Reencode,
 }
@@ -361,6 +371,7 @@ impl Task {
                 resize_curve: _,
                 type_pref: _,
                 quality,
+                spoiler,
             }
             | Task::ImageResize {
                 new_dimensions,
@@ -369,6 +380,7 @@ impl Task {
                 format: _,
                 resize_type,
                 quality,
+                spoiler,
             } => {
                 if let ResizeType::ToSticker
                 | ResizeType::ToCustomEmoji
@@ -416,17 +428,23 @@ impl Task {
                     write_param!("Resize curve", resize_curve)?;
                 }
 
-                writeln!(output, "<b>Quality</b>: {quality}%")
+                writeln!(output, "<b>Quality</b>: {quality}%")?;
+
+                write_param!("Spoiler", spoiler)?;
+
+                Ok(())
             }
             Task::Ocr => Ok(()),
             Task::AmenBreak {
                 shortest,
                 match_length,
+                spoiler,
             }
             | Task::LayerAudio {
                 meta: _,
                 shortest,
                 match_length,
+                spoiler,
             } => {
                 let text_shortest = if *shortest { "shortest" } else { "longest" };
                 writeln!(
@@ -445,6 +463,8 @@ impl Task {
                         "<b>Keep speed</b>, making result not a perfect loop"
                     )?;
                 }
+
+                write_param!("Spoiler", spoiler)?;
 
                 Ok(())
             }
@@ -527,6 +547,7 @@ impl Task {
             format: ImageFormat::Webp,
             resize_type: ResizeType::ToSticker,
             quality: NonZeroU8::new(92).unwrap(),
+            spoiler: false,
         }
     }
     pub fn default_to_custom_emoji() -> Task {
@@ -537,6 +558,7 @@ impl Task {
             format: ImageFormat::Webp,
             resize_type: ResizeType::ToCustomEmoji,
             quality: NonZeroU8::new(92).unwrap(),
+            spoiler: false,
         }
     }
     pub fn default_to_spoilered_image(width: i32, height: i32, caption: String) -> Task {
@@ -547,6 +569,7 @@ impl Task {
             format: ImageFormat::Jpeg,
             resize_type: ResizeType::ToSpoileredMedia { caption },
             quality: NonZeroU8::new(92).unwrap(),
+            spoiler: false,
         }
     }
     pub fn default_to_spoilered_video(width: i32, height: i32, caption: String) -> Task {
@@ -573,6 +596,7 @@ impl Task {
             format,
             resize_type,
             quality: NonZeroU8::new(92).unwrap(),
+            spoiler: false,
         }
     }
     pub fn default_video_resize(
@@ -599,6 +623,7 @@ impl Task {
             resize_curve: ResizeCurve::default(),
             type_pref,
             quality: NonZeroU8::new(100).unwrap(),
+            spoiler: false,
         }
     }
     pub fn default_ocr() -> Task {
@@ -614,6 +639,7 @@ impl Task {
         Task::AmenBreak {
             shortest: false,
             match_length: true,
+            spoiler: false,
         }
     }
     pub fn default_layer_audio(meta: FileMeta) -> Task {
@@ -621,6 +647,7 @@ impl Task {
             meta,
             shortest: false,
             match_length: true,
+            spoiler: false,
         }
     }
     pub fn default_reencode() -> Task {

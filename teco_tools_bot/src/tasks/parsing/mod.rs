@@ -179,6 +179,7 @@ impl Task {
                             "Can't be less than -1024 or bigger than 1024.\n",
                             "<code>quality</code>: Quality level, between 1% and 100%. ",
                             "For videos, this compresses each frame to JPG before encoding to create a compressed effect.\n",
+                            "<code>spoiler</code>: Spoiler output media.\n",
                             "\n",
                             "Only for images:\n",
                             "<code>format</code>: Output image format. Can be \"webp\" or \"jpg\".\n",
@@ -214,6 +215,7 @@ impl Task {
                             "<code>method</code>: Resize method. Can only be \"fit\" (default), \"stretch\" or \"crop\".\n",
                             "<code>quality</code>: Quality level, between 1% and 100%. ",
                             "For videos, this compresses each frame to JPG before encoding to create a compressed effect.\n",
+                            "<code>spoiler</code>: Spoiler output media.\n",
                             "\n",
                             "Only for images:\n",
                             "<code>format</code>: Output image format. Can be \"webp\" or \"jpg\".\n",
@@ -236,19 +238,21 @@ impl Task {
                 }
             },
             Task::Ocr => "",
-            Task::AmenBreak { shortest: _, match_length: _ } =>
+            Task::AmenBreak { shortest: _, match_length: _, spoiler: _ } =>
                 concat!(
                     "<b>Possible parameters for this command:</b>\n",
                     "<code>shortest</code>: Pick shortest length between video and the amen break instead of longest.\n\n",
                     "<code>keepspeed</code>: Don't match speed of video to make its length a whole integer of the amen break. ",
-                    "This is done by default to ensure the result is a perfect loop.",
+                    "This is done by default to ensure the result is a perfect loop.\n",
+                    "<code>spoiler</code>: Spoiler output media.\n",
                 ),
-            Task::LayerAudio{meta: _, shortest: _, match_length: _ } =>
+            Task::LayerAudio{meta: _, shortest: _, match_length: _, spoiler: _ } =>
                 concat!(
                     "<b>Possible parameters for this command:</b>\n",
                     "<code>shortest</code>: Pick shortest length between video and audio instead of longest.\n\n",
                     "<code>keepspeed</code>: Don't match speed of video to make its length a whole integer of audio. ",
-                    "This is done by default to ensure the result is a perfect loop.",
+                    "This is done by default to ensure the result is a perfect loop.\n",
+                    "<code>spoiler</code>: Spoiler output media.\n",
                     "\n\n",
                     "To pick an audio, reply to a message that has some with /pickaudio.",
                 ),
@@ -258,7 +262,8 @@ impl Task {
                     "<b>Possible parameters for this command:</b>\n",
                     "<code>t</code>: Temperature. the higher this is, the wilder the output can become. ",
                     "Can only be between 0 and 1. 0 (default) means autodetect a good value.\n",
-                    "<code>english</code>: Translate to English when transcribing.",
+                    "<code>english</code>: Translate to English when transcribing.\n",
+                    "<code>spoiler</code>: Spoiler output media.\n",
 
                 ),
             Task::Reencode => "",
@@ -304,6 +309,8 @@ impl Task {
             }
         };
 
+        let spoiler_parser = |data: &str| (data == "spoiler").then_some(true).ok_or(());
+
         let params = Tokenizer::new(params);
 
         match self {
@@ -329,6 +336,7 @@ impl Task {
                 format: _,
                 ref resize_type,
                 mut quality,
+                mut spoiler,
             }
             | &Task::VideoResize {
                 new_dimensions: ref original_dimensions,
@@ -340,6 +348,7 @@ impl Task {
                 resize_curve: _,
                 type_pref: _,
                 mut quality,
+                mut spoiler,
             } => {
                 if let ResizeType::ToSticker
                 | ResizeType::ToCustomEmoji
@@ -456,6 +465,8 @@ impl Task {
                         new_dimensions,
                         dimensions_parser_err
                     );
+
+                    parse_plain_param_with_parser_optional!(param, spoiler, spoiler_parser);
 
                     parse_plain_param_with_parser_optional!(param, new_dimensions, max_parser);
                     parse_plain_param_with_parser_optional!(param, new_dimensions, max_fit_parser);
@@ -627,6 +638,7 @@ impl Task {
                         type_pref: r#type,
                         resize_curve: curve,
                         quality,
+                        spoiler,
                     })
                 } else {
                     Ok(Task::ImageResize {
@@ -636,26 +648,26 @@ impl Task {
                         resize_type,
                         format,
                         quality,
+                        spoiler,
                     })
                 }
             }
             Task::Ocr => Ok(Task::Ocr),
-            Task::AmenBreak { .. } | Task::LayerAudio { .. } => {
-                let (meta, mut shortest, mut match_length) = if let Task::AmenBreak {
-                    shortest,
-                    match_length,
-                } = self
-                {
-                    (None, *shortest, *match_length)
-                } else if let Task::LayerAudio {
-                    meta,
-                    shortest,
-                    match_length,
-                } = self
-                {
-                    (Some(meta), *shortest, *match_length)
+            Task::AmenBreak {
+                mut shortest,
+                mut match_length,
+                mut spoiler,
+            }
+            | Task::LayerAudio {
+                meta: _,
+                mut shortest,
+                mut match_length,
+                mut spoiler,
+            } => {
+                let meta = if let Task::LayerAudio { meta, .. } = self {
+                    Some(meta)
                 } else {
-                    unreachable!();
+                    None
                 };
 
                 for param in params {
@@ -677,6 +689,9 @@ impl Task {
                     } else {
                         Err(())
                     });
+
+                    parse_plain_param_with_parser_optional!(param, spoiler, spoiler_parser);
+
                     parse_keyval_param!(param, shortest, help);
                     parse_stop!(param, help);
                 }
@@ -686,11 +701,13 @@ impl Task {
                         meta: meta.clone(),
                         shortest,
                         match_length,
+                        spoiler,
                     })
                 } else {
                     Ok(Task::AmenBreak {
                         shortest,
                         match_length,
+                        spoiler,
                     })
                 }
             }
