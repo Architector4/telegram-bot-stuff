@@ -196,15 +196,22 @@ async fn handle_message_new_or_edit_raw(
         // cases such as this, we want to retroactively delete all messages where that link was
         // seen that are elegible for deletion.
         //
-        // Therefore, if this isn't sent by an admin, tell the database about the links.
-        if !is_sender_admin_with_cache(bot, message, &mut sent_by_admin_cache).await? {
-            for (sanitized_url, _original_url) in iterate_over_all_links(message) {
-                if let Err(e) = database
-                    .link_sighted(message.chat.id, message.id, &sender_name, &sanitized_url)
-                    .await
-                {
-                    log::error!("Database failed to sight link {sanitized_url}!\n{e:?}");
-                }
+        // Therefore, tell the database about the links.
+        for (sanitized_url, _original_url) in iterate_over_all_links(message) {
+            // Only if this is *not* sent by a chat admin; we don't want to delete admin
+            // messages.
+            //
+            // It's fine to let this function run for every link; there's the cache after all lol
+            if is_sender_admin_with_cache(bot, message, &mut sent_by_admin_cache).await? {
+                // Sent by an admin. Just break, no need to iterate over everything.
+                break;
+            }
+
+            if let Err(e) = database
+                .link_sighted(message.chat.id, message.id, &sender_name, &sanitized_url)
+                .await
+            {
+                log::error!("Database failed to sight link {sanitized_url}!\n{e:?}");
             }
         }
     } // If not private or control chat
