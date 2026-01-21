@@ -154,7 +154,7 @@ async fn handle_message_new_or_edit_raw(
                 // Since all messages in an album are always sent by the same person, and only
                 // messages sent by non-admins are deleted, assume that this message is also by a
                 // non-admin.
-                sent_by_admin_cache = Some(true);
+                sent_by_admin_cache = Some(false);
             }
 
             if is_sender_admin_with_cache(bot, message, &mut sent_by_admin_cache).await? {

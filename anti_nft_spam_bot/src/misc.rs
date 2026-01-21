@@ -280,7 +280,7 @@ pub async fn is_message_spam(
     }
 
     if does_message_have_spam_links(message, database).await {
-        return Some(MessageDeleteReason::OfAlbumWithSpamMessage);
+        return Some(MessageDeleteReason::ContainsSpamLink);
     }
 
     None
