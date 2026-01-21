@@ -261,7 +261,7 @@ impl ReviewCallbackData {
 /// Use like this:
 ///
 /// `format!("Deleted a message from someuser {}", delete_reason);`
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MessageDeleteReason {
     /// Contains a spam link.
     ContainsSpamLink,

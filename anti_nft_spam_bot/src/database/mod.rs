@@ -674,7 +674,7 @@ impl Database {
         })
     }
 
-    /// If the provided URL is found in the database, removes it and returns [`Some`]`(`[`UrlInfoShort`])`
+    /// If the provided URL is found in the database, removes it and returns [`Some`]`(`[`UrlInfoShort`]`)`
     /// describing the past entry, otherwise returns [`None`]
     ///
     /// You most likely want to call [`crate::actions::remove_url_with_log`] instead.

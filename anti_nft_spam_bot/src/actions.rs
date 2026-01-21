@@ -289,7 +289,7 @@ pub async fn insert_or_update_url_with_log(
 }
 
 /// If the provided URL is found in the database, removes it and returns
-/// [`Some`]`(`[`UrlInfoShort`])` describing the past entry, and writes the fact of removal to the
+/// [`Some`]`(`[`UrlInfoShort`]`)` describing the past entry, and writes the fact of removal to the
 /// log, otherwise returns [`None`] with no logging.
 pub async fn remove_url_with_log(
     bot: &Bot,

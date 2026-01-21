@@ -19,7 +19,7 @@ use crate::{
     },
     database::{Database, InsertOrUpdateResult, SendToReviewResult},
     misc::{
-        does_message_have_spam_links, get_entity_url, is_sender_admin, is_sender_admin_with_cache,
+        get_entity_url, is_message_spam, is_sender_admin, is_sender_admin_with_cache,
         iterate_over_all_links, sender_name_prettyprint, user_name_prettyprint,
     },
     types::{MessageDeleteReason, ReviewCallbackData, UrlDesignation},
@@ -33,20 +33,39 @@ pub async fn handle_message_new_or_edit(
     message: Message,
     database: Arc<Database>,
 ) -> Result<(), RequestError> {
-    let result = handle_message_new_or_edit_raw(&bot, &me, &message, &database).await;
+    handle_message_handling_error(
+        &bot,
+        &message,
+        handle_message_new_or_edit_raw(&bot, &me, &message, &database).await,
+    )
+    .await
+}
 
+/// Error handler for `handle_message_new_or_edit_raw`. This is used in case the failure is fault
+/// of a user and shouldn't be logged.
+///
+/// Currently handles just the case where something has failed because the bot doesn't have admin
+/// rights in the relevant chat. This can happen when deleting a message, or when checking if a
+/// user is an admin of the chat lol
+async fn handle_message_handling_error(
+    bot: &Bot,
+    message: &Message,
+    result: Result<(), RequestError>,
+) -> Result<(), RequestError> {
     match result {
         Err(RequestError::Api(ApiError::Unknown(reason)))
             if reason.contains("CHAT_ADMIN_REQUIRED") =>
         {
-            // Bot is not an admin and the handler failed because of this. Be a bit more graceful
-            // about it than to just send it back.
-
-            bot.archsendmsg_no_link_preview(message.chat.id, concat!(
+            // Bot is not an admin and the handler failed because of this. Complain.
+            //
+            // The complain might fail too though. Funnily enough, it might fail for the same
+            // "CHAT_ADMIN_REQUIRED" error, if the bot isn't an admin and sending messages isn't
+            // allowed for non-admins, or for some other reason.
+            let _ = bot.archsendmsg_no_link_preview(message.chat.id, concat!(
                     "Failed to perform an operation because this bot is not an admin in this chat.\n\n",
                     "For proper functioning, please make this bot an admin with ability to remove messages, ",
                     "or remove it from this chat."
-            ), None).await?;
+            ), None).await;
 
             Ok(())
         }
@@ -65,7 +84,7 @@ async fn handle_message_new_or_edit_raw(
     bot: &Bot,
     me: &Me,
     message: &Message,
-    database: &Database,
+    database: &Arc<Database>,
 ) -> Result<(), RequestError> {
     if let Some(sender) = &message.from {
         if sender.id == me.id {
@@ -81,91 +100,105 @@ async fn handle_message_new_or_edit_raw(
     // This variable is used to have to check this at most once across this function.
     let mut sent_by_admin_cache: Option<bool> = None;
 
-    // This block below handles checking for spam and deleting the message, either now, or later due
-    // to a review of one of the URLs contained within.
-    if !message.chat.is_private() {
-        let mut deleted_this_message = false;
-
-        // This message might be in an album that we want to delete.
-        if let Some(album_id) = message.media_group_id() {
-            let last_deleted = database
-                .get_last_deleted_album_id(message.chat.id)
-                .await
-                .expect("Database died!");
-
-            if last_deleted.as_ref() == Some(album_id) {
-                // Matches album ID of last deleted spam message. Delete this too.
-                delete_message_as_spam(
-                    bot,
-                    database,
-                    message,
-                    Some(&sender_name),
-                    MessageDeleteReason::OfAlbumWithSpamMessage,
-                )
-                .await?;
-
-                deleted_this_message = true;
-            }
-        }
-
-        if !deleted_this_message && does_message_have_spam_links(message, database).await {
-            if is_sender_admin_with_cache(bot, message, &mut sent_by_admin_cache).await? {
-                if message.chat.id != CONTROL_CHAT_ID {
-                    bot.archsendmsg_no_link_preview(
-                        message.chat.id,
-                        "Skipping deleting a message from an admin containing a spam link.",
-                        None,
-                    )
-                    .await?;
-                }
-            } else {
-                delete_message_as_spam(
-                    bot,
-                    database,
-                    message,
-                    Some(&sender_name),
-                    MessageDeleteReason::ContainsSpamLink,
-                )
-                .await?;
-                deleted_this_message = true;
-            }
-        }
-
+    // If not private or control chat...
+    if !message.chat.is_private() && message.chat.id != CONTROL_CHAT_ID {
+        // First, check if the replied-to message is worth deleting and handle that.
         if let Some(reply_to) = message.reply_to_message() {
             // If this is a reply to another message within the same chat, check that message for
             // spam links too. Probably a second time over. A link in that message might have been
             // marked as spam since then.
-            if message.chat.id == reply_to.chat.id
-                && does_message_have_spam_links(reply_to, database).await
-                && !is_sender_admin(bot, reply_to).await?
-            {
-                delete_message_as_spam(
-                    bot,
-                    database,
-                    reply_to,
-                    None,
-                    MessageDeleteReason::ContainsSpamLink,
-                )
-                .await?;
+            if message.chat.id == reply_to.chat.id {
+                // We will be checking it for spam stuff and admin status and deleting it
+                // asynchronously, because such checks can potentially take a long time, and we
+                // want to handle the main message separately.
+                //
+                // Clone stuff to avoid ownership issues lol
+                let database = database.clone();
+                let reply_to = reply_to.clone();
+                let bot = bot.clone();
+
+                tokio::spawn(async move {
+                    let result = async {
+                        if let Some(message_delete_reason) =
+                            is_message_spam(&reply_to, &database).await
+                        {
+                            if is_sender_admin(&bot, &reply_to).await? {
+                                // If this *is* by an admin, no need to notify about not deleting it; we
+                                // probably did that already. Do nothing.
+                            } else {
+                                delete_message_as_spam(
+                                    &bot,
+                                    &database,
+                                    &reply_to,
+                                    None,
+                                    message_delete_reason,
+                                )
+                                .await?;
+                            }
+                        }
+
+                        Ok(())
+                    }
+                    .await;
+
+                    handle_message_handling_error(&bot, &reply_to, result).await
+                });
             }
         }
 
-        if deleted_this_message {
-            // This message was deleted as spam. No need for any further handling.
-            return Ok(());
+        if let Some(message_delete_reason) = is_message_spam(message, database).await {
+            if message_delete_reason == MessageDeleteReason::OfAlbumWithSpamMessage {
+                // This delete reason only appears if this is a message in an album that an item
+                // was deemed as spam and deleted already.
+                //
+                // Since all messages in an album are always sent by the same person, and only
+                // messages sent by non-admins are deleted, assume that this message is also by a
+                // non-admin.
+                sent_by_admin_cache = Some(true);
+            }
+
+            if is_sender_admin_with_cache(bot, message, &mut sent_by_admin_cache).await? {
+                // It's spam, but sent by an admin.
+                //
+                // It's likely that a chat admin is testing the bot for deletion behavior. Doing
+                // and saying nothing might lead people to believe the bot is broken or something,
+                // and sending spam is otherwise not a likely thing for an admin to do lol
+                if let Some(reason_str) = message_delete_reason.to_str() {
+                    // Except if this is in the control chat. We know it works :v
+                    if message.chat.id != CONTROL_CHAT_ID {
+                        bot.archsendmsg_no_link_preview(
+                            message.chat.id,
+                            format!("Skipping deleting a message from an admin {reason_str}.")
+                                .as_str(),
+                            None,
+                        )
+                        .await?;
+                    }
+                }
+            } else {
+                // Not sent by an admin. Explode.
+                delete_message_as_spam(
+                    bot,
+                    database,
+                    message,
+                    Some(&sender_name),
+                    MessageDeleteReason::ContainsSpamLink,
+                )
+                .await?;
+                // This message was deleted as spam. No need for any further handling.
+                return Ok(());
+            }
         }
 
         // Above passed. This message was not deleted as spam.
         //
-        // However, some of the links might be on review, and later might be marked as spam.
-        // In such case, we want to retroactively delete all messages where that link was seen that
-        // are elegible for deletion.
+        // However, some of the links might be on review, and later might be marked as spam. In
+        // cases such as this, we want to retroactively delete all messages where that link was
+        // seen that are elegible for deletion.
         //
-        // Therefore, tell the database about the links.
-        for (sanitized_url, _original_url) in iterate_over_all_links(message) {
-            // Only if this is *not* sent by a chat admin. We don't want to delete admin messages
-            // containing spam links.
-            if !is_sender_admin_with_cache(bot, message, &mut sent_by_admin_cache).await? {
+        // Therefore, if this isn't sent by an admin, tell the database about the links.
+        if !is_sender_admin_with_cache(bot, message, &mut sent_by_admin_cache).await? {
+            for (sanitized_url, _original_url) in iterate_over_all_links(message) {
                 if let Err(e) = database
                     .link_sighted(message.chat.id, message.id, &sender_name, &sanitized_url)
                     .await
@@ -174,7 +207,7 @@ async fn handle_message_new_or_edit_raw(
                 }
             }
         }
-    }
+    } // If not private or control chat
 
     // Above passed. This message was not deleted as spam and links were sighted.
     let is_edited = message.edit_date().is_some();
@@ -264,7 +297,7 @@ pub async fn handle_command(
     }
 
     let _params = &text[command_full_len..].trim_start();
-    
+
     // Telegram "commands" are ASCII only and at most 32 characters long.
     // We here don't *need* to apply those restrictions, but the length limit is worth having lol
     if command.len() > 32 {
@@ -334,7 +367,9 @@ pub async fn handle_command(
         | "/mark_aggregator" => {
             handle_command_mark(bot, message, database, sender_name_with_id, command).await
         }
-        "/remove" | "/forget" => handle_command_remove(bot, message, database, sender_name_with_id).await,
+        "/remove" | "/forget" => {
+            handle_command_remove(bot, message, database, sender_name_with_id).await
+        }
         "/review" => handle_command_review(bot, message, database).await,
         "/info" => handle_command_info(bot, message, database).await,
         // NOTE: When adding new commands, also add them to `generate_bot_commands` function below.
@@ -632,13 +667,16 @@ async fn handle_command_remove(
         } else {
             had_links_not_found = true;
         }
-
     }
 
     let footer = match (had_links_not_found, had_links_removed) {
         (false, false) => "\nPlease specify links. Replies don't count to avoid accidents.",
-        (true, false) => "\nLink(s) were not found in the database. Only exact matches are considered.",
-        (true, true) => "\nSome URLs were not found in the database. Only exact matches are considered.",
+        (true, false) => {
+            "\nLink(s) were not found in the database. Only exact matches are considered."
+        }
+        (true, true) => {
+            "\nSome URLs were not found in the database. Only exact matches are considered."
+        }
         (false, true) => "",
     };
 

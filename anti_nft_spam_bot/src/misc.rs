@@ -1,12 +1,13 @@
 use teloxide::{
     prelude::Requester,
-    types::{Chat, ChatMember, InlineKeyboardButton, Message, MessageEntityRef, User},
+    types::{Chat, InlineKeyboardButton, Message, MessageEntityRef, User},
     Bot, RequestError,
 };
 use url::Url;
 
 use crate::{
-    database::Database, sanitized_url::SanitizedUrl, spam_checker::is_url_spam, CONTROL_CHAT_ID,
+    database::Database, sanitized_url::SanitizedUrl, spam_checker::is_url_spam,
+    types::MessageDeleteReason, CONTROL_CHAT_ID,
 };
 
 /// Try to parse a string as a [`Url`] in a way that telegram parses it,
@@ -182,8 +183,11 @@ pub async fn is_sender_admin(bot: &Bot, message: &Message) -> Result<bool, Reque
             chat_full.linked_chat_id() == Some(sender_chat.id.0)
         }
     } else if let Some(user) = &message.from {
-        let ChatMember { kind, .. } = bot.get_chat_member(message.chat.id, user.id).await?;
-        kind.is_privileged()
+        // Might fail if the bot is not an admin lol
+        bot.get_chat_member(message.chat.id, user.id)
+            .await?
+            .kind
+            .is_privileged()
     } else {
         false
     };
@@ -207,9 +211,9 @@ pub async fn is_sender_admin_with_cache(
     Ok(result)
 }
 
-/// Iterate over all links that incriminate this message. This includes message entities, buttons,
-/// and, if the message is a reply to a message in another chat, all of the above of that message
-/// too.
+/// Iterate over all links that potentially incriminate this message. This includes message
+/// entities, buttons, and, if the message is a reply to a message in another chat, all of the
+/// above of that message too.
 pub fn iterate_over_all_links(
     message: &Message,
 ) -> impl Iterator<Item = (SanitizedUrl, Url)> + Send + Sync + '_ {
@@ -254,6 +258,32 @@ pub async fn does_message_have_spam_links(message: &Message, database: &Database
     }
 
     false
+}
+
+/// Checks if this message is classified as spam. Doesn't check if it's sent by an admin or in a
+/// private chat or somesuch. Returns a delete reason, if applicable.
+pub async fn is_message_spam(
+    message: &Message,
+    database: &Database,
+) -> Option<MessageDeleteReason> {
+    // This message might be in an album that we want to delete.
+    if let Some(album_id) = message.media_group_id() {
+        let last_deleted = database
+            .get_last_deleted_album_id(message.chat.id)
+            .await
+            .expect("Database died!");
+
+        if last_deleted.as_ref() == Some(album_id) {
+            // Matches album ID of last deleted spam message. Delete this too.
+            return Some(MessageDeleteReason::OfAlbumWithSpamMessage);
+        }
+    }
+
+    if does_message_have_spam_links(message, database).await {
+        return Some(MessageDeleteReason::OfAlbumWithSpamMessage);
+    }
+
+    None
 }
 
 #[cfg(test)]
