@@ -218,6 +218,11 @@ pub trait BotStuff {
         to: &mut Vec<u8>,
     ) -> impl Future<Output = Result<(), RequestError>> + Send;
 
+    fn download_file_to_temp(
+        &self,
+        file: &teloxide::types::File,
+    ) -> impl Future<Output = Result<NamedTempFile, RequestError>> + Send;
+
     fn download_file_to_temp_or_directly(
         &self,
         file: &FileMeta,
@@ -251,21 +256,36 @@ impl BotStuff for Bot {
         Ok(())
     }
 
+    async fn download_file_to_temp(
+        &self,
+        file: &teloxide::types::File,
+    ) -> Result<NamedTempFile, RequestError> {
+        let mut tempfile = tempfile::NamedTempFile::new().map_err(Arc::new)?;
+
+        if file.is_local() {
+            // If file is copy, just copy it over.
+            //std::fs::copy(&file.path, tempfile.path()).map_err(Arc::new)?;
+            let mut source = std::fs::File::open(&file.path).map_err(Arc::new)?;
+            std::io::copy(&mut source, &mut tempfile).map_err(Arc::new)?;
+        } else {
+            let reopened = tempfile.reopen().map_err(Arc::new)?;
+            let mut tokio_file = tokio::fs::File::from_std(reopened);
+            self.download_file(&file.path, &mut tokio_file).await?;
+        }
+
+        Ok(tempfile)
+    }
+
     async fn download_file_to_temp_or_directly(
         &self,
-        file: &FileMeta,
+        filemeta: &FileMeta,
     ) -> Result<(PathBuf, Option<NamedTempFile>), RequestError> {
-        let file = self.get_file(file.id.clone()).await?;
+        let file= self.get_file(filemeta.id.clone()).await?;
         if file.is_local() {
             // If file is local, just return that.
             Ok((std::path::PathBuf::from(file.path), None))
         } else {
-            // If the file is remote, make a tempfile and use that.
-            let tempfile = tempfile::NamedTempFile::new().map_err(Arc::new)?;
-
-            let reopened = tempfile.reopen().map_err(Arc::new)?;
-            let mut tokio_file = tokio::fs::File::from_std(reopened);
-            self.download_file(&file.path, &mut tokio_file).await?;
+            let tempfile = self.download_file_to_temp(&file).await?;
 
             Ok((tempfile.path().to_path_buf(), Some(tempfile)))
         }

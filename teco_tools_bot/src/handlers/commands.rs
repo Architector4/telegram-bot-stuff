@@ -1185,13 +1185,14 @@ async fn ffprobe(tp: TaskParams<'_>) -> Ret {
         ));
     };
 
-    let (path, _tempfile) =
-        teloxide_retry!(tp.bot.download_file_to_temp_or_directly(file.file).await)?;
+    let file = tp.bot.get_file(file.file.id.clone()).await?;
+
+    let tempfile = teloxide_retry!(tp.bot.download_file_to_temp(&file).await)?;
 
     let _ = tp.bot.typing(tp.message.chat.id).await;
 
     let stderr = match tokio::task::spawn_blocking(move || {
-        crate::tasks::completion::media_processing::ffprobe(&path)
+        crate::tasks::completion::media_processing::ffprobe(tempfile.path())
     })
     .await
     {
