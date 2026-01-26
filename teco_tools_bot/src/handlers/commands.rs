@@ -6,7 +6,7 @@ use std::{
 };
 
 use arch_bot_commons::{teloxide_retry, useful_methods::*};
-use html_escape::encode_text;
+use html_escape::{encode_text, encode_text_to_string};
 
 use teloxide::{
     payloads::{SendAnimationSetters, SendPhotoSetters, SendVideoSetters},
@@ -31,9 +31,10 @@ pub const COMMANDS: &[Command] = &[
     AMENBREAK,
     AMOGUS,
     DISTORT,
+    FFPROBE,
+    LAYERAUDIO,
     OCR,
     PICKAUDIO,
-    LAYERAUDIO,
     REENCODE,
     RESIZE,
     REVERSE_TEXT,
@@ -1166,6 +1167,52 @@ async fn layeraudio(tp: TaskParams<'_>) -> Ret {
     let task = unfail!(temp_task.parse_params(&tp));
 
     Ok(Ok(task))
+}
+
+pub const FFPROBE: Command = Command {
+    callname: "/ffprobe",
+    description: "Run ffprobe on a photo/video/GIF/file/whatnot and return results.",
+    function: wrap!(ffprobe),
+    hidden: false,
+};
+async fn ffprobe(tp: TaskParams<'_>) -> Ret {
+    let _ = tp.bot.typing(tp.message.chat.id).await;
+
+    let Some(file) = tp.message.get_media_info() else {
+        goodbye_cancel!(concat!(
+            "can't find a media or a file. ",
+            "This command needs to be used as either a reply or caption to one."
+        ));
+    };
+
+    let (path, _tempfile) =
+        teloxide_retry!(tp.bot.download_file_to_temp_or_directly(file.file).await)?;
+
+    let _ = tp.bot.typing(tp.message.chat.id).await;
+
+    let stderr = match tokio::task::spawn_blocking(move || {
+        crate::tasks::completion::media_processing::ffprobe(&path)
+    })
+    .await
+    {
+        Ok(Ok(x)) => x,
+        Ok(Err(e)) => goodbye_err!(e),
+        Err(join_error) => goodbye_err!(&format!("ffprobe thread panicked: {}", join_error)),
+    };
+
+    if stderr.is_empty() {
+        goodbye_err!("ffprobe returned no output");
+    }
+
+    let mut output = "<blockquote expandable><code>".to_string();
+    encode_text_to_string(stderr, &mut output);
+    output.push_str("</code></blockquote>");
+
+    tp.bot
+        .archsendmsg_no_link_preview(tp.message.chat.id, output.as_str(), tp.message.id)
+        .await?;
+
+    goodbye!();
 }
 
 #[cfg(test)]

@@ -567,6 +567,7 @@ pub fn check_if_has_video_audio(path: &std::path::Path) -> Result<(bool, bool), 
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, $desc))
         };
     }
+
     let checker = Command::new("ffprobe")
         .args([
             OsStr::new("-loglevel"),
@@ -1553,4 +1554,20 @@ pub fn reencode(
     }
 
     Err("Unknown file type.".to_string())
+}
+
+/// Runs `ffprobe` on a file and returns `stderr`.
+pub fn ffprobe(path: &std::path::Path) -> Result<String, std::io::Error> {
+    let ffprobe_results = Command::new("ffprobe")
+        .args([OsStr::new("-hide_banner"), path.as_os_str()])
+        .stdout(Stdio::null()) // ffprobe outputs on stderr only by default lol
+        .stderr(Stdio::piped())
+        .spawn()?
+        .wait_with_output()?;
+
+    let stderr = String::from_utf8_lossy(&ffprobe_results.stderr)
+        .trim()
+        .to_string();
+
+    Ok(stderr)
 }
