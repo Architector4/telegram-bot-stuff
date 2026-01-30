@@ -14,7 +14,7 @@ use sqlx::{
 use teloxide::types::{ChatId, MediaGroupId, MessageId};
 use url::Url;
 
-use crate::{misc::parse_url_like_telegram, sanitized_url::SanitizedUrl, types::UrlDesignation};
+use crate::{sanitized_url::SanitizedUrl, types::UrlDesignation};
 
 pub use sqlx::Error;
 
@@ -1037,132 +1037,133 @@ impl Database {
             .fetch_one(&self.pool)
     }
 
-    /// Imports data from the old, pre-rewrite version of this bot.
-    ///
-    /// For database schema of the old bot, see:
-    /// <https://github.com/Architector4/telegram-bot-stuff/blob/6205ce670f6625a0754e04d534a16b137122d3ff/anti_nft_spam_bot/src/database/mod.rs>
-    #[allow(unused)]
-    pub async fn import_from_old_database(self: &Arc<Self>) -> Result<(), Error> {
-        enum IsSpamOld {
-            No = 0,
-            Yes = 1,
-            Maybe = 2,
-        }
-        impl From<u8> for IsSpamOld {
-            fn from(value: u8) -> Self {
-                use IsSpamOld::*;
-                match value {
-                    value if value == No as u8 => No,
-                    value if value == Yes as u8 => Yes,
-                    value if value == Maybe as u8 => Maybe,
-                    _ => panic!("Unknown value: {value}"),
-                }
-            }
-        }
+    // This old code needs flume as a dependency to work.
+    ///// Imports data from the old, pre-rewrite version of this bot.
+    /////
+    ///// For database schema of the old bot, see:
+    ///// <https://github.com/Architector4/telegram-bot-stuff/blob/6205ce670f6625a0754e04d534a16b137122d3ff/anti_nft_spam_bot/src/database/mod.rs>
+    //#[allow(unused)]
+    //pub async fn import_from_old_database(self: &Arc<Self>) -> Result<(), Error> {
+    //    enum IsSpamOld {
+    //        No = 0,
+    //        Yes = 1,
+    //        Maybe = 2,
+    //    }
+    //    impl From<u8> for IsSpamOld {
+    //        fn from(value: u8) -> Self {
+    //            use IsSpamOld::*;
+    //            match value {
+    //                value if value == No as u8 => No,
+    //                value if value == Yes as u8 => Yes,
+    //                value if value == Maybe as u8 => Maybe,
+    //                _ => panic!("Unknown value: {value}"),
+    //            }
+    //        }
+    //    }
 
-        async fn receiver_task(
-            database: Arc<Database>,
-            receiver: flume::Receiver<(SanitizedUrl, Url, UrlDesignation)>,
-        ) {
-            while let Ok((sanitized_url, url, designation)) = receiver.recv() {
-                database
-                    .insert_or_update_url(&sanitized_url, &url, designation, false)
-                    .await
-                    .expect("Failed to insert into database!");
-            }
-        }
+    //    async fn receiver_task(
+    //        database: Arc<Database>,
+    //        receiver: flume::Receiver<(SanitizedUrl, Url, UrlDesignation)>,
+    //    ) {
+    //        while let Ok((sanitized_url, url, designation)) = receiver.recv() {
+    //            database
+    //                .insert_or_update_url(&sanitized_url, &url, designation, false)
+    //                .await
+    //                .expect("Failed to insert into database!");
+    //        }
+    //    }
 
-        let (sender, receiver) = flume::bounded(64);
+    //    let (sender, receiver) = flume::bounded(64);
 
-        let receiver_task = tokio::spawn(receiver_task(self.clone(), receiver));
+    //    let receiver_task = tokio::spawn(receiver_task(self.clone(), receiver));
 
-        let oldpool = SqlitePoolOptions::new()
-            .max_connections(32)
-            .connect_with(
-                SqliteConnectOptions::from_str("sqlite:spam_domains.sqlite")
-                    .expect("SQLite connect options should be valid")
-                    .pragma("cache_size", "-32768")
-                    .foreign_keys(true) // Already  default, but doesn't hurt being explicit.
-                    .busy_timeout(std::time::Duration::from_secs(600)),
-            )
-            .await?;
+    //    let oldpool = SqlitePoolOptions::new()
+    //        .max_connections(32)
+    //        .connect_with(
+    //            SqliteConnectOptions::from_str("sqlite:spam_domains.sqlite")
+    //                .expect("SQLite connect options should be valid")
+    //                .pragma("cache_size", "-32768")
+    //                .foreign_keys(true) // Already  default, but doesn't hurt being explicit.
+    //                .busy_timeout(std::time::Duration::from_secs(600)),
+    //        )
+    //        .await?;
 
-        let oldpool_for_hide_deletes = oldpool.clone();
-        let database_for_hide_deletes = self.clone();
+    //    let oldpool_for_hide_deletes = oldpool.clone();
+    //    let database_for_hide_deletes = self.clone();
 
-        let hide_deletes_task = tokio::spawn(async move {
-            let mut hide_deletes_stream = sqlx::query("SELECT chatid FROM hide_deletes")
-                .map(|row: SqliteRow| ChatId(row.get(0)))
-                .fetch(&oldpool_for_hide_deletes);
+    //    let hide_deletes_task = tokio::spawn(async move {
+    //        let mut hide_deletes_stream = sqlx::query("SELECT chatid FROM hide_deletes")
+    //            .map(|row: SqliteRow| ChatId(row.get(0)))
+    //            .fetch(&oldpool_for_hide_deletes);
 
-            while let Some(chatid) = hide_deletes_stream
-                .try_next()
-                .await
-                .expect("Old database died!")
-            {
-                database_for_hide_deletes
-                    .set_hide_deletes(chatid, true)
-                    .await
-                    .expect("Database died!");
-            }
-        });
+    //        while let Some(chatid) = hide_deletes_stream
+    //            .try_next()
+    //            .await
+    //            .expect("Old database died!")
+    //        {
+    //            database_for_hide_deletes
+    //                .set_hide_deletes(chatid, true)
+    //                .await
+    //                .expect("Database died!");
+    //        }
+    //    });
 
-        let old_domains_stream = sqlx::query("SELECT domain, example_url, is_spam FROM domains;")
-            .map(|row: SqliteRow| {
-                let domain =
-                    SanitizedUrl::from_str(row.get(0)).expect("Invalid domain in database!");
-                let example_url =
-                    parse_url_like_telegram(row.get(1)).expect("Invalid example URL in database!");
-                let is_spam = IsSpamOld::from(row.get::<u8, _>(2));
+    //    let old_domains_stream = sqlx::query("SELECT domain, example_url, is_spam FROM domains;")
+    //        .map(|row: SqliteRow| {
+    //            let domain =
+    //                SanitizedUrl::from_str(row.get(0)).expect("Invalid domain in database!");
+    //            let example_url =
+    //                crate::misc::parse_url_like_telegram(row.get(1)).expect("Invalid example URL in database!");
+    //            let is_spam = IsSpamOld::from(row.get::<u8, _>(2));
 
-                (domain, example_url, is_spam)
-            })
-            .fetch(&oldpool);
+    //            (domain, example_url, is_spam)
+    //        })
+    //        .fetch(&oldpool);
 
-        let old_urls_stream = sqlx::query("SELECT url, is_spam FROM urls")
-            .map(|row: SqliteRow| {
-                let (sanitized_url, url) = SanitizedUrl::from_str_with_original(row.get(0))
-                    .expect("Invalid example URL in database!");
-                let is_spam = IsSpamOld::from(row.get::<u8, _>(1));
+    //    let old_urls_stream = sqlx::query("SELECT url, is_spam FROM urls")
+    //        .map(|row: SqliteRow| {
+    //            let (sanitized_url, url) = SanitizedUrl::from_str_with_original(row.get(0))
+    //                .expect("Invalid example URL in database!");
+    //            let is_spam = IsSpamOld::from(row.get::<u8, _>(1));
 
-                (sanitized_url, url, is_spam)
-            })
-            .fetch(&oldpool);
+    //            (sanitized_url, url, is_spam)
+    //        })
+    //        .fetch(&oldpool);
 
-        let mut old_urls_chain =
-            futures_util::StreamExt::chain(old_domains_stream, old_urls_stream);
+    //    let mut old_urls_chain =
+    //        futures_util::StreamExt::chain(old_domains_stream, old_urls_stream);
 
-        let mut counter = 0usize;
+    //    let mut counter = 0usize;
 
-        while let Some((sanitized_url, url, is_spam)) = old_urls_chain.try_next().await? {
-            let designation = match is_spam {
-                IsSpamOld::Yes => UrlDesignation::Spam,
-                IsSpamOld::No => UrlDesignation::NotSpam,
-                IsSpamOld::Maybe => continue,
-            };
+    //    while let Some((sanitized_url, url, is_spam)) = old_urls_chain.try_next().await? {
+    //        let designation = match is_spam {
+    //            IsSpamOld::Yes => UrlDesignation::Spam,
+    //            IsSpamOld::No => UrlDesignation::NotSpam,
+    //            IsSpamOld::Maybe => continue,
+    //        };
 
-            sender
-                .send((sanitized_url, url, designation))
-                .expect("Send channel died!");
+    //        sender
+    //            .send((sanitized_url, url, designation))
+    //            .expect("Send channel died!");
 
-            counter += 1;
+    //        counter += 1;
 
-            if counter.is_multiple_of(10000) {
-                log::info!("Migrated {counter} URLs from old database...");
-            }
-        }
+    //        if counter.is_multiple_of(10000) {
+    //            log::info!("Migrated {counter} URLs from old database...");
+    //        }
+    //    }
 
-        log::info!("Done sending URLs for insertion...");
-        drop(sender);
+    //    log::info!("Done sending URLs for insertion...");
+    //    drop(sender);
 
-        receiver_task.await.expect("Receiver task failed!");
-        log::info!("Waiting for hide deletes sending to be done...");
-        hide_deletes_task.await.expect("Hide deletes task failed!");
+    //    receiver_task.await.expect("Receiver task failed!");
+    //    log::info!("Waiting for hide deletes sending to be done...");
+    //    hide_deletes_task.await.expect("Hide deletes task failed!");
 
-        log::info!("Old database imported.");
+    //    log::info!("Old database imported.");
 
-        Ok(())
-    }
+    //    Ok(())
+    //}
 }
 
 #[cfg(test)]
