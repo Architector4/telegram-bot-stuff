@@ -182,7 +182,7 @@ async fn handle_message_new_or_edit_raw(
                     database,
                     message,
                     Some(&sender_name),
-                    MessageDeleteReason::ContainsSpamLink,
+                    message_delete_reason,
                 )
                 .await?;
                 // This message was deleted as spam. No need for any further handling.
