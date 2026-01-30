@@ -5,10 +5,11 @@
 for i in . */; do
 	(
 		cd "$i" || return
-		cargo clippy&
-		cargo build&
-		cargo build --release&
-		cargo test&
+		chrt -i 0 ionice -c 3 cargo clippy&
+		chrt -i 0 ionice -c 3 cargo clippy --all-targets&
+		chrt -i 0 ionice -c 3 cargo build&
+		chrt -i 0 ionice -c 3 cargo build --release&
+		chrt -i 0 ionice -c 3 cargo test&
 		wait
 		)&
 done
