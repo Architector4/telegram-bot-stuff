@@ -1178,14 +1178,31 @@ pub const FFPROBE: Command = Command {
 async fn ffprobe(tp: TaskParams<'_>) -> Ret {
     let _ = tp.bot.typing(tp.message.chat.id).await;
 
-    let Some(file) = tp.message.get_media_info() else {
-        goodbye_cancel!(concat!(
-            "can't find a media or a file. ",
-            "This command needs to be used as either a reply or caption to one."
-        ));
+    let file_meta = match tp.message.get_media_info() {
+        Some(media) => {
+            if media.is_vector_sticker {
+                goodbye_cancel!("can't work with animated stickers.");
+            }
+            media.file
+        }
+        None => {
+            let Some(document) = tp
+                .message
+                .document()
+                .or_else(|| tp.message.reply_to_message().and_then(|x| x.document()))
+            else {
+                goodbye_cancel!(concat!(
+                    "can't find a media. ",
+                    "This command needs to be used as either a reply or caption to one."
+                ));
+            };
+            &document.file
+        }
     };
 
-    let file = tp.bot.get_file(file.file.id.clone()).await?;
+    check_too_large!(file_meta);
+
+    let file = tp.bot.get_file(file_meta.id.clone()).await?;
 
     let tempfile = teloxide_retry!(tp.bot.download_file_to_temp(&file).await)?;
 
