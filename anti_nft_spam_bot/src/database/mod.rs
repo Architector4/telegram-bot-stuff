@@ -966,7 +966,7 @@ impl Database {
 
         while let Some((review_entry_id, sanitized_url)) = stream.try_next().await? {
             let Some(info) = self.get_url(&sanitized_url, false).await? else {
-                // No existing entry. Probably still in review.
+                // No URL entries matching this review queue entry.
                 continue;
             };
 
