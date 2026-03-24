@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     future::Future,
     io::Write,
     pin::Pin,
@@ -1264,7 +1265,13 @@ async fn to_file(tp: TaskParams<'_>) -> Ret {
     let mut buf = Vec::with_capacity(file.size as usize);
     teloxide_retry!(tp.bot.download_file_to_vec(file, &mut buf).await)?;
 
-    let file = InputFile::memory(buf).file_name(name.clone().unwrap_or("the file".to_string()));
+    let name = if let Some(name) = name {
+        Cow::Owned(format!("{}.file", name))
+    } else {
+        Cow::Borrowed("the.file")
+    };
+
+    let file = InputFile::memory(buf).file_name(name);
 
     tp.bot
         .send_document(tp.message.chat.id, file)
