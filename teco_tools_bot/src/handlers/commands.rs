@@ -26,28 +26,29 @@ use crate::{
 };
 
 pub const COMMANDS: &[Command] = &[
-    START,
-    HELP,
     AMENBREAK,
     AMOGUS,
     DISTORT,
     FFPROBE,
+    HELP,
     LAYERAUDIO,
     OCR,
     PICKAUDIO,
+    PREMIUM,
     REENCODE,
     RESIZE,
     REVERSE_TEXT,
     ROT_TEXT,
     SPOILER,
+    START,
     TO_CUSTOM_EMOJI,
+    TO_FILE,
     TO_GIF,
     TO_STICKER,
     TO_VIDEO,
     TRANSCRIBE,
-    ____SEPARATOR,
-    PREMIUM,
     UNPREMIUM,
+    ____SEPARATOR,
 ];
 
 pub type Ret = Result<Result<Task, TaskError>, RequestError>;
@@ -655,7 +656,7 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
     // Video stickers are excluded from this because they are VP9 WEBM, while
     // video files should preferably be H.264 MP4.
     if !video.is_sticker {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(video.file.size as usize);
         teloxide_retry!(tp.bot.download_file_to_vec(video.file, &mut buf).await)?;
         let should_send_directly = if to_gif {
             // If we need to send it as a gif, we need to ensure the input has
@@ -1228,6 +1229,46 @@ async fn ffprobe(tp: TaskParams<'_>) -> Ret {
 
     tp.bot
         .archsendmsg_no_link_preview(tp.message.chat.id, output.as_str(), tp.message.id)
+        .await?;
+
+    goodbye!();
+}
+
+pub const TO_FILE: Command = Command {
+    callname: "/to_file",
+    description: concat!(
+        "Resend a media or something as a \"Document\". ",
+        "Useful for some clients that disallow downloading some types of media."
+    ),
+    function: wrap!(to_file),
+    hidden: false,
+};
+async fn to_file(tp: TaskParams<'_>) -> Ret {
+    let _ = tp.bot.typing(tp.message.chat.id).await;
+
+    let name_and_file = tp
+        .message
+        .get_media_info()
+        .map(|x| (x.name, x.file))
+        .or_else(|| tp.message.document().map(|x| (&x.file_name, &x.file)));
+
+    let Some((name, file)) = name_and_file else {
+        goodbye_cancel!(concat!(
+            "can't find a media. ",
+            "This command needs to be used as either a reply or caption to one."
+        ));
+    };
+
+    check_too_large!(file);
+
+    let mut buf = Vec::with_capacity(file.size as usize);
+    teloxide_retry!(tp.bot.download_file_to_vec(file, &mut buf).await)?;
+
+    let file = InputFile::memory(buf).file_name(name.clone().unwrap_or("the file".to_string()));
+
+    tp.bot
+        .send_document(tp.message.chat.id, file)
+        .reply_to(tp.message.id)
         .await?;
 
     goodbye!();
