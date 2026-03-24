@@ -280,7 +280,7 @@ impl BotStuff for Bot {
         &self,
         filemeta: &FileMeta,
     ) -> Result<(PathBuf, Option<NamedTempFile>), RequestError> {
-        let file= self.get_file(filemeta.id.clone()).await?;
+        let file = self.get_file(filemeta.id.clone()).await?;
         if file.is_local() {
             // If file is local, just return that.
             Ok((std::path::PathBuf::from(file.path), None))
