@@ -866,7 +866,7 @@ async fn handle_command_spam(
 
     // All links marked as appropriate. Tell the user about it.
     let response = if some_marked {
-        "Thank you, links in this message will be reviewed for spam."
+        "Thank you, links in this message will be reviewed for spam by volunteers."
     } else if some_already_on_review {
         "Thank you, but the links in this message are already marked for review."
     } else if some_already_marked_spam {
