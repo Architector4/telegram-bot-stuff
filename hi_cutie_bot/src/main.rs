@@ -1,4 +1,4 @@
-use rand::{seq::IndexedRandom, Rng};
+use rand::{seq::IndexedRandom, RngExt};
 use regex::Regex;
 use std::{fs, sync::LazyLock};
 use teloxide::{
