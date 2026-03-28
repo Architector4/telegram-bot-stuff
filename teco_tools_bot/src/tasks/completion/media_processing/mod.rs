@@ -714,7 +714,7 @@ pub fn resize_video(
 
     let _ = status_report.send("Creating temp files...".to_string());
 
-    let outputfile = unfail!(NamedTempFile::new());
+    let mut outputfile = unfail!(NamedTempFile::new());
 
     let _ = status_report.send("Counting frames...".to_string());
 
@@ -842,30 +842,100 @@ pub fn resize_video(
 
     let _ = status_report.send("Initializing encoder...".to_string());
 
+    let input_frame_rate = input_frame_rate.to_string();
+
+    let mut encoder_args = vec![
+        OsStr::new("-y"),
+        OsStr::new("-loglevel"),
+        OsStr::new("error"),
+        OsStr::new("-f"),
+        OsStr::new("image2pipe"),
+        OsStr::new("-vcodec"),
+        OsStr::new(format.as_str_for_ffmpeg()),
+        OsStr::new("-framerate"),
+        OsStr::new(input_frame_rate.as_str()),
+        OsStr::new("-i"), // BMP stream
+        OsStr::new("-"),
+    ];
+
+    let mut vibrato_str_temp;
+    let bitrate_str_temp;
+
+    if has_audio && !strip_audio {
+        // Figure out audio in the args..
+        encoder_args.extend_from_slice(&[
+            OsStr::new("-i"), // Original input file
+            inputfile.as_ref(),
+            OsStr::new("-map"),
+            OsStr::new("0:v:0"),
+            OsStr::new("-map"),
+            OsStr::new("1:a:0"),
+        ]);
+
+        // Should we distort audio?
+        // Will exclude cases of 0.0, -0.0, and all the NaNs and infinities
+        let distort_audio = vibrato_hz.is_normal()
+            && vibrato_depth.is_normal()
+            && vibrato_hz >= 0.1
+            && vibrato_depth > 0.0;
+
+        vibrato_str_temp = String::new();
+
+        if distort_audio {
+            encoder_args.push(OsStr::new("-af"));
+
+            let mut vibrato_depth_left = vibrato_depth;
+            while vibrato_depth_left > 0.0 {
+                use std::fmt::Write;
+                write!(
+                    vibrato_str_temp,
+                    "vibrato=f={}:d={},aformat=s16p,",
+                    vibrato_hz.min(20000.0),
+                    vibrato_depth.min(1.0)
+                )
+                .expect("this literally cannot panic");
+
+                vibrato_depth_left -= 1.0;
+            }
+
+            encoder_args.push(vibrato_str_temp.as_ref());
+        }
+
+        // Quality tends to behave in an exponential manner.
+        // Normalize this to make it perceptually linear.
+        let quality = quality.get() - 1; // From 0 to 99.
+        let quality_pow_4 = u32::from(quality).pow(3); // From 0 to 99³.
+
+        // Bring it back to 0..99, then back to 1.100.
+        let quality = quality_pow_4 / 99u32.pow(2) + 1;
+        let quality = quality.min(100);
+
+        // We want to map "quality" to an audio bitrate.
+        // Specifically, map quality of 100 to 145k,
+        // and quality of 0 to 20k.
+        let bitrate = 20 + quality.saturating_add(quality / 4).min(125);
+        bitrate_str_temp = format!("{bitrate}k");
+
+        encoder_args.extend_from_slice(&[OsStr::new("-b:a"), bitrate_str_temp.as_ref()]);
+    }
+
+    encoder_args.extend_from_slice(&[
+        OsStr::new("-vf"), // Pad uneven pixels with black.
+        OsStr::new("pad=ceil(iw/2)*2:ceil(ih/2)*2"),
+        // I'd prefer the crop filter instead, but it leaves
+        // a chance of cropping to 0 width/height and stuff breaking :(
+        //OsStr::new("crop=trunc(iw/2)*2:trunc(ih/2)*2"),
+        OsStr::new("-pix_fmt"),
+        OsStr::new("yuv420p"),
+        OsStr::new("-movflags"),
+        OsStr::new("+faststart"),
+        OsStr::new("-f"),
+        OsStr::new("mp4"),
+        outputfile.path().as_os_str(),
+    ]);
+
     let encoder = Command::new("ffmpeg")
-        .args([
-            OsStr::new("-y"),
-            OsStr::new("-loglevel"),
-            OsStr::new("error"),
-            OsStr::new("-f"),
-            OsStr::new("image2pipe"),
-            OsStr::new("-vcodec"),
-            OsStr::new(format.as_str_for_ffmpeg()),
-            OsStr::new("-framerate"),
-            OsStr::new(input_frame_rate.to_string().as_str()),
-            OsStr::new("-i"),
-            OsStr::new("-"),
-            OsStr::new("-vf"), // Pad uneven pixels with black.
-            OsStr::new("pad=ceil(iw/2)*2:ceil(ih/2)*2"),
-            // I'd prefer the crop filter instead, but it leaves
-            // a chance of cropping to 0 width/height and stuff breaking :(
-            //OsStr::new("crop=trunc(iw/2)*2:trunc(ih/2)*2"),
-            OsStr::new("-pix_fmt"),
-            OsStr::new("yuv420p"),
-            OsStr::new("-f"),
-            OsStr::new("mp4"),
-            outputfile.path().as_os_str(),
-        ])
+        .args(encoder_args)
         .stdin(Stdio::piped())
         .spawn();
     let mut encoder = unfail!(encoder);
@@ -935,96 +1005,10 @@ pub fn resize_video(
     unfail!(decoder.wait());
     unfail!(encoder.wait());
 
-    let mut finalfile = if has_audio && !strip_audio {
-        let _ = status_report.send("Writing audio...".to_string());
-        // Now to transfer audio... This means we need a THIRD file to put the final result into.
-        // It's probably possible to do some funny mapping shenanigans to add the audio
-        // in at the same time as muxing the video, but I'm too lazy to figure that out right now.
-        let muxfile = unfail!(NamedTempFile::new());
-        // Will exclude cases of 0.0, -0.0, and all the NaNs and infinities
-        let distort_audio = vibrato_hz.is_normal()
-            && vibrato_depth.is_normal()
-            && vibrato_hz >= 0.1
-            && vibrato_depth > 0.0;
-
-        let mut args = vec![
-            OsStr::new("-y"),
-            OsStr::new("-loglevel"),
-            OsStr::new("error"),
-            OsStr::new("-i"),
-            inputfile.as_ref(),
-            OsStr::new("-i"),
-            outputfile.path().as_ref(),
-            OsStr::new("-c:v"),
-            OsStr::new("copy"),
-            OsStr::new("-map"),
-            OsStr::new("1:v:0"),
-            OsStr::new("-map"),
-            OsStr::new("0:a:0"),
-        ];
-
-        let mut vibrato_str_temp: String = String::new();
-
-        if distort_audio {
-            args.push(OsStr::new("-af"));
-
-            let mut vibrato_depth_left = vibrato_depth;
-            while vibrato_depth_left > 0.0 {
-                use std::fmt::Write;
-                write!(
-                    vibrato_str_temp,
-                    "vibrato=f={}:d={},aformat=s16p,",
-                    vibrato_hz.min(20000.0),
-                    vibrato_depth.min(1.0)
-                )
-                .expect("this literally cannot panic");
-
-                vibrato_depth_left -= 1.0;
-            }
-
-            args.push(vibrato_str_temp.as_ref());
-        }
-
-        // Quality tends to behave in an exponential manner.
-        // Normalize this to make it perceptually linear.
-        let quality = quality.get() - 1; // From 0 to 99.
-        let quality_pow_4 = u32::from(quality).pow(3); // From 0 to 99³.
-
-        // Bring it back to 0..99, then back to 1.100.
-        let quality = quality_pow_4 / 99u32.pow(2) + 1;
-        let quality = quality.min(100);
-
-        // We want to map "quality" to an audio bitrate.
-        // Specifically, map quality of 100 to 145k,
-        // and quality of 0 to 20k.
-        let bitrate = 20 + quality.saturating_add(quality / 4).min(125);
-        let bitrate_str = format!("{bitrate}k");
-
-        args.extend_from_slice(&[
-            OsStr::new("-b:a"),
-            bitrate_str.as_ref(),
-            OsStr::new("-f"),
-            OsStr::new("mp4"),
-            OsStr::new("-preset"),
-            OsStr::new("slow"),
-            OsStr::new("-movflags"),
-            OsStr::new("+faststart"),
-            muxfile.path().as_ref(),
-        ]);
-
-        let audiomuxer = Command::new("ffmpeg").args(args).spawn();
-
-        unfail!(unfail!(audiomuxer).wait());
-
-        muxfile
-    } else {
-        outputfile
-    };
-
-    unfail!(finalfile.reopen());
+    unfail!(outputfile.reopen());
 
     let mut output = Vec::new();
-    unfail!(finalfile.read_to_end(&mut output));
+    unfail!(outputfile.read_to_end(&mut output));
 
     let thumbnail = thumbnail.lock().expect("Thumbnail mutex died!").take();
 
@@ -1162,7 +1146,7 @@ fn ffmpeg_status_report(
             // Normal status report
             let _ = status_report.send(format!("{prefix}\n<code>{text}</code>"));
         } else {
-            println!("Error from ffmepg for operation {prefix}: {text}");
+            println!("Error from ffmpeg for operation {prefix}: {text}");
         }
         line_buf.clear();
     }
