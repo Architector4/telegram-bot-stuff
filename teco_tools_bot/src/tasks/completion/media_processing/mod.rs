@@ -1549,9 +1549,14 @@ pub fn ffprobe(path: &std::path::Path) -> Result<String, std::io::Error> {
         .spawn()?
         .wait_with_output()?;
 
-    let stderr = String::from_utf8_lossy(&ffprobe_results.stderr)
+    let mut output = String::from_utf8_lossy(&ffprobe_results.stderr)
         .trim()
         .to_string();
 
-    Ok(stderr)
+    // Also append filesize in megabytes
+    let file_size_megabytes = std::fs::metadata(path)?.len() as f64 / 1024.0 / 1024.0;
+    use std::fmt::Write;
+    let _ = writeln!(output, "\n\nFile size: {:.3} MB", file_size_megabytes);
+
+    Ok(output)
 }
