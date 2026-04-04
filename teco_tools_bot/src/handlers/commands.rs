@@ -20,8 +20,8 @@ use tempfile::NamedTempFile;
 
 use crate::{
     tasks::{
-        completion::media_processing::count_video_frames_and_framerate_and_audio_and_length,
-        parsing::TaskError, taskman::Taskman, ImageFormat, ResizeType, Task, VideoTypePreference,
+        completion::media_processing::video::get_media_metadata, parsing::TaskError,
+        taskman::Taskman, ImageFormat, ResizeType, Task, VideoTypePreference,
     },
     MAX_DOWNLOAD_SIZE_MEGABYTES, OWNER_ID,
 };
@@ -665,18 +665,23 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
 
             // Define the check as a closure.
             // This makes error handling here easier with the "?" operator.
-            let has_audio_closure = || {
+            let has_audio_closure = || async {
                 let mut tempfile = NamedTempFile::new()?;
                 tempfile.write_all(&buf)?;
                 tempfile.flush()?;
-                let has_audio =
-                    count_video_frames_and_framerate_and_audio_and_length(tempfile.path(), false)?
-                        .2;
+
+                let metadata =
+                    tokio::task::spawn_blocking(move || get_media_metadata(tempfile.path()))
+                        .await
+                        .expect("Join shouldn't fail")?;
+
+                let has_audio = !metadata.audio_length.is_zero();
+
                 Ok::<_, std::io::Error>(has_audio)
             };
 
             // If failed, assume it has audio, just in case.
-            let has_audio = has_audio_closure().unwrap_or(true);
+            let has_audio = has_audio_closure().await.unwrap_or(true);
 
             !has_audio
         } else {

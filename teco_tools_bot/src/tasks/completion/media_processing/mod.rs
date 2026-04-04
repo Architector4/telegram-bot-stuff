@@ -11,7 +11,6 @@ use std::{
     path::Path,
     process::{Child, ChildStdout, Command, Stdio},
     sync::{Arc, Mutex, OnceLock},
-    time::Duration,
 };
 
 use tokio::sync::watch::Sender;
@@ -472,24 +471,6 @@ fn get_bmp_width_height(buffer: &[u8]) -> Option<(u32, u32)> {
     Some((width, height))
 }
 
-pub fn count_video_frames_and_framerate_and_audio_and_length(
-    path: &std::path::Path,
-    count_audio: bool,
-) -> Result<(u64, f64, bool, Duration), std::io::Error> {
-    let metadata = video::get_media_metadata(path)?;
-
-    Ok((
-        metadata.frame_count,
-        metadata.frame_rate,
-        metadata.audio_length != Duration::ZERO,
-        if count_audio {
-            metadata.audio_length
-        } else {
-            metadata.video_length
-        },
-    ))
-}
-
 pub fn check_if_has_video_audio(path: &std::path::Path) -> Result<(bool, bool), std::io::Error> {
     macro_rules! goodbye {
         ($desc: expr) => {
@@ -647,31 +628,29 @@ pub fn resize_video(
 
     let _ = status_report.send("Counting frames...".to_string());
 
-    let (input_frame_count, input_frame_rate, has_audio, _input_length) = unfail!(
-        count_video_frames_and_framerate_and_audio_and_length(inputfile, false)
-    );
+    let input_metadata = unfail!(video::get_media_metadata(inputfile));
 
     let converting_function =
         move |(count, frame): (_, Result<Vec<u8>, _>), resize_type: ResizeType| match frame {
             Ok(frame) => {
                 let curved_width = resize_curve.apply_resize_for(
                     count,
-                    input_frame_count,
+                    input_metadata.frame_count,
                     f64::from(input_dimensions.0),
                     f64::from(width),
                 );
                 let curved_height = resize_curve.apply_resize_for(
                     count,
-                    input_frame_count,
+                    input_metadata.frame_count,
                     f64::from(input_dimensions.1),
                     f64::from(height),
                 );
                 let curved_rotation =
-                    resize_curve.apply_resize_for(count, input_frame_count, 0.0, rotation);
+                    resize_curve.apply_resize_for(count, input_metadata.frame_count, 0.0, rotation);
 
                 let curved_quality_f64 = resize_curve.apply_resize_for(
                     count,
-                    input_frame_count,
+                    input_metadata.frame_count,
                     100.0,
                     quality.get().into(),
                 );
@@ -771,7 +750,7 @@ pub fn resize_video(
 
     let _ = status_report.send("Initializing encoder...".to_string());
 
-    let input_frame_rate = input_frame_rate.to_string();
+    let input_frame_rate = input_metadata.frame_rate.to_string();
 
     let mut encoder_args = vec![
         OsStr::new("-y"),
@@ -790,7 +769,7 @@ pub fn resize_video(
     let mut vibrato_str_temp;
     let bitrate_str_temp;
 
-    if has_audio && !strip_audio {
+    if !input_metadata.audio_length.is_zero() && !strip_audio {
         // Figure out audio in the args..
         encoder_args.extend_from_slice(&[
             OsStr::new("-i"), // Original input file
@@ -875,8 +854,9 @@ pub fn resize_video(
     //    .map(|frame| -> Result<(), std::io::Error> {
     //        let frame = frame?;
     //        encoder_stdin.write_all(frame.1.as_slice())?;
-    //        if input_frame_count != 0 {
-    //            let _ = status_report.send(format!("Frame {} / {}", frame.0, input_frame_count));
+    //        if input_metadata.frame_count != 0 {
+    //            let _ = status_report.send(format!("Frame {} / {}", frame.0,
+    //            input_metadata.frame_count));
     //        } else {
     //            let _ = status_report.send(format!("Frame {}", frame.0));
     //        }
@@ -900,11 +880,13 @@ pub fn resize_video(
             frame_store.push(unfail!(new_frame));
             frames_received += 1;
 
-            if input_frame_count != 0 {
-                let _ =
-                    status_report.send(format!("Frame {frames_received} / {input_frame_count}"));
+            if input_metadata.frame_count != 0 {
+                let _ = status_report.send(format!(
+                    "Frame {} / {}",
+                    frames_received, input_metadata.frame_count
+                ));
             } else {
-                let _ = status_report.send(format!("Frame {frames_received}"));
+                let _ = status_report.send(format!("Frame {}", frames_received));
             }
         }
 
@@ -1124,14 +1106,10 @@ pub fn layer_audio_over_media(
     };
 
     let _ = status_report.send("Checking audio length...".to_string());
-    let (_input_frame_count, _input_frame_rate, _has_audio, audio_length) = unfail!(
-        count_video_frames_and_framerate_and_audio_and_length(path, true)
-    );
+    let audio_length = unfail!(video::get_media_metadata(path)).audio_length;
 
     let _ = status_report.send("Checking video length...".to_string());
-    let (_input_frame_count, _input_frame_rate, _has_audio, mut input_length) = unfail!(
-        count_video_frames_and_framerate_and_audio_and_length(inputfile, false)
-    );
+    let mut input_length = unfail!(video::get_media_metadata(inputfile)).video_length;
 
     let one_over_speed: f64 =
         if match_length && is_video && !input_length.is_zero() && !audio_length.is_zero() {
