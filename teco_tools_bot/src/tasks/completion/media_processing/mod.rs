@@ -1,5 +1,7 @@
 #![allow(clippy::manual_clamp)] // It's better here since it also gets rid of NaN
 
+// TODO: move a lot of things to video rewritten with ffmpeg lol
+pub mod video;
 pub mod whisper;
 
 use std::{
@@ -474,91 +476,18 @@ pub fn count_video_frames_and_framerate_and_audio_and_length(
     path: &std::path::Path,
     count_audio: bool,
 ) -> Result<(u64, f64, bool, Duration), std::io::Error> {
-    macro_rules! goodbye {
-        ($desc: expr) => {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, $desc))
-        };
-    }
+    let metadata = video::get_media_metadata(path)?;
 
-    let counter = Command::new("ffmpeg")
-        .args([
-            OsStr::new("-stats"),
-            OsStr::new("-i"),
-            path.as_ref(),
-            OsStr::new("-vsync"),
-            OsStr::new("passthrough"),
-            OsStr::new(if count_audio { "-vn" } else { "-an" }),
-            OsStr::new("-f"),
-            OsStr::new("null"),
-            OsStr::new("-"),
-        ])
-        .stderr(Stdio::piped())
-        .spawn()?;
-
-    let output = counter.wait_with_output()?;
-    let Ok(output) = String::from_utf8(output.stderr) else {
-        goodbye!("Frame counter returned non UTF-8 response");
-    };
-
-    // Output may be in a format like
-    // ...
-    // (OPTIONAL)  Stream #0:1(eng): Audio: pcm_s16le, 44100 Hz, stereo, s16, 1411 kb/s (default)
-    // ...
-    // frame= 2280 fps=0.0 q=-0.0 Lsize=N/A time=00:38:00.00 bitrate=N/A speed=3.19e+04x
-    // Whitespace after "frame=" is not guaranteed
-    //
-    // If input is audio only, the first 'frame = 2280' field will not be present.
-
-    let audio_stream_regex = Regex::new(r" *Stream .*: Audio:.*").unwrap();
-
-    let has_audio = audio_stream_regex.is_match(&output);
-
-    let frame_regex = Regex::new(r"frame= *(\d+).*").unwrap();
-    let time_regex = Regex::new(r".*time=(\d+):(\d+):(\d+)\.(\d+).*").unwrap();
-
-    let Some(last_line) = output.lines().last() else {
-        goodbye!("Frame counter returned no output");
-    };
-
-    let frame_count = if let Some(frame_capture) = frame_regex.captures(last_line) {
-        let Ok(frame_count): Result<u64, _> = frame_capture[1].parse() else {
-            goodbye!("Failed to parse frame count");
-        };
-        frame_count
-    } else {
-        0
-    };
-
-    let Some(time_captures) = time_regex.captures(last_line) else {
-        goodbye!("Frame counter returned an invalid response");
-    };
-
-    assert_eq!(time_captures.len(), 5);
-
-    let Ok(hours): Result<u64, _> = time_captures[1].parse() else {
-        goodbye!("Failed to parse hours in length");
-    };
-
-    let Ok(minutes): Result<u64, _> = time_captures[2].parse() else {
-        goodbye!("Failed to parse minutes in length");
-    };
-
-    let Ok(seconds): Result<u64, _> = time_captures[3].parse() else {
-        goodbye!("Failed to parse seconds in length");
-    };
-
-    let Ok(centiseconds): Result<u64, _> = time_captures[4].parse() else {
-        goodbye!("Failed to parse centiseconds in length");
-    };
-
-    let length: Duration = Duration::from_millis(10 * centiseconds)
-        + Duration::from_secs(seconds)
-        + Duration::from_secs(minutes * 60)
-        + Duration::from_secs(hours * 60 * 60);
-
-    let framerate = frame_count as f64 / length.as_secs_f64();
-
-    Ok((frame_count, framerate, has_audio, length))
+    Ok((
+        metadata.frame_count,
+        metadata.frame_rate,
+        metadata.audio_length != Duration::ZERO,
+        if count_audio {
+            metadata.audio_length
+        } else {
+            metadata.video_length
+        },
+    ))
 }
 
 pub fn check_if_has_video_audio(path: &std::path::Path) -> Result<(bool, bool), std::io::Error> {
