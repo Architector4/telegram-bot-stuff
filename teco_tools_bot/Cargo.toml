@@ -30,5 +30,7 @@ unicode-segmentation = "1.11.0"
 url = "2.5.0"
 
 # BIG boi
-ffmpeg-next = { version = "8.1.0", features = ["build", "build-lib-celt", "build-lib-dav1d", "build-lib-fdk-aac", "build-lib-gsm", "build-lib-ilbc", "build-lib-kvazaar", "build-lib-mp3lame", "build-lib-opencore-amrnb", "build-lib-opencore-amrwb", "build-lib-openh264", "build-lib-openjpeg", "build-lib-opus", "build-lib-snappy", "build-lib-speex", "build-lib-theora", "build-lib-twolame", "build-lib-vorbis", "build-lib-vpx", "build-lib-webp", "build-lib-x264", "build-lib-x265", "build-lib-xvid", "build-license-gpl", "build-license-nonfree", "build-license-version3"] }
+#ffmpeg-next = { version = "8.1.0", features = ["build", "build-lib-celt", "build-lib-dav1d", "build-lib-fdk-aac", "build-lib-gsm", "build-lib-ilbc", "build-lib-kvazaar", "build-lib-mp3lame", "build-lib-opencore-amrnb", "build-lib-opencore-amrwb", "build-lib-openh264", "build-lib-openjpeg", "build-lib-opus", "build-lib-snappy", "build-lib-speex", "build-lib-theora", "build-lib-twolame", "build-lib-vorbis", "build-lib-vpx", "build-lib-webp", "build-lib-x264", "build-lib-x265", "build-lib-xvid", "build-license-gpl", "build-license-nonfree", "build-license-version3"] }
 
+# actually nah
+ffmpeg-next = { version = "8.1.0" }
