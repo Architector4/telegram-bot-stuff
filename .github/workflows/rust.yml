@@ -27,7 +27,7 @@ jobs:
           ./configure --with-magick-plus-plus=no --with-perl=no 
           make -j
           sudo make install
-          sudo apt update && sudo apt install -y libmagickwand-dev nasm
+          sudo apt update && sudo apt install -y libmagickwand-dev clang libavcodec-dev libavformat-dev libavutil-dev pkg-config libcelt
     - uses: Swatinem/rust-cache@v2
     - name: Build
       run: cargo build --verbose
