@@ -9,6 +9,7 @@ for i in . */; do
 		chrt -i 0 ionice -c 3 cargo clippy --all-targets --keep-going&
 		chrt -i 0 ionice -c 3 cargo build --keep-going&
 		chrt -i 0 ionice -c 3 cargo build --release --keep-going&
+		chrt -i 0 ionice -c 3 cargo doc --keep-going&
 		chrt -i 0 ionice -c 3 cargo test&
 		wait
 		)&
