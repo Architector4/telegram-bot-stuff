@@ -53,6 +53,10 @@ async fn lol() {
 
     let bot = Bot::new(key);
 
+    // Clear bot commands. Mostly useful when running this in debug build on a debug bot that might
+    // still have command completions from a previous debug session with another bot lol
+    let _ = bot.set_my_commands([]).await;
+
     static REGEXMOMENT: LazyLock<regex::Regex> =
         LazyLock::new(|| Regex::new("(hi|hey)+,? +cutie.*").expect("Regex will always be valid"));
     static REGEXMOMENT_HERBERT: LazyLock<regex::Regex> =
