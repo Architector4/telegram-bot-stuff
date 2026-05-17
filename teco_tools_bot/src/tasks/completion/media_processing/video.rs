@@ -55,7 +55,6 @@ pub fn get_media_metadata(path: &Path) -> Result<MediaMetadata, FfmpegError> {
 
     let mut video_data =
         if let Some(best_video) = input.streams().best(ffmpeg_next::media::Type::Video) {
-            // TODO: in codec_context, set skip_frame to yes?? we don't care about the pixel data
             let mut codec_context =
                 ffmpeg_next::codec::context::Context::from_parameters(best_video.parameters())?;
 
