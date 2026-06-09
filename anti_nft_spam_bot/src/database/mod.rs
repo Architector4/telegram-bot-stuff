@@ -9,7 +9,7 @@ use sqlx::{
     error::ErrorKind,
     migrate::MigrateDatabase,
     sqlite::{Sqlite, SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
-    Executor, Row, Transaction,
+    AssertSqlSafe, Executor, Row, Transaction,
 };
 use teloxide::types::{ChatId, MediaGroupId, MessageId};
 use url::Url;
@@ -336,7 +336,7 @@ impl Database {
             sql_query
         };
 
-        let mut sql_query = sqlx::query(&sql_query_str)
+        let mut sql_query = sqlx::query(AssertSqlSafe(sql_query_str.as_str()))
             .bind(url.as_ref().host_str())
             .bind(url.as_ref().path())
             .bind(manual_reviews_only);
@@ -542,6 +542,9 @@ impl Database {
         .last_insert_rowid();
 
         if param_count > 0 {
+            // SQLx doesn't do array inserts of any kinds yet, so this is the best we can do for
+            // now with SQLite, aside from maybe making a temp table and inserting each param into
+            // it.
             let mut query = String::from("INSERT INTO url_params(url_id, param) VALUES ");
             for i in 0..param_count {
                 use std::fmt::Write;
@@ -552,7 +555,7 @@ impl Database {
             }
             query.push(';');
 
-            let mut query = sqlx::query(&query);
+            let mut query = sqlx::query(AssertSqlSafe(query.as_str()));
 
             for param in params {
                 query = query.bind(param);
