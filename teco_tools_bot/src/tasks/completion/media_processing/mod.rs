@@ -20,7 +20,8 @@ use regex::Regex;
 use tempfile::NamedTempFile;
 
 use crate::tasks::{
-    parsing::MAX_OUTPUT_MEDIA_DIMENSION_SIZE, ImageFormat, ResizeCurve, ResizeType,
+    completion::media_processing::video::MediaStream, parsing::MAX_OUTPUT_MEDIA_DIMENSION_SIZE,
+    ImageFormat, ResizeCurve, ResizeType,
 };
 
 /// Will error if [`ImageFormat::Preserve`] is sent.
@@ -691,7 +692,7 @@ pub fn resize_video(
         };
 
     // We computed all the internal stuff. Now to actually do something useful.
-    let (mut decoder, decoded_image_stream) = unfail!(SplitIntoBmps::from_file(inputfile));
+    let decoded_image_stream = unfail!(MediaStream::new(inputfile));
 
     let parallelisms = std::thread::available_parallelism()
         .map(std::num::NonZero::get)
@@ -731,9 +732,31 @@ pub fn resize_video(
     let thumbnail_for_sending_thread = thumbnail.clone();
 
     let sending_thread = std::thread::spawn(move || {
-        for frame in decoded_image_stream.enumerate() {
-            if frame.0 == 0 {
-                if let Ok(first_frame) = &frame.1 {
+        for (idx, frame) in decoded_image_stream
+            .filter(|x| {
+                // Filter for videos and errors
+                if let Ok(frame) = x {
+                    frame.data.video().is_some()
+                } else {
+                    true
+                }
+            })
+            .enumerate()
+        {
+            let frame: Result<Box<[u8]>, std::io::Error> = match frame {
+                Err(e) => Err(e.into()),
+                Ok(f) => {
+                    let Some(bmp) = f.data.as_bmp() else {
+                        // Not a video frame...
+                        continue;
+                    };
+
+                    bmp.map_err(|x| x.into())
+                }
+            };
+
+            if idx == 0 {
+                if let Ok(first_frame) = &frame {
                     // Generate a thumbnail...
                     if let Ok(new_thumb) = image_into_thumbnail(first_frame) {
                         *thumbnail_for_sending_thread
@@ -742,7 +765,8 @@ pub fn resize_video(
                     }
                 }
             }
-            if decoded_sender.send(frame).is_err() {
+
+            if decoded_sender.send((idx, frame.map(|x| x.into()))).is_err() {
                 return;
             }
         }
@@ -897,6 +921,7 @@ pub fn resize_video(
             .map(|x| x.0)
         {
             let next_frame = frame_store.swap_remove(next_frame_idx_in_store);
+
             unfail!(encoder_stdin.write_all(next_frame.1.as_slice()));
             next_frame_to_write += 1;
         }
@@ -913,7 +938,6 @@ pub fn resize_video(
     for h in converting_thread_handles {
         h.join().unwrap();
     }
-    unfail!(decoder.wait());
     unfail!(encoder.wait());
 
     unfail!(outputfile.reopen());

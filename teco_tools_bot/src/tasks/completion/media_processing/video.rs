@@ -1,6 +1,6 @@
 use std::{path::Path, time::Duration};
 
-use ffmpeg_next::{util::error::Error as FfmpegError, Rational};
+use ffmpeg_next::{format::Pixel, util::error::Error as FfmpegError, Packet, Rational};
 
 #[derive(Debug)]
 pub struct MediaMetadata {
@@ -39,7 +39,7 @@ fn time_base_to_duration(base: Rational, value: i64) -> Duration {
 
     let nanos = numerator / denominator;
 
-    if nanos > Duration::MAX.as_nanos() {
+    if nanos >= Duration::MAX.as_nanos() {
         // Saturate on overflow lol
         Duration::MAX
     } else {
@@ -52,9 +52,9 @@ pub fn get_media_metadata(path: &Path) -> Result<MediaMetadata, FfmpegError> {
     let mut audio_length = Duration::ZERO;
     let mut frame_count = 0;
 
-    let mut stream = MediaStream::new(path)?;
+    let stream = MediaStream::new(path)?;
 
-    while let Some(data) = stream.next_frame() {
+    for data in stream {
         let data = data?;
 
         match data.data {
@@ -174,14 +174,14 @@ impl MediaStream {
 }
 
 /// Either a video or an audio frame.
-pub enum VideoOrAudioFrame<'a> {
+pub enum VideoOrAudioFrame {
     #[allow(unused)]
-    Video(&'a ffmpeg_next::util::frame::Video),
+    Video(ffmpeg_next::util::frame::Video),
     #[allow(unused)]
-    Audio(&'a ffmpeg_next::util::frame::Audio),
+    Audio(ffmpeg_next::util::frame::Audio),
 }
 
-impl std::fmt::Debug for VideoOrAudioFrame<'_> {
+impl std::fmt::Debug for VideoOrAudioFrame {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Video(_) => "Video frame".fmt(f),
@@ -190,10 +190,36 @@ impl std::fmt::Debug for VideoOrAudioFrame<'_> {
     }
 }
 
+impl VideoOrAudioFrame {
+    pub fn video(&self) -> Option<&ffmpeg_next::util::frame::Video> {
+        match self {
+            Self::Video(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    #[allow(unused)]
+    pub fn audio(&self) -> Option<&ffmpeg_next::util::frame::Audio> {
+        match self {
+            Self::Audio(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    #[allow(unused)]
+    pub fn as_webp(&self) -> Option<Result<Box<[u8]>, FfmpegError>> {
+        self.video().map(convert_frame_to_lossless_webp)
+    }
+
+    pub fn as_bmp(&self) -> Option<Result<Box<[u8]>, FfmpegError>> {
+        self.video().map(convert_frame_to_lossless_bmp)
+    }
+}
+
 #[derive(Debug)]
-pub struct MediaStreamFrame<'a> {
+pub struct MediaStreamFrame {
     /// The frame itself.
-    pub data: VideoOrAudioFrame<'a>,
+    pub data: VideoOrAudioFrame,
     /// Approximate timestamp into the media where this frame should start being presented.
     pub approx_presentation_start: Option<Duration>,
     /// Approximate timestamp into the media where this frame should stop being presented. Might be
@@ -201,13 +227,9 @@ pub struct MediaStreamFrame<'a> {
     pub approx_presentation_end: Option<Duration>,
 }
 
-impl MediaStream {
-    /// Get the next frame.
-    ///
-    /// This is not an iterator because it returns a reference to itself to avoid extraneous
-    /// allocation. I could fix this with a separate wrapper iterator type to sort this out, but
-    /// bleh.
-    pub fn next_frame(&mut self) -> Option<Result<MediaStreamFrame<'_>, FfmpegError>> {
+impl Iterator for MediaStream {
+    type Item = Result<MediaStreamFrame, FfmpegError>;
+    fn next(&mut self) -> Option<Result<MediaStreamFrame, FfmpegError>> {
         macro_rules! unfail {
             ($thing: expr) => {{
                 match $thing {
@@ -237,7 +259,7 @@ impl MediaStream {
                             .map(|pts| time_base_to_duration(self.video_time_base, pts));
 
                         return Some(Ok(MediaStreamFrame {
-                            data: VideoOrAudioFrame::Video(&self.video_frame),
+                            data: VideoOrAudioFrame::Video(self.video_frame.clone()),
                             approx_presentation_start,
                             approx_presentation_end,
                         }));
@@ -265,7 +287,7 @@ impl MediaStream {
                             .map(|pts| time_base_to_duration(self.audio_time_base, pts));
 
                         return Some(Ok(MediaStreamFrame {
-                            data: VideoOrAudioFrame::Audio(&self.audio_frame),
+                            data: VideoOrAudioFrame::Audio(self.audio_frame.clone()),
                             approx_presentation_start,
                             approx_presentation_end,
                         }));
@@ -328,4 +350,96 @@ impl MediaStream {
             // If it's some other kind of random goofy ahh stream, we don't care. ✨
         }
     }
+}
+
+/// Converts an input video frame to a lossless, uncompressed WebP file.
+pub fn convert_frame_to_lossless_webp(
+    frame: &ffmpeg_next::util::frame::Video,
+) -> Result<Box<[u8]>, FfmpegError> {
+    let mut pixel_converter = ffmpeg_next::software::converter(
+        (frame.width(), frame.height()),
+        frame.format(),
+        Pixel::BGRA,
+    )?;
+
+    let mut converted_frame = ffmpeg_next::util::frame::Video::empty();
+
+    pixel_converter.run(frame, &mut converted_frame)?;
+
+    let codec = ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::WEBP)
+        .expect("WebP codec should exist????");
+
+    let mut encoder = ffmpeg_next::codec::Context::new_with_codec(codec)
+        .encoder()
+        .video()?;
+    encoder.set_time_base(Rational::new(1, 1));
+    encoder.set_format(Pixel::BGRA);
+    encoder.set_width(frame.width());
+    encoder.set_height(frame.height());
+
+    let mut webp_params = ffmpeg_next::Dictionary::new();
+    webp_params.set("lossless", "1");
+    webp_params.set("compression_level", "0");
+
+    let mut webp_encoder = encoder.open_with(webp_params)?;
+
+    webp_encoder.send_frame(&converted_frame)?;
+
+    webp_encoder.send_eof()?;
+
+    let mut packet = Packet::empty();
+
+    webp_encoder.receive_packet(&mut packet)?;
+
+    let Some(data) = packet.data() else {
+        return Err(FfmpegError::InvalidData);
+    };
+
+    // Ideally I'd avoid this copy, but unsafely copying the data causes a double free because it's
+    // probably reference counted by FFmpeg stuff or something. bleh.
+    Ok(data.into())
+}
+
+/// Converts an input video frame to a lossless, uncompressed BMP file.
+pub fn convert_frame_to_lossless_bmp(
+    frame: &ffmpeg_next::util::frame::Video,
+) -> Result<Box<[u8]>, FfmpegError> {
+    let mut pixel_converter = ffmpeg_next::software::converter(
+        (frame.width(), frame.height()),
+        frame.format(),
+        Pixel::BGRA,
+    )?;
+
+    let mut converted_frame = ffmpeg_next::util::frame::Video::empty();
+
+    pixel_converter.run(frame, &mut converted_frame)?;
+
+    let codec = ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::BMP)
+        .expect("BMP codec should exist????");
+
+    let mut encoder = ffmpeg_next::codec::Context::new_with_codec(codec)
+        .encoder()
+        .video()?;
+    encoder.set_time_base(Rational::new(1, 1));
+    encoder.set_format(Pixel::BGRA);
+    encoder.set_width(frame.width());
+    encoder.set_height(frame.height());
+
+    let mut bmp_encoder = encoder.open()?;
+
+    bmp_encoder.send_frame(&converted_frame)?;
+
+    bmp_encoder.send_eof()?;
+
+    let mut packet = Packet::empty();
+
+    bmp_encoder.receive_packet(&mut packet)?;
+
+    let Some(data) = packet.data() else {
+        return Err(FfmpegError::InvalidData);
+    };
+
+    // Ideally I'd avoid this copy, but unsafely copying the data causes a double free because it's
+    // probably reference counted by FFmpeg stuff or something. bleh.
+    Ok(data.into())
 }
