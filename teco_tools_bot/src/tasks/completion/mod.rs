@@ -134,6 +134,7 @@ impl Task {
                     resize_type,
                     quality,
                     spoiler,
+                    sharpen,
                 } = params;
 
                 let media = data.message.get_media_info();
@@ -182,6 +183,7 @@ impl Task {
                 let mut resize_type = resize_type.clone();
                 let rotation = *rotation;
                 let quality = *quality;
+                let sharpen = *sharpen;
 
                 let (vibrato_hz, vibrato_depth, resize_curve) = if let Task::VideoResize {
                     vibrato_hz,
@@ -244,6 +246,7 @@ impl Task {
                             input_dimensions,
                             resize_curve,
                             quality,
+                            sharpen,
                         )
                     })
                     .await
@@ -275,6 +278,7 @@ impl Task {
                             None,
                             false,
                             quality,
+                            sharpen,
                         )
                         .map_err(|e| e.to_string())
                     })

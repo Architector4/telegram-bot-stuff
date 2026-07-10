@@ -38,6 +38,7 @@ pub fn resize_image(
     output_size: Option<(u32, u32, bool)>,
     crop_rotation: bool,
     quality: NonZeroU8,
+    sharpen: f64,
 ) -> Result<Vec<u8>, MagickError> {
     if format == ImageFormat::Preserve {
         // yeah this isn't a MagickError, but we'd get one in the last line
@@ -250,7 +251,16 @@ pub fn resize_image(
     wand.set_image_compression_quality(quality)?;
     wand.set_compression_quality(quality)?;
 
-    // Do we need to apply output size?
+    static SHARPEN_LIMIT: f64 = 3.0;
+
+    // Let's make sure we don't burn the CPU lol
+    let mut sharpen = sharpen.abs().min(25.0);
+
+    while sharpen > 0.0 {
+        wand.sharpen_image(0.0, sharpen.min(SHARPEN_LIMIT))?;
+        // If it dips into the negatives, that's fine too.
+        sharpen -= SHARPEN_LIMIT;
+    }
 
     if quality < 100 {
         if format == ImageFormat::Webp {
@@ -553,6 +563,7 @@ pub fn resize_video(
     input_dimensions: (u32, u32),
     resize_curve: ResizeCurve,
     quality: NonZeroU8,
+    sharpen: f64,
 ) -> Result<VideoOutput, String> {
     macro_rules! unfail {
         ($thing: expr) => {
@@ -658,6 +669,9 @@ pub fn resize_video(
                 let curved_quality =
                     NonZeroU8::new(curved_quality_f64 as u8).unwrap_or(NonZeroU8::MIN);
 
+                let curved_sharpen =
+                    resize_curve.apply_resize_for(count, input_metadata.frame_count, 0.0, sharpen);
+
                 // Check if this operation changes the image at all.
                 // If the dimensions (both target and output) and rotation
                 // are the same, it doesn't.
@@ -666,6 +680,7 @@ pub fn resize_video(
                     && input_dimensions == Some((output_width, output_height))
                     && input_dimensions == Some((curved_width as u32, curved_height as u32))
                     && quality.get() >= 100
+                    && sharpen == 0.0
                 {
                     // It doesn't. Just return the same buffer directly.
                     Ok(frame)
@@ -680,6 +695,7 @@ pub fn resize_video(
                         Some((output_width, output_height, stretch_to_output_size)),
                         is_curved, // Prevent bounds bouncing.
                         curved_quality,
+                        curved_sharpen,
                     )
                 };
 

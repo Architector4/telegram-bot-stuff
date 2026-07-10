@@ -179,6 +179,8 @@ impl Task {
                             "Can't be less than -1024 or bigger than 1024.\n",
                             "<code>quality</code>: Quality level, between 1% and 100%. ",
                             "For videos, this compresses each frame to JPG before encoding to create a compressed effect.\n",
+                            "<code>sharpen</code>: Amount of image sharpening to apply. Can't be less than 0 or bigger than 25. ",
+                            "Default is 0.\n",
                             "<code>spoiler</code>: Spoiler output media.\n",
                             "\n",
                             "Only for images:\n",
@@ -215,6 +217,8 @@ impl Task {
                             "<code>method</code>: Resize method. Can only be \"fit\" (default), \"stretch\" or \"crop\".\n",
                             "<code>quality</code>: Quality level, between 1% and 100%. ",
                             "For videos, this compresses each frame to JPG before encoding to create a compressed effect.\n",
+                            "<code>sharpen</code>: Amount of image sharpening to apply. Can't be less than 0 or bigger than 100. ",
+                            "Default is 0.\n",
                             "<code>spoiler</code>: Spoiler output media.\n",
                             "\n",
                             "Only for images:\n",
@@ -338,6 +342,7 @@ impl Task {
                         ref resize_type,
                         mut quality,
                         mut spoiler,
+                        mut sharpen,
                     },
                 format: _,
             }
@@ -350,6 +355,7 @@ impl Task {
                         ref resize_type,
                         mut quality,
                         mut spoiler,
+                        mut sharpen,
                     },
                 vibrato_hz: _,
                 vibrato_depth: _,
@@ -522,6 +528,12 @@ impl Task {
                     }
 
                     parse_keyval_param_with_parser!(param, quality, quality_parser, help);
+                    parse_keyval_param_with_parser!(
+                        param,
+                        sharpen,
+                        sanitized_f64_parser(0.0, 25.0),
+                        help
+                    );
 
                     if let Token::KeyVal(k, v) = param {
                         let v = (k, v);
@@ -640,6 +652,7 @@ impl Task {
                     resize_type,
                     quality,
                     spoiler,
+                    sharpen,
                 };
 
                 if is_video {

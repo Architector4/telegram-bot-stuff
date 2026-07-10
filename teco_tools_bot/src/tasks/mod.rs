@@ -267,6 +267,7 @@ pub struct ImageResize {
     #[serde(default)]
     spoiler: bool,
     resize_type: ResizeType,
+    sharpen: f64,
 }
 
 // Serde default tags are added for when new fields are added, to ensure tasks from an older
@@ -416,6 +417,8 @@ impl Task {
 
                 writeln!(output, "<b>Quality</b>: {}%", params.quality)?;
 
+                write_param!("Sharpen:", params.sharpen)?;
+
                 write_param!("Spoiler", params.spoiler)?;
 
                 Ok(())
@@ -534,6 +537,7 @@ impl Task {
                 resize_type: ResizeType::ToSticker,
                 quality: NonZeroU8::new(92).unwrap(),
                 spoiler: false,
+                sharpen: 0.0,
             },
             format: ImageFormat::Webp,
         }
@@ -547,6 +551,7 @@ impl Task {
                 resize_type: ResizeType::ToCustomEmoji,
                 quality: NonZeroU8::new(92).unwrap(),
                 spoiler: false,
+                sharpen: 0.0,
             },
             format: ImageFormat::Webp,
         }
@@ -560,6 +565,7 @@ impl Task {
                 resize_type: ResizeType::ToSpoileredMedia { caption },
                 quality: NonZeroU8::new(92).unwrap(),
                 spoiler: false,
+                sharpen: 0.0,
             },
             format: ImageFormat::Jpeg,
         }
@@ -589,6 +595,7 @@ impl Task {
                 resize_type,
                 quality: NonZeroU8::new(92).unwrap(),
                 spoiler: false,
+                sharpen: 0.0,
             },
             format,
         }
@@ -619,6 +626,7 @@ impl Task {
                 resize_type,
                 quality: NonZeroU8::new(100).unwrap(),
                 spoiler: false,
+                sharpen: 0.0,
             },
         }
     }
