@@ -217,7 +217,7 @@ impl Task {
                             "<code>method</code>: Resize method. Can only be \"fit\" (default), \"stretch\" or \"crop\".\n",
                             "<code>quality</code>: Quality level, between 1% and 100%. ",
                             "For videos, this compresses each frame to JPG before encoding to create a compressed effect.\n",
-                            "<code>sharpen</code>: Amount of image sharpening to apply. Can't be less than 0 or bigger than 100. ",
+                            "<code>sharpen</code>: Amount of image sharpening to apply. Can't be less than 0 or bigger than 25. ",
                             "Default is 0.\n",
                             "<code>spoiler</code>: Spoiler output media.\n",
                             "\n",
