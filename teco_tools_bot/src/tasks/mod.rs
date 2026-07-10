@@ -254,6 +254,21 @@ impl Display for VideoTypePreference {
     }
 }
 
+/// Instructions on mutating a single image, either by itself or as a frame of a video.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImageResize {
+    /// Signed integer to allow specifying negative resolutions
+    /// as a way to signify mirroring the image.
+    new_dimensions: (i32, i32),
+    rotation: f64,
+    percentage: Option<f32>,
+    /// Between 1 and 100.
+    quality: NonZeroU8,
+    #[serde(default)]
+    spoiler: bool,
+    resize_type: ResizeType,
+}
+
 // Serde default tags are added for when new fields are added, to ensure tasks from an older
 // version of the bot still decode.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -262,35 +277,19 @@ pub enum Task {
         amogus: i32,
     },
     ImageResize {
-        /// Signed integer to allow specifying negative resolutions
-        /// as a way to signify mirroring the image.
-        new_dimensions: (i32, i32),
-        rotation: f64,
-        percentage: Option<f32>,
+        #[serde(flatten)]
+        params: ImageResize,
         format: ImageFormat,
-        resize_type: ResizeType,
-        /// Between 1 and 100.
-        quality: NonZeroU8,
-        #[serde(default)]
-        spoiler: bool,
     },
     VideoResize {
-        /// Signed integer to allow specifying negative resolutions
-        /// as a way to signify mirroring the image.
-        new_dimensions: (i32, i32),
-        rotation: f64,
-        percentage: Option<f32>,
-        resize_type: ResizeType,
+        #[serde(flatten)]
+        params: ImageResize,
         vibrato_hz: f64,
         vibrato_depth: f64,
         #[serde(default = "ResizeCurve::default")]
         resize_curve: ResizeCurve,
         #[serde(default = "VideoTypePreference::default")]
         type_pref: VideoTypePreference,
-        /// Between 1 and 100.
-        quality: NonZeroU8,
-        #[serde(default)]
-        spoiler: bool,
     },
     /// Optical Character Recognition, i.e. extracting text from an image
     Ocr,
@@ -362,29 +361,16 @@ impl Task {
                 wp!(amogus)
             }
             Task::VideoResize {
-                new_dimensions,
-                rotation,
-                percentage,
-                resize_type,
+                params,
                 vibrato_hz: _,
                 vibrato_depth: _,
                 resize_curve: _,
                 type_pref: _,
-                quality,
-                spoiler,
             }
-            | Task::ImageResize {
-                new_dimensions,
-                rotation,
-                percentage,
-                format: _,
-                resize_type,
-                quality,
-                spoiler,
-            } => {
+            | Task::ImageResize { params, format: _ } => {
                 if let ResizeType::ToSticker
                 | ResizeType::ToCustomEmoji
-                | ResizeType::ToSpoileredMedia { .. } = resize_type
+                | ResizeType::ToSpoileredMedia { .. } = params.resize_type
                 {
                     return Ok(());
                 }
@@ -394,25 +380,25 @@ impl Task {
                 if let Task::ImageResize { format, .. } = self {
                     write_param!("Format", format)?;
                 }
-                if *resize_type == ResizeType::Fit {
+                if params.resize_type == ResizeType::Fit {
                     write!(
                         output,
                         "<b>Size to fit</b>: {}x{}",
-                        new_dimensions.0, new_dimensions.1
+                        params.new_dimensions.0, params.new_dimensions.1
                     )?;
                 } else {
                     write!(
                         output,
                         "<b>Size</b>: {}x{}",
-                        new_dimensions.0, new_dimensions.1
+                        params.new_dimensions.0, params.new_dimensions.1
                     )?;
                 }
-                if let Some(percentage) = percentage {
+                if let Some(percentage) = params.percentage {
                     write!(output, ", or {percentage}%")?;
                 }
                 writeln!(output)?;
-                writeln!(output, "<b>Rotation</b>: {rotation}°")?;
-                write_param!("Resize method", resize_type)?;
+                writeln!(output, "<b>Rotation</b>: {}°", params.rotation)?;
+                write_param!("Resize method", params.resize_type)?;
 
                 if let Task::VideoResize {
                     vibrato_hz,
@@ -428,9 +414,9 @@ impl Task {
                     write_param!("Resize curve", resize_curve)?;
                 }
 
-                writeln!(output, "<b>Quality</b>: {quality}%")?;
+                writeln!(output, "<b>Quality</b>: {}%", params.quality)?;
 
-                write_param!("Spoiler", spoiler)?;
+                write_param!("Spoiler", params.spoiler)?;
 
                 Ok(())
             }
@@ -541,35 +527,41 @@ impl Task {
 impl Task {
     pub fn default_to_sticker() -> Task {
         Task::ImageResize {
-            new_dimensions: (512, 512),
-            rotation: 0.0,
-            percentage: None,
+            params: ImageResize {
+                new_dimensions: (512, 512),
+                rotation: 0.0,
+                percentage: None,
+                resize_type: ResizeType::ToSticker,
+                quality: NonZeroU8::new(92).unwrap(),
+                spoiler: false,
+            },
             format: ImageFormat::Webp,
-            resize_type: ResizeType::ToSticker,
-            quality: NonZeroU8::new(92).unwrap(),
-            spoiler: false,
         }
     }
     pub fn default_to_custom_emoji() -> Task {
         Task::ImageResize {
-            new_dimensions: (100, 100),
-            rotation: 0.0,
-            percentage: None,
+            params: ImageResize {
+                new_dimensions: (100, 100),
+                rotation: 0.0,
+                percentage: None,
+                resize_type: ResizeType::ToCustomEmoji,
+                quality: NonZeroU8::new(92).unwrap(),
+                spoiler: false,
+            },
             format: ImageFormat::Webp,
-            resize_type: ResizeType::ToCustomEmoji,
-            quality: NonZeroU8::new(92).unwrap(),
-            spoiler: false,
         }
     }
     pub fn default_to_spoilered_image(width: i32, height: i32, caption: String) -> Task {
         Task::ImageResize {
-            new_dimensions: (width, height),
-            rotation: 0.0,
-            percentage: None,
+            params: ImageResize {
+                new_dimensions: (width, height),
+                rotation: 0.0,
+                percentage: None,
+                resize_type: ResizeType::ToSpoileredMedia { caption },
+                quality: NonZeroU8::new(92).unwrap(),
+                spoiler: false,
+            },
             format: ImageFormat::Jpeg,
-            resize_type: ResizeType::ToSpoileredMedia { caption },
-            quality: NonZeroU8::new(92).unwrap(),
-            spoiler: false,
         }
     }
     pub fn default_to_spoilered_video(width: i32, height: i32, caption: String) -> Task {
@@ -590,13 +582,15 @@ impl Task {
         format: ImageFormat,
     ) -> Task {
         Task::ImageResize {
-            new_dimensions: (width, height),
-            rotation: 0.0,
-            percentage: Some(100.0),
+            params: ImageResize {
+                new_dimensions: (width, height),
+                rotation: 0.0,
+                percentage: Some(100.0),
+                resize_type,
+                quality: NonZeroU8::new(92).unwrap(),
+                spoiler: false,
+            },
             format,
-            resize_type,
-            quality: NonZeroU8::new(92).unwrap(),
-            spoiler: false,
         }
     }
     pub fn default_video_resize(
@@ -606,9 +600,6 @@ impl Task {
         type_pref: VideoTypePreference,
     ) -> Task {
         Task::VideoResize {
-            new_dimensions: (width, height),
-            rotation: 0.0,
-            percentage: Some(100.0),
             vibrato_hz: if resize_type.is_seam_carve() {
                 7.0
             } else {
@@ -619,11 +610,16 @@ impl Task {
             } else {
                 0.0
             },
-            resize_type,
             resize_curve: ResizeCurve::default(),
             type_pref,
-            quality: NonZeroU8::new(100).unwrap(),
-            spoiler: false,
+            params: ImageResize {
+                new_dimensions: (width, height),
+                rotation: 0.0,
+                percentage: Some(100.0),
+                resize_type,
+                quality: NonZeroU8::new(100).unwrap(),
+                spoiler: false,
+            },
         }
     }
     pub fn default_ocr() -> Task {

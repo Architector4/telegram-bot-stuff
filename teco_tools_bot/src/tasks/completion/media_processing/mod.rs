@@ -24,6 +24,8 @@ use crate::tasks::{
     ImageFormat, ResizeCurve, ResizeType,
 };
 
+use serde::{Serialize, Deserialize};
+
 /// Will error if [`ImageFormat::Preserve`] is sent.
 #[allow(clippy::too_many_arguments)]
 pub fn resize_image(

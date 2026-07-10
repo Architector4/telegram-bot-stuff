@@ -157,8 +157,8 @@ impl Task {
                     "• <code>/amogus -5</code>\n",
                 )
             }
-            Task::ImageResize { resize_type, ..} | Task::VideoResize { resize_type, ..}=> {
-                match resize_type {
+            Task::ImageResize { params, ..} | Task::VideoResize { params, ..}=> {
+                match params.resize_type {
                     ResizeType::ToSticker | ResizeType::ToCustomEmoji | ResizeType::ToSpoileredMedia { .. } => "",
                     ResizeType::SeamCarve { .. } =>
                         concat!(
@@ -330,25 +330,31 @@ impl Task {
                 Ok(Task::Amogus { amogus })
             }
             &Task::ImageResize {
-                new_dimensions: ref original_dimensions,
-                ref rotation,
-                percentage: _,
+                params:
+                    ImageResize {
+                        new_dimensions: ref original_dimensions,
+                        ref rotation,
+                        percentage: _,
+                        ref resize_type,
+                        mut quality,
+                        mut spoiler,
+                    },
                 format: _,
-                ref resize_type,
-                mut quality,
-                mut spoiler,
             }
             | &Task::VideoResize {
-                new_dimensions: ref original_dimensions,
-                ref rotation,
-                percentage: _,
-                ref resize_type,
+                params:
+                    ImageResize {
+                        new_dimensions: ref original_dimensions,
+                        ref rotation,
+                        percentage: _,
+                        ref resize_type,
+                        mut quality,
+                        mut spoiler,
+                    },
                 vibrato_hz: _,
                 vibrato_depth: _,
                 resize_curve: _,
                 type_pref: _,
-                mut quality,
-                mut spoiler,
             } => {
                 if let ResizeType::ToSticker
                 | ResizeType::ToCustomEmoji
@@ -627,29 +633,25 @@ impl Task {
                     *rg = rigidity;
                 }
 
+                let params = ImageResize {
+                    new_dimensions: (new_dimensions.0, new_dimensions.1),
+                    rotation: rot,
+                    percentage: new_dimensions.2,
+                    resize_type,
+                    quality,
+                    spoiler,
+                };
+
                 if is_video {
                     Ok(Task::VideoResize {
-                        new_dimensions: (new_dimensions.0, new_dimensions.1),
-                        rotation: rot,
-                        percentage: new_dimensions.2,
-                        resize_type,
+                        params,
                         vibrato_hz,
                         vibrato_depth,
                         type_pref: r#type,
                         resize_curve: curve,
-                        quality,
-                        spoiler,
                     })
                 } else {
-                    Ok(Task::ImageResize {
-                        new_dimensions: (new_dimensions.0, new_dimensions.1),
-                        rotation: rot,
-                        percentage: new_dimensions.2,
-                        resize_type,
-                        format,
-                        quality,
-                        spoiler,
-                    })
+                    Ok(Task::ImageResize { params, format })
                 }
             }
             Task::Ocr => Ok(Task::Ocr),
@@ -745,7 +747,11 @@ fn image_resize_parse_test() -> Result<(), TaskError> {
     let default = Task::default_image_resize(x, y, ResizeType::Fit, ImageFormat::Preserve);
 
     let result = default.parse_params_inner("/resize", "", false)?;
-    let Task::ImageResize { new_dimensions, .. } = result else {
+    let Task::ImageResize {
+        params: ImageResize { new_dimensions, .. },
+        ..
+    } = result
+    else {
         unreachable!()
     };
     assert_eq!(new_dimensions.0, 256);
@@ -753,10 +759,13 @@ fn image_resize_parse_test() -> Result<(), TaskError> {
 
     let result = default.parse_params_inner("/resize", "150%x-100% 86deg webp", false)?;
     let Task::ImageResize {
-        new_dimensions,
-        rotation,
+        params:
+            ImageResize {
+                new_dimensions,
+                rotation,
+                ..
+            },
         format,
-        ..
     } = result
     else {
         unreachable!()

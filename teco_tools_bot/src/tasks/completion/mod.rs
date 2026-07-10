@@ -14,7 +14,7 @@ use tokio::sync::watch::Sender;
 use crate::{
     tasks::{
         completion::media_processing::{reencode, ReencodeMedia},
-        ResizeCurve, ResizeType, VideoTypePreference,
+        ImageResize, ResizeCurve, ResizeType, VideoTypePreference,
     },
     MAX_DOWNLOAD_SIZE_MEGABYTES, MAX_UPLOAD_SIZE_MEGABYTES,
 };
@@ -119,27 +119,23 @@ impl Task {
 
                 goodbye!(response_str);
             }
-            Task::ImageResize {
-                new_dimensions,
-                rotation,
-                percentage: _,
-                format: _,
-                resize_type,
-                quality,
-                spoiler,
-            }
+            Task::ImageResize { params, format: _ }
             | Task::VideoResize {
-                new_dimensions,
-                rotation,
-                percentage: _,
-                resize_type,
+                params,
                 vibrato_hz: _,
                 vibrato_depth: _,
                 resize_curve: _,
                 type_pref: _,
-                quality,
-                spoiler,
             } => {
+                let ImageResize {
+                    new_dimensions,
+                    rotation,
+                    percentage: _,
+                    resize_type,
+                    quality,
+                    spoiler,
+                } = params;
+
                 let media = data.message.get_media_info();
                 let media = match media {
                     Some(media) => {
