@@ -417,7 +417,7 @@ impl Task {
 
                 writeln!(output, "<b>Quality</b>: {}%", params.quality)?;
 
-                write_param!("Sharpen:", params.sharpen)?;
+                write_param!("Sharpen", params.sharpen)?;
 
                 write_param!("Spoiler", params.spoiler)?;
 
