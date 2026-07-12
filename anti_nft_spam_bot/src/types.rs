@@ -173,7 +173,7 @@ impl ReviewCallbackData {
 
             format!(
                 "⛔️ {ellipsis_start}{}{ellipsis_end}",
-                &a[start..end].trim_matches('.')
+                a[start..end].trim_matches('.')
             )
         }
 

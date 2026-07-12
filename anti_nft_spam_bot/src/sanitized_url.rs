@@ -101,17 +101,14 @@ impl SanitizedUrl {
             return None;
         }
 
-        if let Some(host) = url.host() {
-            if let Host::Domain(d) = host {
-                if !d.contains('.') {
-                    // If host is a hostname and has no period, then it's probably not a world wide web
-                    // link that could poossibly be a spam.
-                    return None;
-                }
+        let host = url.host()?;
+
+        if let Host::Domain(d) = host {
+            if !d.contains('.') {
+                // If host is a hostname and has no period, then it's probably not a world wide web
+                // link that could possibly be a spam.
+                return None;
             }
-        } else {
-            // No host, no pass.
-            return None;
         }
 
         if url.scheme() != "https" {
