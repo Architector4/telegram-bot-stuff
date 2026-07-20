@@ -250,7 +250,7 @@ pub async fn handle_command(
     sender_name_with_id: &str,
     mut sent_by_admin_cache: Option<bool>,
 ) -> Result<(), RequestError> {
-    let Some(mut text) = message.text_full() else {
+    let Some(text) = message.text_full() else {
         // shrug
         return Ok(());
     };
@@ -278,14 +278,9 @@ pub async fn handle_command(
         }
     }
 
-    // Commands start with a forward slash.
-    if !text.starts_with('/') {
-        // Not a command. Is this in DMs to the bot? If so, think of this as "/start" lol
-        if is_private {
-            text = "/start";
-        } else {
-            return Ok(());
-        }
+    // Only go forward if this is in DMs or the message starts with a /.
+    if !(is_private || text.starts_with('/')) {
+        return Ok(());
     }
 
     // Get first word in message, the command itself.
@@ -318,47 +313,8 @@ pub async fn handle_command(
         command = tmp.as_str();
     }
 
+    // NOTE: When adding new commands, also add them to `generate_bot_commands` function below.
     match command {
-        "/start" | "/help" if is_private => {
-            bot.archsendmsg_no_link_preview(
-                message.chat.id, concat!(
-"This bot is made to combat various types of spam experienced by chats across Telegram.\n\n",
-"To use this bot, add it to a chat and give it administrator status with \"Remove messages\" permission.\n\n",
-"No further setup is required. A message will be sent when spam is removed.\n\n",
-"For available commands, type / into the message text box below and see the previews.\n\n"
-),
-                message.id,
-            )
-            .await?;
-
-            let is_reviewer = authenticate_control_of_sender(bot, message).await?;
-
-            if is_reviewer {
-                // Also note super special super secret commands.
-                bot.archsendmsg_no_link_preview(message.chat.id, concat!(
-"Super special reviewer commands:\n\n",
-
-"/mark_spam &lt;URL&gt;, /mark_url_spam &lt;URL&gt; - Insert or update an entry for a URL as spam.\n\n",
-
-"/mark_domain_spam &lt;URL&gt; - Remove path and query parameters from the URL then insert/update an ",
-"entry for the resulting host-only URL as spam.\n\n",
-
-"/mark_not_spam &lt;URL&gt; - Insert or update an entry for a URL as not spam.\n\n",
-
-"/mark_aggregator &lt;URL&gt; - Insert or update an entry for a URL as a link aggregator. ",
-"A link aggregator is considered to be not spam itself, but URLs below it will be automatically checked.\n\n",
-
-"/remove &lt;URL&gt; (or /forget) - Remove an URL entry from the database. Does not check on-review links.\n\n",
-
-"/review - Initiate a review keyboard.\n\n",
-
-"/info &lt;URL&gt; - Find a database entry that matches this URL and print its contents.\n\n",
-), message.id)
-                    .await?;
-            }
-
-            Ok(())
-        }
         "/hide_deletes" | "/show_deletes" => {
             handle_command_show_hide_deletes(
                 bot,
@@ -379,18 +335,28 @@ pub async fn handle_command(
         }
         "/review" => handle_command_review(bot, message, database).await,
         "/info" => handle_command_info(bot, message, database).await,
-        // NOTE: When adding new commands, also add them to `generate_bot_commands` function below.
+        "/start" | "/help" => handle_command_help(bot, message).await,
+
         _ if is_private => {
-            bot.archsendmsg_no_link_preview(
-                message.chat.id,
-                concat!(
-                    "Unknown command. Try /start for bot info, or use bot commands button ",
-                    "on your message entry bar to see commands."
-                ),
-                message.id,
-            )
-            .await?;
-            Ok(())
+            if text.starts_with('/') {
+                bot.archsendmsg_no_link_preview(
+                    message.chat.id,
+                    concat!(
+                        "Unknown command. Try /start for bot info, or use bot commands button ",
+                        "on your message entry bar to see commands."
+                    ),
+                    message.id,
+                )
+                .await?;
+                Ok(())
+            } else if message.forward_origin().is_none() {
+                // If it's in DMs and doesn't start with "/" and is not a forward, treat it as
+                // /help.
+                handle_command_help(bot, message).await
+            } else {
+                // In all other cases, whatever
+                Ok(())
+            }
         }
         _ => {
             // Woop.
@@ -410,6 +376,47 @@ pub fn generate_bot_commands() -> Vec<BotCommand> {
             "Don't hide spam deletion notification messages.",
         ),
     ]
+}
+/// Handle this message assuming it's the command `/start` or `/help` or similar.
+async fn handle_command_help(bot: &Bot, message: &Message) -> Result<(), RequestError> {
+    bot.archsendmsg_no_link_preview(
+                message.chat.id, concat!(
+"This bot is made to combat various types of spam experienced by chats across Telegram.\n\n",
+"To use this bot, add it to a chat and give it administrator status with \"Remove messages\" permission.\n\n",
+"No further setup is required. A message will be sent when spam is removed.\n\n",
+"For available commands, type / into the message text box below and see the previews.\n\n"
+),
+                message.id,
+            )
+            .await?;
+
+    let is_reviewer = authenticate_control_of_sender(bot, message).await?;
+
+    if is_reviewer {
+        // Also note super special super secret commands.
+        bot.archsendmsg_no_link_preview(message.chat.id, concat!(
+"Super special reviewer commands:\n\n",
+
+"/mark_spam &lt;URL&gt;, /mark_url_spam &lt;URL&gt; - Insert or update an entry for a URL as spam.\n\n",
+
+"/mark_domain_spam &lt;URL&gt; - Remove path and query parameters from the URL then insert/update an ",
+"entry for the resulting host-only URL as spam.\n\n",
+
+"/mark_not_spam &lt;URL&gt; - Insert or update an entry for a URL as not spam.\n\n",
+
+"/mark_aggregator &lt;URL&gt; - Insert or update an entry for a URL as a link aggregator. ",
+"A link aggregator is considered to be not spam itself, but URLs below it will be automatically checked.\n\n",
+
+"/remove &lt;URL&gt; (or /forget) - Remove an URL entry from the database. Does not check on-review links.\n\n",
+
+"/review - Initiate a review keyboard.\n\n",
+
+"/info &lt;URL&gt; - Find a database entry that matches this URL and print its contents.\n\n",
+), message.id)
+                    .await?;
+    }
+
+    Ok(())
 }
 
 /// Handle this message assuming it's the command `/review`.
