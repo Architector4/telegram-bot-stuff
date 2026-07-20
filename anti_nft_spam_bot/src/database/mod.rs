@@ -64,7 +64,7 @@ impl Database {
                     .expect("SQLite connect options should be valid")
                     .pragma("cache_size", "-32768")
                     .foreign_keys(true) // Already  default, but doesn't hurt being explicit.
-                    .busy_timeout(std::time::Duration::from_secs(600)),
+                    .busy_timeout(std::time::Duration::from_mins(10)),
             )
             .await?;
 

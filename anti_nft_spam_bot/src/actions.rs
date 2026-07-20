@@ -562,7 +562,7 @@ pub async fn discard_review_keyboard(
     designation: UrlDesignation,
     sanitized_url: &SanitizedUrl,
 ) -> Result<(), RequestError> {
-    let text = format!("Handled by {handled_by_name}:\n<b>{designation}</b>\n{sanitized_url}",);
+    let text = format!("Handled by {handled_by_name}:\n<b>{designation}</b>\n{sanitized_url}");
 
     bot.edit_message_text(chat_id, message_id, text)
         .parse_mode(teloxide::types::ParseMode::Html)
