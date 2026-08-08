@@ -5,10 +5,7 @@ use teloxide::{
 };
 use url::Url;
 
-use crate::{
-    database::Database, sanitized_url::SanitizedUrl, spam_checker::is_url_spam,
-    types::MessageDeleteReason, CONTROL_CHAT_ID,
-};
+use crate::{sanitized_url::SanitizedUrl, CONTROL_CHAT_ID};
 
 /// Try to parse a string as a [`Url`] in a way that telegram parses it,
 /// with allowing an implicit `https://` prefix, or as a username.
@@ -246,44 +243,6 @@ pub fn iterate_over_all_links(
             .into_iter()
             .flat_map(|reply_to| the_unholy_links_iterator!(reply_to)),
     )
-}
-
-/// Returns true if any of the links in this message are spam, or if it's a reply to a message in
-/// another chat that does.
-pub async fn does_message_have_spam_links(message: &Message, database: &Database) -> bool {
-    for (sanitized_url, _original_url) in iterate_over_all_links(message) {
-        if is_url_spam(database, &sanitized_url).await {
-            return true;
-        }
-    }
-
-    false
-}
-
-/// Checks if this message is classified as spam. Doesn't check if it's sent by an admin or in a
-/// private chat or somesuch. Returns a delete reason, if applicable.
-pub async fn is_message_spam(
-    message: &Message,
-    database: &Database,
-) -> Option<MessageDeleteReason> {
-    // This message might be in an album that we want to delete.
-    if let Some(album_id) = message.media_group_id() {
-        let last_deleted = database
-            .get_last_deleted_album_id(message.chat.id)
-            .await
-            .expect("Database died!");
-
-        if last_deleted.as_ref() == Some(album_id) {
-            // Matches album ID of last deleted spam message. Delete this too.
-            return Some(MessageDeleteReason::OfAlbumWithSpamMessage);
-        }
-    }
-
-    if does_message_have_spam_links(message, database).await {
-        return Some(MessageDeleteReason::ContainsSpamLink);
-    }
-
-    None
 }
 
 #[cfg(test)]

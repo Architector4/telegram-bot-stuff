@@ -11,19 +11,15 @@ use teloxide::{
 };
 
 use crate::{
-    actions::{
+    CONTROL_CHAT_ID, actions::{
         authenticate_control, authenticate_control_of_sender, delete_message_as_spam,
         discard_review_keyboard, edit_message_into_a_new_review_keyboard,
         insert_or_update_url_with_log, remove_url_with_log, send_new_review_keyboard,
         send_review_header, send_review_keyboard,
-    },
-    database::{Database, InsertOrUpdateResult, SendToReviewResult},
-    misc::{
-        get_entity_url, is_message_spam, is_sender_admin, is_sender_admin_with_cache,
+    }, database::{Database, InsertOrUpdateResult, SendToReviewResult}, misc::{
+        get_entity_url, is_sender_admin, is_sender_admin_with_cache,
         iterate_over_all_links, sender_name_prettyprint, user_name_prettyprint,
-    },
-    types::{MessageDeleteReason, ReviewCallbackData, UrlDesignation},
-    CONTROL_CHAT_ID,
+    }, spam_checker::is_message_spam, types::{MessageDeleteReason, ReviewCallbackData, UrlDesignation}
 };
 
 /// Handler for events of new or edited messages.
