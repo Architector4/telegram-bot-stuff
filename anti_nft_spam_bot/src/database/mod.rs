@@ -947,11 +947,17 @@ impl Database {
         .fetch(&self.pool)
     }
 
-    /// Find up to one entry still in the review queue for which the best match in the URL
-    /// designations table is the an entry with this ID.
-    pub async fn find_one_matching_review_queue_entry(
+    /// Assuming the provided ID is into the URL designations table for a freshly made designation,
+    /// find up to one review entry that should be discarded based on it.
+    ///
+    /// This checks the best matching designation in the database for every review entry, and finds
+    /// one for which this designation is one with the provided ID.
+    ///
+    /// Note that, if the designation is [`UrlDesignation::Aggregator`], only exact matches are
+    /// considered.
+    pub async fn find_review_entry_to_remove_based_on_designation(
         &self,
-        url_entry_to_match_id: i64,
+        designation_id: i64,
     ) -> Result<Option<i64>, Error> {
         let mut stream = sqlx::query(
             "SELECT
@@ -968,13 +974,23 @@ impl Database {
         .fetch(&self.pool);
 
         while let Some((review_entry_id, sanitized_url)) = stream.try_next().await? {
-            let Some(info) = self.get_url(&sanitized_url, false).await? else {
+            let Some(info) = self.get_url_full(&sanitized_url, false).await? else {
                 // No URL entries matching this review queue entry.
                 continue;
             };
 
-            if info.id() == url_entry_to_match_id {
+            if info.id() == designation_id {
                 // That's it!
+
+                // Let's account for an aggregator match, though...
+                if info.designation() == UrlDesignation::Aggregator
+                    && info.sanitized_url() != &sanitized_url
+                {
+                    // This designation is aggregator and this review URL is NOT an exact match.
+                    // Skip.
+                    continue;
+                }
+
                 return Ok(Some(review_entry_id));
             }
         }

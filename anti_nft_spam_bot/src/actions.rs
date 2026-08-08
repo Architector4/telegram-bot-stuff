@@ -224,7 +224,7 @@ pub async fn insert_or_update_url_with_log(
     // This requires also discarding all keyboards and sightings pertaining it.
 
     while let Some(review_entry_id) = database
-        .find_one_matching_review_queue_entry(result.id())
+        .find_review_entry_to_remove_based_on_designation(result.id())
         .await
         .expect("Database died!")
     {
