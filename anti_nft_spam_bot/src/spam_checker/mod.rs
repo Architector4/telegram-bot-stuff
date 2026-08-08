@@ -7,16 +7,6 @@ use crate::{
     types::{MessageDeleteReason, UrlDesignation},
 };
 
-/// Returns true if the message is classified as spam, i.e. contains spam links or similar.
-pub async fn does_message_have_spam_links(message: &Message, database: &Database) -> bool {
-    for (sanitized_url, _original_url) in iterate_over_all_links(message) {
-        if is_url_spam(database, &sanitized_url).await {
-            return true;
-        }
-    }
-
-    false
-}
 
 /// Checks if this message is classified as spam. Doesn't check if it's sent by an admin or in a
 /// private chat or somesuch. Returns a delete reason, if applicable.
@@ -41,7 +31,25 @@ pub async fn is_message_spam(
         return Some(MessageDeleteReason::ContainsSpamLink);
     }
 
+    if let Some(text) = message.text() {
+        // temporary hack code until i arse myself to make proper text matching stuff
+        if text.contains("HTTPS:// LUNASO . APP") {
+        return Some(MessageDeleteReason::ContainsSpamLink);
+        }
+    }
+
     None
+}
+
+/// Returns true if the message is classified as spam, i.e. contains spam links or similar.
+pub async fn does_message_have_spam_links(message: &Message, database: &Database) -> bool {
+    for (sanitized_url, _original_url) in iterate_over_all_links(message) {
+        if is_url_spam(database, &sanitized_url).await {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// # Panics
