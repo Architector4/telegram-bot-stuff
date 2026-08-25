@@ -394,20 +394,21 @@ impl<T: Read> SplitIntoBmps<T> {
 impl SplitIntoBmps<ChildStdout> {
     pub fn from_file(path: &std::path::Path) -> Result<(Child, Self), std::io::Error> {
         let mut decoder = Command::new("ffmpeg")
-            .args([
+            .args(dbg!([
                 OsStr::new("-y"),
                 OsStr::new("-loglevel"),
                 OsStr::new("error"),
                 OsStr::new("-i"),
                 path.as_ref(),
+                OsStr::new("-an"),
                 OsStr::new("-c:v"),
                 OsStr::new("bmp"),
-                OsStr::new("-vsync"),
+                OsStr::new("-fps_mode"),
                 OsStr::new("passthrough"),
                 OsStr::new("-f"),
                 OsStr::new("image2pipe"),
                 OsStr::new("-"),
-            ])
+            ]))
             .stdout(Stdio::piped())
             .spawn()?;
         let decoder_stdout = decoder.stdout.take().unwrap();
