@@ -8,10 +8,11 @@ pub struct MediaMetadata {
     pub frame_count: u64,
     /// Frame count divided by video length, producing frames per second.
     pub frame_rate: f64,
-    /// Length of the video stream, if any. Specifically, the
-    /// presentation time of the last frame plus its duration.
+    /// Length of the video stream, if any. Specifically, the presentation time of the last frame
+    /// plus its duration. Might be zero if the video stream is present but corrupted.
     pub video_length: Option<Duration>,
-    /// Length of the audio stream, if any.
+    /// Length of the audio stream, if any. Might be zero if the audio stream is present but
+    /// corrupted.
     pub audio_length: Option<Duration>,
 }
 

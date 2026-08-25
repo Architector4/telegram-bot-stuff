@@ -11,6 +11,7 @@ use std::{
     path::Path,
     process::{Child, ChildStdout, Command, Stdio},
     sync::{Arc, Mutex, OnceLock},
+    time::Duration,
 };
 
 use tokio::sync::watch::Sender;
@@ -812,7 +813,10 @@ pub fn resize_video(
     let mut vibrato_str_temp;
     let bitrate_str_temp;
 
-    if input_metadata.audio_length.is_some() && !strip_audio {
+    if input_metadata.audio_length.is_some()
+        && input_metadata.audio_length != Some(Duration::ZERO)
+        && !strip_audio
+    {
         // Figure out audio in the args..
         encoder_args.extend_from_slice(&[
             OsStr::new("-i"), // Original input file
@@ -1157,6 +1161,10 @@ pub fn layer_audio_over_media(
     let Some(mut input_length) = unfail!(video::get_media_metadata(inputfile)).video_length else {
         return Err("Input video/image file has no video stream!".to_string());
     };
+
+    if input_length == Duration::ZERO {
+        return Err("Input video/image file is corrupted!".to_string());
+    }
 
     let one_over_speed: f64 =
         if match_length && is_video && !input_length.is_zero() && !audio_length.is_zero() {
