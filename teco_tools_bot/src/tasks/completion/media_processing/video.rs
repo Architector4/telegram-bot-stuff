@@ -8,11 +8,11 @@ pub struct MediaMetadata {
     pub frame_count: u64,
     /// Frame count divided by video length, producing frames per second.
     pub frame_rate: f64,
-    /// Length of the video stream, or [`Duration::ZERO`] if no video. Specifically, the
+    /// Length of the video stream, if any. Specifically, the
     /// presentation time of the last frame plus its duration.
-    pub video_length: Duration,
-    /// Length of the audio stream, or [`Duration::ZERO`] if no audio.
-    pub audio_length: Duration,
+    pub video_length: Option<Duration>,
+    /// Length of the audio stream, if any.
+    pub audio_length: Option<Duration>,
 }
 
 /// Given a time base (representing how long is a step relative to a second), and a value (a step),
@@ -48,42 +48,53 @@ fn time_base_to_duration(base: Rational, value: i64) -> Duration {
 }
 
 pub fn get_media_metadata(path: &Path) -> Result<MediaMetadata, FfmpegError> {
-    let mut video_length = Duration::ZERO;
-    let mut audio_length = Duration::ZERO;
+    let mut video_length_observed = Duration::ZERO;
+    let mut audio_length_observed = Duration::ZERO;
     let mut frame_count = 0;
 
-    let stream = MediaStream::new(path)?;
+    let mut stream = MediaStream::new(path, false)?;
 
-    for data in stream {
-        let data = data?;
+    for data in &mut stream {
+        let Ok(data) = data else {
+            continue;
+        };
 
         match data.data {
             VideoOrAudioFrame::Video(_) => {
                 if let Some(start) = data.approx_presentation_start {
-                    video_length = video_length.max(start);
+                    video_length_observed = video_length_observed.max(start);
                 }
 
                 if let Some(end) = data.approx_presentation_end {
-                    video_length = video_length.max(end);
+                    video_length_observed = video_length_observed.max(end);
                 }
 
                 frame_count += 1;
             }
             VideoOrAudioFrame::Audio(_) => {
                 if let Some(start) = data.approx_presentation_start {
-                    audio_length = audio_length.max(start);
+                    audio_length_observed = audio_length_observed.max(start);
                 }
 
                 if let Some(end) = data.approx_presentation_end {
-                    audio_length = audio_length.max(end);
+                    audio_length_observed = audio_length_observed.max(end);
                 }
             }
         }
     }
 
+    let video_length = stream
+        .video_decoder
+        .is_some()
+        .then_some(video_length_observed);
+    let audio_length = stream
+        .audio_decoder
+        .is_some()
+        .then_some(audio_length_observed);
+
     Ok(MediaMetadata {
         frame_count,
-        frame_rate: frame_count as f64 / video_length.as_secs_f64(),
+        frame_rate: frame_count as f64 / video_length_observed.as_secs_f64(),
         video_length,
         audio_length,
     })
@@ -106,7 +117,9 @@ pub struct MediaStream {
 }
 
 impl MediaStream {
-    pub fn new(path: &Path) -> Result<Self, FfmpegError> {
+    /// Create a new `MediaStream` based on input file at specified path. If the provided boolean is
+    /// `true`, any audio data is ignored.
+    pub fn new(path: &Path, ignore_audio: bool) -> Result<Self, FfmpegError> {
         let input = ffmpeg_next::format::input(path)?;
 
         let parallelisms = std::thread::available_parallelism()
@@ -116,27 +129,34 @@ impl MediaStream {
         let video_frame = ffmpeg_next::util::frame::Video::empty();
         let audio_frame = ffmpeg_next::util::frame::Audio::empty();
 
-        let (best_video_stream_index, video_decoder, video_time_base) =
-            if let Some(best_video) = input.streams().best(ffmpeg_next::media::Type::Video) {
-                let mut codec_context =
-                    ffmpeg_next::codec::context::Context::from_parameters(best_video.parameters())?;
+        let (best_video_stream_index, video_decoder, video_time_base) = if let Some(best_video) =
+            input.streams().best(ffmpeg_next::media::Type::Video)
+        {
+            let mut codec_context =
+                ffmpeg_next::codec::context::Context::from_parameters(best_video.parameters())?;
 
-                codec_context.set_threading(ffmpeg_next::threading::Config {
-                    kind: ffmpeg_next::threading::Type::Frame,
-                    count: parallelisms,
-                });
-                let video_decoder = codec_context.decoder().video()?;
+            codec_context.set_threading(ffmpeg_next::threading::Config {
+                kind: ffmpeg_next::threading::Type::Frame,
+                count: parallelisms,
+            });
 
-                (
-                    best_video.index(),
-                    Some(video_decoder),
-                    best_video.time_base(),
-                )
-            } else {
-                (usize::MAX, None, Rational::new(0, 0))
-            };
+            // ffmpeg_next doesn't expose this, so,
+            unsafe {
+                (*codec_context.as_mut_ptr()).err_recognition = ffmpeg_next::ffi::AV_EF_IGNORE_ERR;
+            }
 
-        let (best_audio_stream_index, audio_decoder, audio_time_base) =
+            let video_decoder = codec_context.decoder().video()?;
+
+            (
+                best_video.index(),
+                Some(video_decoder),
+                best_video.time_base(),
+            )
+        } else {
+            (usize::MAX, None, Rational::new(0, 0))
+        };
+
+        let (best_audio_stream_index, audio_decoder, audio_time_base) = if !ignore_audio {
             if let Some(best_audio) = input.streams().best(ffmpeg_next::media::Type::Audio) {
                 let mut codec_context =
                     ffmpeg_next::codec::context::Context::from_parameters(best_audio.parameters())?;
@@ -145,6 +165,13 @@ impl MediaStream {
                     kind: ffmpeg_next::threading::Type::Frame,
                     count: parallelisms,
                 });
+
+                // ffmpeg_next doesn't expose this, so,
+                unsafe {
+                    (*codec_context.as_mut_ptr()).err_recognition =
+                        ffmpeg_next::ffi::AV_EF_IGNORE_ERR;
+                }
+
                 let audio_decoder = codec_context.decoder().audio()?;
 
                 (
@@ -154,7 +181,10 @@ impl MediaStream {
                 )
             } else {
                 (usize::MAX, None, Rational::new(0, 0))
-            };
+            }
+        } else {
+            (usize::MAX, None, Rational::new(0, 0))
+        };
 
         Ok(Self {
             input,

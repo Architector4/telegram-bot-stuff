@@ -394,8 +394,10 @@ impl<T: Read> SplitIntoBmps<T> {
 impl SplitIntoBmps<ChildStdout> {
     pub fn from_file(path: &std::path::Path) -> Result<(Child, Self), std::io::Error> {
         let mut decoder = Command::new("ffmpeg")
-            .args(dbg!([
+            .args([
                 OsStr::new("-y"),
+                OsStr::new("-err_detect"),
+                OsStr::new("ignore_err"),
                 OsStr::new("-loglevel"),
                 OsStr::new("error"),
                 OsStr::new("-i"),
@@ -408,7 +410,7 @@ impl SplitIntoBmps<ChildStdout> {
                 OsStr::new("-f"),
                 OsStr::new("image2pipe"),
                 OsStr::new("-"),
-            ]))
+            ])
             .stdout(Stdio::piped())
             .spawn()?;
         let decoder_stdout = decoder.stdout.take().unwrap();
@@ -709,7 +711,7 @@ pub fn resize_video(
         };
 
     // We computed all the internal stuff. Now to actually do something useful.
-    let decoded_image_stream = unfail!(MediaStream::new(inputfile));
+    let decoded_image_stream = unfail!(MediaStream::new(inputfile, true));
 
     let parallelisms = std::thread::available_parallelism()
         .map(std::num::NonZero::get)
@@ -810,7 +812,7 @@ pub fn resize_video(
     let mut vibrato_str_temp;
     let bitrate_str_temp;
 
-    if !input_metadata.audio_length.is_zero() && !strip_audio {
+    if input_metadata.audio_length.is_some() && !strip_audio {
         // Figure out audio in the args..
         encoder_args.extend_from_slice(&[
             OsStr::new("-i"), // Original input file
@@ -1147,10 +1149,14 @@ pub fn layer_audio_over_media(
     };
 
     let _ = status_report.send("Checking audio length...".to_string());
-    let audio_length = unfail!(video::get_media_metadata(path)).audio_length;
+    let Some(audio_length) = unfail!(video::get_media_metadata(path)).audio_length else {
+        return Err("Input audio file has no audio stream!".to_string());
+    };
 
     let _ = status_report.send("Checking video length...".to_string());
-    let mut input_length = unfail!(video::get_media_metadata(inputfile)).video_length;
+    let Some(mut input_length) = unfail!(video::get_media_metadata(inputfile)).video_length else {
+        return Err("Input video/image file has no video stream!".to_string());
+    };
 
     let one_over_speed: f64 =
         if match_length && is_video && !input_length.is_zero() && !audio_length.is_zero() {
@@ -1205,6 +1211,8 @@ pub fn layer_audio_over_media(
     let converter = Command::new("ffmpeg")
         .args([
             OsStr::new("-y"),
+            OsStr::new("-err_detect"),
+            OsStr::new("ignore_err"),
             OsStr::new("-stats"),
             OsStr::new("-loglevel"),
             OsStr::new("error"),
@@ -1293,6 +1301,8 @@ fn reencode_video(
     let mut converter = Command::new("ffmpeg")
         .args([
             OsStr::new("-y"),
+            OsStr::new("-err_detect"),
+            OsStr::new("ignore_err"),
             OsStr::new("-stats"),
             OsStr::new("-loglevel"),
             OsStr::new("error"),
@@ -1342,6 +1352,8 @@ fn reencode_audio(
     let mut converter = Command::new("ffmpeg")
         .args([
             OsStr::new("-y"),
+            OsStr::new("-err_detect"),
+            OsStr::new("ignore_err"),
             OsStr::new("-stats"),
             OsStr::new("-loglevel"),
             OsStr::new("error"),

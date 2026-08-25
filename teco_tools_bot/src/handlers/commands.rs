@@ -675,7 +675,7 @@ async fn to_video_or_gif_inner(tp: TaskParams<'_>, to_gif: bool) -> Ret {
                         .await
                         .expect("Join shouldn't fail")?;
 
-                let has_audio = !metadata.audio_length.is_zero();
+                let has_audio = metadata.audio_length.is_some();
 
                 Ok::<_, std::io::Error>(has_audio)
             };
