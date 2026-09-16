@@ -7,7 +7,6 @@ use crate::{
     types::{MessageDeleteReason, UrlDesignation},
 };
 
-
 /// Checks if this message is classified as spam. Doesn't check if it's sent by an admin or in a
 /// private chat or somesuch. Returns a delete reason, if applicable.
 pub async fn is_message_spam(
@@ -34,7 +33,7 @@ pub async fn is_message_spam(
     if let Some(text) = message.text() {
         // temporary hack code until i arse myself to make proper text matching stuff
         if text.contains("HTTPS:// LUNASO . APP") {
-        return Some(MessageDeleteReason::ContainsSpamLink);
+            return Some(MessageDeleteReason::ContainsSpamLink);
         }
     }
 
@@ -61,6 +60,14 @@ pub async fn is_url_spam(database: &Database, url: &SanitizedUrl) -> bool {
     }
 
     // No entry in the database found.
+
+    // They keep cycling those, so it's kind of easier to just put this here lol
+    if url.host_str() == "telegra.ph"
+        && url.path().starts_with("/aktualnaya-ssylka-na-nashego-bota")
+    {
+        return true;
+    }
+
     // TODO: automatic checking.
 
     false
