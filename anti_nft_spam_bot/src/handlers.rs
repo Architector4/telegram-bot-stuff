@@ -121,7 +121,7 @@ async fn handle_message_new_or_edit_raw(
                 tokio::spawn(async move {
                     let result = async {
                         if let Some(message_delete_reason) =
-                            is_message_spam(&reply_to, &database).await
+                            is_message_spam(&bot, &reply_to, &database).await
                         {
                             if is_sender_admin(&bot, &reply_to).await? {
                                 // If this *is* by an admin, no need to notify about not deleting it; we
@@ -147,7 +147,7 @@ async fn handle_message_new_or_edit_raw(
             }
         }
 
-        if let Some(message_delete_reason) = is_message_spam(message, database).await {
+        if let Some(message_delete_reason) = is_message_spam(bot, message, database).await {
             if message_delete_reason == MessageDeleteReason::OfAlbumWithSpamMessage {
                 // This delete reason only appears if this is a message in an album that an item
                 // was deemed as spam and deleted already.
