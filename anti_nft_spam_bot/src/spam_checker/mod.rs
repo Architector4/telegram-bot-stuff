@@ -134,7 +134,9 @@ pub async fn is_url_spam(
 pub async fn check_url_for_spam(_original_url: &Url, sanitized_url: &SanitizedUrl) -> Option<bool> {
     // They keep cycling those, so it's kind of easier to just put this here lol
     if sanitized_url.host_str() == "telegra.ph"
-        && sanitized_url.path().starts_with("/aktualnaya-ssylka-na-nashego-bota")
+        && sanitized_url
+            .path()
+            .starts_with("/aktualnaya-ssylka-na-nashego-bota")
     {
         return Some(true);
     }
