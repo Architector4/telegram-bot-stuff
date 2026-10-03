@@ -18,13 +18,13 @@ pub async fn entry() {
     })
     .expect("Could not load bot key file!");
 
+    let database: Arc<Database> = Database::new().await.expect("Failed to create database!");
+
     let bot = Bot::new(key);
 
     bot.set_my_commands(generate_bot_commands())
         .await
         .expect("Failed to set bot commands!");
-
-    let database: Arc<Database> = Database::new().await.expect("Failed to create database!");
 
     // Already imported.
     //if let Err(e) = database.import_from_old_database().await {

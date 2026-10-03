@@ -190,7 +190,11 @@ impl Database {
             ))
             .await;
 
-        Ok(Arc::new(Database { pool }))
+        let result = Arc::new(Database { pool });
+
+        result.resanitize_all_urls().await?;
+
+        Ok(result)
     }
 
     /// If the input URL has no query, provide empty string for that argument.
@@ -504,6 +508,8 @@ impl Database {
     }
 
     /// Returns ID of the inserted URL.
+    ///
+    /// IMPORTANT! If you're about to change this, also change `resanitize_url_at_id`.
     async fn insert_url_unchecked(
         transaction: &mut Transaction<'_, Sqlite>,
         sanitized_url: &SanitizedUrl,
@@ -1054,6 +1060,191 @@ impl Database {
         sqlx::query("SELECT COUNT(*) FROM review_queue;")
             .map(|row: SqliteRow| row.get(0))
             .fetch_one(&self.pool)
+    }
+
+    /// Check if this entry's [`SanitizedUrl`] value is actually sanitized.
+    ///
+    /// This assumes the `param_count` number and `url_params` values are still valid.
+    pub async fn url_at_id_is_sanitized(&self, id: i64) -> Result<bool, Error> {
+        // We can't use things like get_url_full here because they put the result into
+        // `SanitizedUrl` when returning. So, gather the stuff ourselves.
+
+        let row = sqlx::query("SELECT host, path, query, param_count FROM urls WHERE id=?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        // Extract to variables.
+        let host: &str = row.get(0);
+        let path: &str = row.get(1);
+        let query: &str = row.get(2);
+
+        let mut combined = format!("https://{host}{path}");
+        if !query.is_empty() {
+            combined.push('?');
+            combined.push_str(query);
+        }
+
+        let expected_url = Url::parse(&combined).expect("Invalid URL in database!");
+        let Some(sanitized_url) = SanitizedUrl::new(expected_url.clone()) else {
+            // This shouldn't exist!
+            return Ok(false);
+        };
+
+        if sanitized_url.as_ref() != &expected_url {
+            // This needs resanitization!
+
+            log::info!("Expected URL : {expected_url}");
+            log::info!("Should be    : {sanitized_url}");
+            return Ok(false);
+        }
+
+        // All good.
+        Ok(true)
+    }
+
+    /// Check if this entry's [`SanitizedUrl`] value is actually sanitized, and if not, replace it
+    /// with a sanitized one.
+    ///
+    /// Returns true if the entry had to be resanitized, false otherwise.
+    ///
+    /// Assumes this is the only thing running on the database at the time.
+    pub async fn resanitize_url_at_id(&self, id: i64) -> Result<bool, Error> {
+        // We can't use things like get_url_full here because they put the result into
+        // `SanitizedUrl` when returning. So, gather the stuff ourselves.
+
+        // Getting way more than we need for the initial validation because we'll probably be
+        // recreating this entry entirely.
+        let row = sqlx::query(
+            "
+            SELECT
+                host,
+                path,
+                query,
+                original_url,
+                designation,
+                manually_reviewed
+            FROM
+                urls
+                WHERE
+                id=?",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        // Extract to variables.
+        let host: &str = row.get(0);
+        let path: &str = row.get(1);
+        let query: &str = row.get(2);
+        let original_url: &str = row.get(3);
+        let designation: u8 = row.get(4);
+        let manually_reviewed: bool = row.get(5);
+
+        let original_url =
+            Url::from_str(original_url).expect("Invalid original URL found in database!");
+
+        let designation = UrlDesignation::try_from(designation)
+            .expect("Invalid URL designation found in database!");
+
+        let mut combined = format!("https://{host}{path}");
+        if !query.is_empty() {
+            combined.push('?');
+            combined.push_str(query);
+        }
+
+        let expected_url = Url::parse(&combined).expect("Invalid URL in database!");
+        let sanitized_url = SanitizedUrl::new(expected_url.clone());
+
+        if let Some(sanitized_url) = &sanitized_url {
+            if sanitized_url.as_ref() == &expected_url {
+                // All good!
+                return Ok(false);
+            }
+        }
+
+        // This is NOT sanitized. EXPLODE.
+        sqlx::query("DELETE FROM url_params WHERE url_id=?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("DELETE FROM urls WHERE id=?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        let Some(sanitized_url) = sanitized_url else {
+            // Sanitized URL turned out to be None. This means this entry shouldn't exist at all,
+            // and suddenly we're done here.
+            return Ok(true);
+        };
+
+        // Time to resanitize. Thankfully, that step is quite simple.
+        self.insert_or_update_url(
+            &sanitized_url,
+            &original_url,
+            designation,
+            manually_reviewed,
+        )
+        .await?;
+
+        Ok(true)
+    }
+
+    /// Go through every single URL in the database and resanitize ones that need it.
+    ///
+    /// Long and expensive. Prints status every 4096 URLs.
+    async fn resanitize_all_urls(&self) -> Result<(), Error> {
+        log::info!("Will now resanitize all URLs.");
+
+        // Get total count real quick.
+        let total_count: i64 = sqlx::query("SELECT COUNT(*) FROM urls")
+            .fetch_one(&self.pool)
+            .await?
+            .get(0);
+
+        let mut stream = sqlx::query("SELECT id FROM urls ORDER BY id")
+            .map(|row: SqliteRow| row.get::<i64, _>(0))
+            .fetch(&self.pool);
+
+        let mut total_counter = 0u64;
+        let mut sanitized_counter = 0u64;
+
+        while let Some(this_id) = stream.try_next().await? {
+            if !self.url_at_id_is_sanitized(this_id).await? {
+                // Ruh roh!
+                drop(stream);
+
+                // Do the thing!
+                let result = self.resanitize_url_at_id(this_id).await;
+
+                if let Err(e) = result {
+                    log::error!("ERROR when resanitizing URL at ID {this_id}:\n{e:?}");
+                    Err(e)?;
+                }
+
+                // Restart the stream.
+                stream = sqlx::query("SELECT id FROM urls WHERE id > ? ORDER BY id")
+                    .bind(this_id)
+                    .map(|row: SqliteRow| row.get::<i64, _>(0))
+                    .fetch(&self.pool);
+
+                sanitized_counter += 1;
+            }
+
+            total_counter += 1;
+
+            if total_counter.is_multiple_of(4096) {
+                log::info!(
+                    "Looked at {total_counter:8} / {total_count:8}, sanitized {sanitized_counter}"
+                );
+            }
+        }
+
+        log::info!("Looked through {total_counter} URLs, sanitized {sanitized_counter} of them.");
+
+        Ok(())
     }
 
     // This old code needs flume as a dependency to work.
