@@ -66,6 +66,47 @@ pub fn normalize_new_string(input: &str) -> String {
     output
 }
 
+/// Check if this is a Twitter embedder hostname.
+#[inline(always)] // it's used in one spot anyway lol
+fn is_twitter_embedder_hostname(mut host_str: &str) -> bool {
+    // Input might be like "i.fxtwitter.com".
+    // Isolate to just the TLD and proper domain, i.e. "fxtwitter.com".
+
+    // UTF-8 guarantees that any byte below 0x7F is ASCII, so byte comparison works out fine here
+    // ...Might have overengineered it, but whatever lmao
+    if let Some(second_last_dot) = host_str
+        .as_bytes()
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|x| *x.1 == b'.')
+        .nth(1)
+    {
+        host_str = &host_str[second_last_dot.0 + 1..]
+    }
+
+    // GOD
+    matches!(
+        host_str,
+        "boytitsx.com"
+            | "cunnyx.com"
+            | "fixupx.com"
+            | "fixvx.com"
+            | "furryfeetx.com"
+            | "fxtwitter.com"
+            | "girlcockx.com"
+            | "hitlerx.com"
+            | "mpregx.com"
+            | "nazibar.site"
+            | "peepeepoopoodumdumtwitterx.org"
+            | "skibidix.com"
+            | "stupidpenisx.com"
+            | "twitter.com"
+            | "vxtwitter.com"
+            | "x.com"
+    )
+}
+
 /// A URL with various guarantees applied. See [`Self::new`] for details.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SanitizedUrl(Url);
@@ -266,12 +307,7 @@ impl SanitizedUrl {
                         url.set_query(Some(&video_param));
                     }
                 }
-                "fixupx.com" | "fxtwitter.com" | "girlcockx.com" | "mobile.twitter.com"
-                | "mobile.x.com" | "stupidpenisx.com" | "twitter.com" | "vxtwitter.com"
-                | "x.com" | "hitlerx.com" | "cunnyx.com" | "fixvx.com" | "skibidix.com"
-                | "mpregx.com" => {
-                    // GOD
-
+                x if is_twitter_embedder_hostname(x) => {
                     if host_str != "twitter.com" {
                         url.set_host(Some("twitter.com"))
                             .expect("twitter.com is a valid host");
