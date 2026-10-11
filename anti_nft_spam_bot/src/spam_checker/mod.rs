@@ -105,7 +105,7 @@ pub async fn is_url_spam(
 
     // No entry in the database found, or is under an aggregator. Gotta run the checker.
 
-    if let Some(is_spam) = check_url_for_spam(original_url, sanitized_url).await {
+    if let Some(is_spam) = check_url_for_spam(original_url, sanitized_url) {
         // Checker got something! Write this to the database.
 
         let new_designation = if is_spam {
@@ -131,12 +131,25 @@ pub async fn is_url_spam(
     false
 }
 
-pub async fn check_url_for_spam(_original_url: &Url, sanitized_url: &SanitizedUrl) -> Option<bool> {
+/// Checks the supplied URL for spam, maybe by visiting it.
+///
+/// Provided `Url` and `SanitizedUrl` arguments must correspond to the same link.
+pub fn check_url_for_spam(_original_url: &Url, sanitized_url: &SanitizedUrl) -> Option<bool> {
     // They keep cycling those, so it's kind of easier to just put this here lol
     if sanitized_url.host_str() == "telegra.ph"
         && sanitized_url
             .path()
             .starts_with("/aktualnaya-ssylka-na-nashego-bota")
+    {
+        return Some(true);
+    }
+
+    // Also an annoying case. It's all random porn.
+    if sanitized_url.host_str() == "t.me"
+        && sanitized_url
+            .path()
+            .strip_circumfix("/addstickers/erotic_", "stickers_by_stickerio_robot")
+            .is_some()
     {
         return Some(true);
     }
