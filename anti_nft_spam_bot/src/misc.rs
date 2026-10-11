@@ -222,7 +222,7 @@ pub fn iterate_over_all_links(
                 .unwrap_or_default()
                 .into_iter()
                 .filter_map(|x| get_entity_url(&x))
-                .chain(
+                .chain( // Grab the inline keyboard URLs...
                     message
                         .reply_markup()
                         .map(|x| &x.inline_keyboard)
@@ -230,6 +230,18 @@ pub fn iterate_over_all_links(
                         .flat_map(|x| x.iter())
                         .flat_map(|x| x.iter())
                         .filter_map(get_button_url),
+                )
+                .chain( // Grab the sticker pack...
+                    message
+                        .sticker()
+                        .and_then(|s| s.set_name.as_ref())
+                        .and_then(|n| {
+                            SanitizedUrl::from_str_with_original(&format!(
+                                "https://t.me/addstickers/{}",
+                                n
+                            ))
+                        })
+                        .into_iter(),
                 )
         };
     }
