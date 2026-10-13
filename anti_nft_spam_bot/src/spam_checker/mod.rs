@@ -29,8 +29,8 @@ pub async fn is_message_spam(
         }
     }
 
-    if does_message_have_spam_links(bot, message, database).await {
-        return Some(MessageDeleteReason::ContainsSpamLink);
+    if let Some(delete_reason) = check_links_in_message(bot, message, database).await {
+        return Some(delete_reason);
     }
 
     if let Some(text) = message.text() {
@@ -43,21 +43,34 @@ pub async fn is_message_spam(
     None
 }
 
-/// Returns true if the message is classified as spam, i.e. contains spam links or similar.
-pub async fn does_message_have_spam_links(
+/// Check all links in this message for spam. If it finds one, a delete reason is returned.
+///
+/// This also includes converting a sticker's sticker pack into a link and checking it.
+pub async fn check_links_in_message(
     bot: &Bot,
     message: &Message,
     database: &Database,
-) -> bool {
+) -> Option<MessageDeleteReason> {
     for (sanitized_url, original_url) in iterate_over_all_links(message) {
         if is_url_spam(bot, database, &original_url, &sanitized_url).await {
-            return true;
+            // This feels hacky, but it works lol
+            if sanitized_url.host_str() == "t.me"
+                && sanitized_url.path().starts_with("/addstickers/")
+            {
+                return Some(MessageDeleteReason::ContainsSpamSticker);
+            } else {
+                return Some(MessageDeleteReason::ContainsSpamLink);
+            }
         }
     }
 
-    false
+    None
 }
 
+/// Checks if the provided URL is spam via the database or checking.
+///
+/// `original_url` and `sanitized_url` must correspond to the same link.
+///
 /// # Panics
 ///
 /// Panics if the database dies lol

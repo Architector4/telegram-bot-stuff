@@ -267,6 +267,8 @@ pub enum MessageDeleteReason {
     ContainsSpamLink,
     /// It's in an album with a message that was deemed as spam.
     OfAlbumWithSpamMessage,
+    /// Contains a sticker from a marked sticker pack.
+    ContainsSpamSticker,
 }
 
 impl MessageDeleteReason {
@@ -283,6 +285,7 @@ impl MessageDeleteReason {
         match self {
             Self::ContainsSpamLink => Some("containing a spam link"),
             Self::OfAlbumWithSpamMessage => None,
+            Self::ContainsSpamSticker => Some("containing a spam sticker"),
         }
     }
 }

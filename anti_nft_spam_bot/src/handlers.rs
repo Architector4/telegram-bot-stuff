@@ -874,19 +874,19 @@ async fn handle_command_spam(
 
     // All links marked as appropriate. Tell the user about it.
     let response = if some_marked {
-        "Thank you, links in this message will be reviewed for spam by volunteers."
+        "Thank you, this message will be reviewed for spam by volunteers."
     } else if some_already_on_review {
-        "Thank you, but the links in this message are already marked for review."
+        "Thank you, but the links or sticker in this message are already marked for review."
     } else if some_already_marked_spam {
-        "Thank you, but links in this message are already marked as spam."
+        "Thank you, but links or sticker in this message are already marked as spam."
     } else if some_already_manually_reviewed_as_not_spam {
         "Thank you, but the links in this message were manually reviewed and were determined to be not spam."
     } else {
         // No links at all.
         concat!(
-            "Sorry, but I could not find any links in ",
-            "your message or the message you replied to, if any. ",
-            "This bot only blocks messages with usernames, links, and buttons with links."
+            "Sorry, but I could not find any links or a sticker belonging to a pack in your message ",
+            "or the message you replied to, if any. This bot only blocks messages with ",
+            "usernames, links, buttons with links, and stickers from spam packs."
         )
     };
 
