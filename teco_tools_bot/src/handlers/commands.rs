@@ -568,7 +568,7 @@ pub const RESIZE: Command = Command {
     hidden: false,
 };
 fn resize(tp: TaskParams<'_>) -> impl Future<Output = Ret> + '_ {
-    resize_inner(tp, ResizeType::Fit)
+    resize_inner(tp, ResizeType::Stretch)
 }
 
 pub const DISTORT: Command = Command {
