@@ -336,7 +336,7 @@ pub async fn handle_command(
         }
         "/review" => handle_command_review(bot, message, database).await,
         "/info" => handle_command_info(bot, message, database).await,
-        "/start" | "/help" => handle_command_help(bot, message).await,
+        "/start" | "/help" if is_private => handle_command_help(bot, message).await,
 
         _ if is_private => {
             if text.starts_with('/') {
