@@ -11,10 +11,13 @@ use sqlx::{
     sqlite::{Sqlite, SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
     AssertSqlSafe, Executor, Row, Transaction,
 };
-use teloxide::types::{ChatId, MediaGroupId, MessageId};
+use teloxide::types::{ChatId, MediaGroupId, MessageId, UserId};
 use url::Url;
 
-use crate::{sanitized_url::SanitizedUrl, types::UrlDesignation};
+use crate::{
+    sanitized_url::SanitizedUrl,
+    types::{MessageDeleteReason, UrlDesignation},
+};
 
 pub use sqlx::Error;
 
@@ -23,29 +26,36 @@ pub use types::*;
 
 type Pool = sqlx::Pool<Sqlite>;
 const DB_PATH: &str = "sqlite:anti_nft_spam_bot.sqlite";
+const DB_PATH_STRIKES: &str = "sqlite:anti_nft_spam_bot_strikes.sqlite";
 static WAS_CONSTRUCTED: AtomicBool = AtomicBool::new(false);
 
 /// The database.
 pub struct Database {
     /// The connection pool.
     pool: Pool,
+    /// The connection pool for the strikes database.
+    pool_strikes: Pool,
 }
 
 impl Database {
     /// Create a new database.
     pub fn new() -> impl std::future::Future<Output = Result<Arc<Database>, Error>> + Send {
-        Self::new_by_path(DB_PATH, true)
+        Self::new_by_path(DB_PATH, DB_PATH_STRIKES, true)
     }
 
     /// Create a new database for testing.
     #[cfg(test)]
     pub fn new_test() -> impl std::future::Future<Output = Result<Arc<Database>, Error>> + Send {
-        Database::new_by_path("sqlite::memory:", false)
+        Database::new_by_path("sqlite::memory:", "sqlite::memory:", false)
     }
 
     /// Create a new database with specified path. Will check if it's a unique database if `unique`
     /// is set.
-    async fn new_by_path(path: &str, unique: bool) -> Result<Arc<Database>, Error> {
+    async fn new_by_path(
+        path: &str,
+        path_strikes: &str,
+        unique: bool,
+    ) -> Result<Arc<Database>, Error> {
         if unique {
             assert!(
                 !WAS_CONSTRUCTED.swap(true, std::sync::atomic::Ordering::SeqCst),
@@ -190,7 +200,81 @@ impl Database {
             ))
             .await;
 
-        let result = Arc::new(Database { pool });
+        /// Init the strikes database.
+        /// This is a separate function to reduce confusion of scope lol
+        async fn init_strikes_database(path_strikes: &str) -> Result<Pool, Error> {
+            // Now init the strikes database. It's a separate database because it will have way more
+            // frequent writes, so I don't want to let this conflict with the primary one.
+
+            if !Sqlite::database_exists(path_strikes).await.unwrap_or(false) {
+                Sqlite::create_database(path_strikes).await?;
+            }
+
+            let pool_strikes = SqlitePoolOptions::new()
+                .max_connections(32)
+                .connect_with(
+                    SqliteConnectOptions::from_str(path_strikes)
+                        .expect("SQLite connect options should be valid")
+                        .pragma("cache_size", "-32768")
+                        .foreign_keys(true), // Already  default, but doesn't hurt being explicit.
+                )
+                .await?;
+
+            // STRIKES: (maybe later)
+            // id (i64, unique primary key)
+            // chatid (i64)
+            // userid (i64)
+            // timestamp (i64, seconds since unix epoch (1970-01-01 00:00:00 UTC); when was this made)
+
+            // REMOVAL_NOTES:
+            // id (i64, unique primary key)
+            // userid (i64)
+            // chatid (i64)
+            // messageid (i64)
+            // timestamp (i64, seconds since unix epoch; when was this made or last edited)
+            // count (u32, how many removals are noted in this note)
+            // delete_reason (u8, representing a value in the enum `MessageDeleteReason`, optional)
+            pool_strikes
+                .execute(
+                    "CREATE TABLE IF NOT EXISTS removal_notes (
+                    id INTEGER PRIMARY KEY NOT NULL,
+                    userid INTEGER NOT NULL,
+                    chatid INTEGER NOT NULL,
+                    messageid INTEGER NOT NULL,
+                    timestamp INTEGER NOT NULL DEFAULT (unixepoch()),
+                    count INTEGER NOT NULL,
+                    delete_reason INTEGER NULL,
+                    UNIQUE (userid, chatid)
+                ) STRICT;",
+                )
+                .await?;
+
+            // Add a cleanup trigger to remove removal notes after half hour.
+            pool_strikes
+                .execute(
+                    "CREATE TRIGGER IF NOT EXISTS removal_notes_cleanup
+                BEFORE INSERT ON removal_notes BEGIN
+                    DELETE FROM removal_notes WHERE timestamp < unixepoch() - 60 * 30;
+                END;",
+                )
+                .await?;
+
+            // Same on updates.
+            pool_strikes
+                .execute(
+                    "CREATE TRIGGER IF NOT EXISTS removal_notes_cleanup
+                AFTER UPDATE ON removal_notes BEGIN
+                    DELETE FROM removal_notes WHERE timestamp < unixepoch() - 60 * 30;
+                END;",
+                )
+                .await?;
+
+            Ok(pool_strikes)
+        }
+
+        let pool_strikes = init_strikes_database(path_strikes).await?;
+
+        let result = Arc::new(Database { pool, pool_strikes });
 
         result.resanitize_all_urls().await?;
 
@@ -1374,6 +1458,104 @@ impl Database {
 
     //    Ok(())
     //}
+
+    /// Find a removal note matching this. If one is found, it should be edited; otherwise, send a
+    /// new one. Either way, after this, run [`Self::sync_removal_note`].
+    pub async fn find_removal_note(
+        &self,
+        userid: UserId,
+        chatid: ChatId,
+    ) -> Result<Option<RemovalNote>, Error> {
+        let Some(row) = sqlx::query(
+            "SELECT id, messageid, timestamp, count, delete_reason
+            FROM removal_notes
+            WHERE userid=? AND chatid=? AND timestamp >= unixepoch() - 60 * 30
+            ORDER BY id DESC LIMIT 1",
+        )
+        // https://core.telegram.org/bots/api#user
+        .bind::<i64>(
+            userid
+                .0
+                .try_into()
+                .expect("User IDs are guaranteed by Telegram API to fit within i64"),
+        )
+        .bind(chatid.0)
+        .fetch_optional(&self.pool_strikes)
+        .await?
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(RemovalNote {
+            id: row.get(0),
+            userid,
+            chatid,
+            messageid: MessageId(row.get(1)),
+            timestamp: row.get(2),
+            count: row.get(3),
+            delete_reason: row.get::<Option<u8>, _>(4).map(|x| {
+                x.try_into()
+                    .expect("Invalid MessageDeleteReason in database!")
+            }),
+        }))
+    }
+
+    /// Sync a new or updated removal note to the database. If one was changed, set `id` field to
+    /// its database ID; for a new entry, leave it empty.
+    pub async fn sync_removal_note(
+        &self,
+        id: Option<i64>,
+        userid: UserId,
+        chatid: ChatId,
+        messageid: MessageId,
+        delete_reason: MessageDeleteReason,
+    ) -> Result<(), Error> {
+        if let Some(id) = id {
+            // It's possible that by the time this executes, this updates zero rows.
+            // That's fine.
+            sqlx::query(
+                "UPDATE removal_notes SET
+                    count = count+1,
+                    timestamp = unixepoch(),
+                    delete_reason = IF(delete_reason = ?, delete_reason, NULL)
+                WHERE id=?;",
+            )
+            .bind(delete_reason as u8)
+            .bind(id)
+            .execute(&self.pool_strikes)
+            .await?;
+        } else {
+            // It's very unlikely but maybe possible that this runs into a unique constraint
+            // violation. That's fine too.
+            let result = sqlx::query(
+                "INSERT INTO removal_notes
+                (userid, chatid, messageid, count, delete_reason)
+            VALUES
+                (?, ?, ?, 1, ?);",
+            )
+            .bind::<i64>(
+                userid
+                    .0
+                    .try_into()
+                    .expect("User IDs are guaranteed by Telegram API to fit within i64"),
+            )
+            .bind(chatid.0)
+            .bind(messageid.0)
+            .bind(delete_reason as u8)
+            .execute(&self.pool_strikes)
+            .await;
+
+            match result {
+                Ok(_) => {
+                    // nice
+                }
+                Err(Error::Database(e)) if e.kind() == ErrorKind::UniqueViolation => (), // whatever,
+                Err(e) => Err(e)?,
+            };
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1765,5 +1947,74 @@ mod tests {
             db.get_last_deleted_album_id(chat_id).await.unwrap(),
             Some(album_id)
         );
+    }
+
+    #[tokio::test]
+    async fn removal_note() {
+        let db = new_db().await;
+        let chatid = ChatId(1312);
+        let userid = UserId(69420);
+
+        // A spam message is sent.
+        // A spam message is removed. Checking removal note.
+        let removal_note = db.find_removal_note(userid, chatid).await.unwrap();
+        assert!(removal_note.is_none());
+        // None; posting a new note.
+        let removal_message = MessageId(1);
+        db.sync_removal_note(
+            None,
+            userid,
+            chatid,
+            removal_message,
+            MessageDeleteReason::ContainsSpamLink,
+        )
+        .await
+        .unwrap();
+
+        // Cool beans.
+
+        // The user posts another spam message of different reason.
+        // It's removed. Checking removal note.
+        let removal_note = db.find_removal_note(userid, chatid).await.unwrap().unwrap();
+        assert_eq!(removal_note.userid(), userid);
+        assert_eq!(removal_note.chatid(), chatid);
+        assert_eq!(removal_note.messageid(), removal_message);
+        assert_eq!(removal_note.count(), 1);
+        assert_eq!(
+            removal_note.delete_reason(),
+            Some(MessageDeleteReason::ContainsSpamLink)
+        );
+
+        // Editing it.
+        db.sync_removal_note(
+            Some(removal_note.id()),
+            userid,
+            chatid,
+            removal_message,
+            MessageDeleteReason::ContainsSpamSticker,
+        )
+        .await
+        .unwrap();
+
+        // Yayyyy.
+
+        // They post another spam message, yadda yadda.
+        let removal_note = db.find_removal_note(userid, chatid).await.unwrap().unwrap();
+        assert_eq!(removal_note.userid(), userid);
+        assert_eq!(removal_note.chatid(), chatid);
+        assert_eq!(removal_note.messageid(), removal_message);
+        assert_eq!(removal_note.count(), 2); // Increments.
+        assert_eq!(removal_note.delete_reason(), None);
+
+        // Editing it.
+        db.sync_removal_note(
+            Some(removal_note.id()),
+            userid,
+            chatid,
+            removal_message,
+            MessageDeleteReason::ContainsSpamSticker,
+        )
+        .await
+        .unwrap();
     }
 }

@@ -5,7 +5,7 @@ use teloxide::{
     payloads::{EditMessageTextSetters, SendMessageSetters},
     prelude::Requester,
     sugar::request::{RequestLinkPreviewExt, RequestReplyExt},
-    types::{ChatId, InlineKeyboardMarkup, MediaGroupId, Message, MessageId, User},
+    types::{ChatId, InlineKeyboardMarkup, MediaGroupId, Message, MessageId, User, UserId},
     ApiError, Bot, RequestError,
 };
 use url::Url;
@@ -78,6 +78,7 @@ pub async fn authenticate_control_of_sender(
 /// # Panics
 ///
 /// Panics if the database dies lol
+#[allow(clippy::too_many_arguments)] // aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 pub async fn delete_message_as_spam_raw(
     bot: &Bot,
     database: &Database,
@@ -85,6 +86,7 @@ pub async fn delete_message_as_spam_raw(
     message_id: MessageId,
     album_id: Option<&MediaGroupId>,
     sender_name: &str,
+    sender_id: Option<UserId>,
     reason: MessageDeleteReason,
 ) -> Result<(), RequestError> {
     match teloxide_retry!(bot.delete_message(chat_id, message_id).await) {
@@ -95,7 +97,7 @@ pub async fn delete_message_as_spam_raw(
             }
 
             // Now we shall notify. Should we show the reason?
-            if let Some(reason) = reason.to_str() {
+            if let Some(reason_str) = reason.to_str() {
                 // We should. Do we *need* to?
                 let deletes_hidden = database
                     .get_hide_deletes(chat_id)
@@ -112,18 +114,85 @@ pub async fn delete_message_as_spam_raw(
                         "a message"
                     };
 
-                    bot.archsendmsg_no_link_preview(
-                        chat_id,
-                        format!(
-                            "Deleted {} from <code>{}</code> {}.",
-                            deleted_thing_type,
-                            encode_text(sender_name),
-                            reason
-                        )
-                        .as_str(),
-                        None,
-                    )
-                    .await?;
+                    // Should we post a new one or edit a past one?
+                    // Find a past one.
+
+                    let removal_note_and_sender_id = if let Some(sender_id) = sender_id {
+                        let note = database
+                            .find_removal_note(sender_id, chat_id)
+                            .await
+                            .expect("Database died!");
+
+                        note.map(|note| (note, sender_id))
+                    } else {
+                        None
+                    };
+
+                    if let Some((removal_note, sender_id)) = removal_note_and_sender_id {
+                        let removal_message_id = removal_note.messageid();
+
+                        // Gotta do a bit of annoying grammar gymnastics...
+                        let mut combined_text = format!(
+                            "Deleted {} messages from <code>{}</code>",
+                            removal_note.count() + 1,
+                            encode_text(sender_name)
+                        );
+
+                        let combined_reason = removal_note.delete_reason().filter(|x| x == &reason);
+
+                        if combined_reason.is_some() {
+                            combined_text.push(' ');
+                            combined_text.push_str(reason_str);
+                        } else {
+                            combined_text.push('.');
+                        };
+
+                        bot.edit_message_text(chat_id, removal_message_id, combined_text)
+                            .disable_link_preview(true)
+                            .parse_mode(teloxide::types::ParseMode::Html)
+                            .await?;
+
+                        // Now tell the database back about it.
+                        database
+                            .sync_removal_note(
+                                Some(removal_note.id()),
+                                sender_id,
+                                chat_id,
+                                removal_message_id,
+                                reason,
+                            )
+                            .await
+                            .expect("Database died!");
+                    } else {
+                        // Send a new thing.
+                        let removal_message = bot
+                            .archsendmsg_no_link_preview(
+                                chat_id,
+                                format!(
+                                    "Deleted {} from <code>{}</code> {}.",
+                                    deleted_thing_type,
+                                    encode_text(sender_name),
+                                    reason_str
+                                )
+                                .as_str(),
+                                None,
+                            )
+                            .await?;
+
+                        // Now tell the database back about it.
+                        if let Some(sender_id) = sender_id {
+                            database
+                                .sync_removal_note(
+                                    None,
+                                    sender_id,
+                                    chat_id,
+                                    removal_message[0].id,
+                                    reason,
+                                )
+                                .await
+                                .expect("Database died!");
+                        }
+                    }
                 }
             }
             Ok(())
@@ -172,6 +241,7 @@ pub async fn delete_message_as_spam(
         message.id,
         message.media_group_id(),
         sender_name,
+        message.from.as_ref().map(|x| x.id),
         reason,
     )
     .await
@@ -262,6 +332,7 @@ pub async fn insert_or_update_url_with_log(
                         message_id,
                         None,
                         &sender_name,
+                        None,
                         MessageDeleteReason::ContainsSpamLink,
                     )
                     .await;

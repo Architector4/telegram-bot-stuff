@@ -1,8 +1,12 @@
 use std::fmt::Display;
 
+use teloxide::types::{ChatId, MessageId, UserId};
 use url::Url;
 
-use crate::{sanitized_url::SanitizedUrl, types::UrlDesignation};
+use crate::{
+    sanitized_url::SanitizedUrl,
+    types::{MessageDeleteReason, UrlDesignation},
+};
 
 /// Shortened info of a database entry on a URL.
 #[derive(Clone, Copy, Debug, Hash)]
@@ -146,5 +150,68 @@ impl InsertOrUpdateResult {
             Self::Updated { old_info } => old_info.id(),
             Self::NoChange { existing_info } => existing_info.id(),
         }
+    }
+}
+
+/// An entry for a notification that a message(s) was removed.
+#[derive(Clone, Copy, Debug)]
+pub struct RemovalNote {
+    /// ID of the entry.
+    pub(super) id: i64,
+    /// ID of the user whose message was removed.
+    pub(super) userid: UserId,
+    /// ID of the chat where this is posted.
+    pub(super) chatid: ChatId,
+    /// ID of this message within the chat.
+    pub(super) messageid: MessageId,
+    /// Timestamp of when this message was last posted or edited, in seconds since Unix epoch.
+    // Could have probably made this std::time::SystemTime, but that also stores nanoseconds, so,
+    // whatever
+    pub(super) timestamp: i64,
+    /// Count of removed messages that this currently represents.
+    pub(super) count: u32,
+    /// Reason for these messages being deleted, if singular.
+    pub(super) delete_reason: Option<MessageDeleteReason>,
+}
+
+impl RemovalNote {
+    /// Returns ID of the entry.
+    #[must_use]
+    pub fn id(&self) -> i64 {
+        self.id
+    }
+    /// Returns the ID of the user whose message was removed.
+    #[must_use]
+    #[allow(unused)]
+    pub fn userid(&self) -> UserId {
+        self.userid
+    }
+    /// Returns chat ID of the message that this represents.
+    #[must_use]
+    #[allow(unused)]
+    pub fn chatid(&self) -> ChatId {
+        self.chatid
+    }
+    /// Returns message ID of the message that this represents.
+    #[must_use]
+    pub fn messageid(&self) -> MessageId {
+        self.messageid
+    }
+    /// Returns the timestamp of when this message was last posted or edited, in seconds since Unix
+    /// epoch.
+    #[must_use]
+    #[allow(unused)]
+    pub fn timestamp(&self) -> i64 {
+        self.timestamp
+    }
+    /// Returns the count of removed messages that this currently represents.
+    #[must_use]
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+    /// Returns the reason for these messages being deleted, if singular.
+    #[must_use]
+    pub fn delete_reason(&self) -> Option<MessageDeleteReason> {
+        self.delete_reason
     }
 }

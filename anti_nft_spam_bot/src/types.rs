@@ -290,6 +290,24 @@ impl MessageDeleteReason {
     }
 }
 
+impl TryFrom<u8> for MessageDeleteReason {
+    type Error = ();
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            x if x == MessageDeleteReason::ContainsSpamLink as u8 => {
+                Ok(MessageDeleteReason::ContainsSpamLink)
+            }
+            x if x == MessageDeleteReason::OfAlbumWithSpamMessage as u8 => {
+                Ok(MessageDeleteReason::OfAlbumWithSpamMessage)
+            }
+            x if x == MessageDeleteReason::ContainsSpamSticker as u8 => {
+                Ok(MessageDeleteReason::ContainsSpamSticker)
+            }
+            _ => Err(()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
