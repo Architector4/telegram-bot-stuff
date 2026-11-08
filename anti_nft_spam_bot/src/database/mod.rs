@@ -8,7 +8,7 @@ use futures_util::{stream::BoxStream, TryStreamExt};
 use sqlx::{
     error::ErrorKind,
     migrate::MigrateDatabase,
-    sqlite::{Sqlite, SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
+    sqlite::{Sqlite, SqliteConnectOptions, SqlitePoolOptions, SqliteRow, SqliteSynchronous},
     AssertSqlSafe, Executor, Row, Transaction,
 };
 use teloxide::types::{ChatId, MediaGroupId, MessageId, UserId};
@@ -74,6 +74,7 @@ impl Database {
                     .expect("SQLite connect options should be valid")
                     .pragma("cache_size", "-32768")
                     .foreign_keys(true) // Already  default, but doesn't hurt being explicit.
+                    .synchronous(SqliteSynchronous::Normal) // I trust my filesystem lol)
                     .busy_timeout(std::time::Duration::from_mins(10)),
             )
             .await?;
@@ -216,7 +217,8 @@ impl Database {
                     SqliteConnectOptions::from_str(path_strikes)
                         .expect("SQLite connect options should be valid")
                         .pragma("cache_size", "-32768")
-                        .foreign_keys(true), // Already  default, but doesn't hurt being explicit.
+                        .foreign_keys(true) // Already  default, but doesn't hurt being explicit.
+                        .synchronous(SqliteSynchronous::Normal), // I trust my filesystem lol)
                 )
                 .await?;
 
