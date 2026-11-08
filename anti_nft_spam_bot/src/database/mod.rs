@@ -189,6 +189,15 @@ impl Database {
         ))
         .await?;
 
+        // MAYBE_VOLUNTEERS:
+        // userid (i64, unique primary key)
+        pool.execute(sqlx::query(
+            "CREATE TABLE IF NOT EXISTS maybe_volunteers (
+                    userid INTEGER NOT NULL PRIMARY KEY
+                ) STRICT;",
+        ))
+        .await?;
+
         // Two automated indices suggested by sqlite3_expert
         let _ = pool
             .execute(sqlx::query(
@@ -1555,6 +1564,53 @@ impl Database {
                 Err(e) => Err(e)?,
             };
         }
+
+        Ok(())
+    }
+
+    /// Add a user ID of an account who is probably a volunteer.
+    pub async fn add_maybe_volunteer(&self, userid: UserId) -> Result<(), Error> {
+        sqlx::query("INSERT INTO maybe_volunteers(userid) VALUES (?) ON CONFLICT DO NOTHING;")
+            // https://core.telegram.org/bots/api#user
+            .bind::<i64>(
+                userid
+                    .0
+                    .try_into()
+                    .expect("User IDs are guaranteed by Telegram API to fit within i64"),
+            )
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Check if this user ID is in the maybe volunteers table. If true, a proper check needs to
+    /// be done afterward.
+    pub async fn check_maybe_volunteer(&self, userid: UserId) -> Result<bool, Error> {
+        sqlx::query("SELECT userid FROM maybe_volunteers WHERE userid=?")
+            // https://core.telegram.org/bots/api#user
+            .bind::<i64>(
+                userid
+                    .0
+                    .try_into()
+                    .expect("User IDs are guaranteed by Telegram API to fit within i64"),
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map(|x| x.is_some())
+    }
+
+    /// Remove this user from the maybe volunteers table, if present.
+    pub async fn remove_maybe_volunteer(&self, userid: UserId) -> Result<(), Error> {
+        sqlx::query("DELETE FROM maybe_volunteers WHERE userid=?")
+            // https://core.telegram.org/bots/api#user
+            .bind::<i64>(
+                userid
+                    .0
+                    .try_into()
+                    .expect("User IDs are guaranteed by Telegram API to fit within i64"),
+            )
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

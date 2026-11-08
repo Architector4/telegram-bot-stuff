@@ -95,6 +95,16 @@ async fn handle_message_new_or_edit_raw(
         }
     }
 
+    // If this is control chat, log that this is probably a volunteer.
+    if message.chat.id == CONTROL_CHAT_ID {
+        if let Some(from) = &message.from {
+            database
+                .add_maybe_volunteer(from.id)
+                .await
+                .expect("Database died!");
+        }
+    }
+
     let sender_name = sender_name_prettyprint(message, false);
 
     // Whether or not the sender of this message is an admin, if checked.
@@ -336,7 +346,7 @@ pub async fn handle_command(
         }
         "/review" => handle_command_review(bot, message, database).await,
         "/info" => handle_command_info(bot, message, database).await,
-        "/start" | "/help" if is_private => handle_command_help(bot, message).await,
+        "/start" | "/help" if is_private => handle_command_help(database, bot, message).await,
 
         _ if is_private => {
             if text.starts_with('/') {
@@ -353,7 +363,7 @@ pub async fn handle_command(
             } else if message.forward_origin().is_none() {
                 // If it's in DMs and doesn't start with "/" and is not a forward, treat it as
                 // /help.
-                handle_command_help(bot, message).await
+                handle_command_help(database, bot, message).await
             } else {
                 // In all other cases, whatever
                 Ok(())
@@ -379,7 +389,11 @@ pub fn generate_bot_commands() -> Vec<BotCommand> {
     ]
 }
 /// Handle this message assuming it's the command `/start` or `/help` or similar.
-async fn handle_command_help(bot: &Bot, message: &Message) -> Result<(), RequestError> {
+async fn handle_command_help(
+    database: &Database,
+    bot: &Bot,
+    message: &Message,
+) -> Result<(), RequestError> {
     bot.archsendmsg_no_link_preview(
                 message.chat.id, concat!(
 "This bot is made to combat various types of spam experienced by chats across Telegram.\n\n",
@@ -391,7 +405,7 @@ async fn handle_command_help(bot: &Bot, message: &Message) -> Result<(), Request
             )
             .await?;
 
-    let is_reviewer = authenticate_control_of_sender(bot, message).await?;
+    let is_reviewer = authenticate_control_of_sender(database, bot, message).await?;
 
     if is_reviewer {
         // Also note super special super secret commands.
@@ -426,7 +440,7 @@ async fn handle_command_review(
     message: &Message,
     database: &Database,
 ) -> Result<(), RequestError> {
-    if !authenticate_control_of_sender(bot, message).await? {
+    if !authenticate_control_of_sender(database, bot, message).await? {
         return Ok(());
     }
 
@@ -489,7 +503,7 @@ async fn handle_command_info(
         return Ok(());
     }
 
-    if !authenticate_control_of_sender(bot, message).await? {
+    if !authenticate_control_of_sender(database, bot, message).await? {
         // Not someone who should be able to query stuff.
         return Ok(());
     }
@@ -564,7 +578,7 @@ async fn handle_command_mark(
         return Ok(());
     }
 
-    if !authenticate_control_of_sender(bot, message).await? {
+    if !authenticate_control_of_sender(database, bot, message).await? {
         // Not someone who can review stuff.
         return Ok(());
     }
@@ -654,7 +668,7 @@ async fn handle_command_remove(
         return Ok(());
     }
 
-    if !authenticate_control_of_sender(bot, message).await? {
+    if !authenticate_control_of_sender(database, bot, message).await? {
         // Not someone who can remove stuff.
         return Ok(());
     }
@@ -926,18 +940,24 @@ pub async fn handle_callback_query(
         goodbye!("huhh???   ?????   guh??");
     }
 
+    let user = query.from;
+
+    if message.chat.id == CONTROL_CHAT_ID {
+        // duhhhh that's obviously a volunteer's doing
+        database
+            .add_maybe_volunteer(user.id)
+            .await
+            .expect("Database died!");
+    } else if !authenticate_control(&database, &bot, &user).await? {
+        goodbye!("Access denied.");
+    }
+
     let Some(query_data) = query
         .data
         .and_then(|d| ReviewCallbackData::deserialize_from_str(&d))
     else {
         goodbye!("Failed to parse query data.");
     };
-
-    let user = query.from;
-
-    if !authenticate_control(&bot, &user).await? {
-        goodbye!("Access denied.");
-    }
 
     let entities = message
         .parse_entities()
@@ -994,5 +1014,23 @@ pub async fn handle_callback_query(
         .await?;
     }
 
+    Ok(())
+}
+
+pub async fn handle_chat_member(
+    chat_member: ChatMemberUpdated,
+    database: Arc<Database>,
+) -> Result<(), RequestError> {
+    // Handler just for logging potential volunteers.
+    if chat_member.chat.id != CONTROL_CHAT_ID {
+        return Ok(());
+    }
+
+    if chat_member.new_chat_member.is_present() {
+        database
+            .add_maybe_volunteer(chat_member.new_chat_member.user.id)
+            .await
+            .expect("Database died!");
+    }
     Ok(())
 }

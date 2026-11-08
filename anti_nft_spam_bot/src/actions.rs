@@ -20,44 +20,44 @@ use crate::{
 
 /// Check if this user is in the control chat and can do reviews, and
 /// delay their requests if appropriate.
-pub async fn authenticate_control(bot: &Bot, user: &User) -> Result<bool, RequestError> {
+pub async fn authenticate_control(
+    database: &Database,
+    bot: &Bot,
+    user: &User,
+) -> Result<bool, RequestError> {
+    // Before querying Telegram, check if we locally know them as one.
+    if !database
+        .check_maybe_volunteer(user.id)
+        .await
+        .expect("Database died!")
+    {
+        let username = user_name_prettyprint(user, true, false);
+        log::info!("Unauthorized user trying to access reviews: {username}");
+        return Ok(false);
+    }
+
+    // Okay, but are they *really* a volunteer though?
     let control = bot
         .get_chat_member(CONTROL_CHAT_ID, user.id)
         .await?
         .is_present();
-    if !control {
-        let username = user_name_prettyprint(user, true, false);
-        log::info!("Unauthorized user trying to access reviews: {username}");
 
-        // Not a member.
-        //
-        // Now, facts:
-        // 1. This function will only be run in context of a private chat.
-        //
-        // 2. Teloxide intentionally processes messages from one chat not-concurrently; that is, if
-        //    we delay now, this will delay processing all following direct messages sent by that
-        //    person to this bot.
-        //
-        // 3. There is no pertinent reason to DM this bot other than to get the help message or for
-        //    authenticated user's purposes.
-        //
-        // 4. If a user is sending DMs to this bot, that means that they have already sent
-        //    `/start`, and hence have already seen the help message.
-        //
-        // 5. Therefore, there is no harm to be done by delaying users not legible for reviews for
-        //    DMs.
-        //
-        // 6. Bad actors may want to try and spam this bot `/review` to cause it to send the above
-        //    API request many times and in turn get rate limited by telegram.
-        //
-        // With that in mind, delay this user from accessing this bot for 5 seconds.
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    if !control {
+        // Sorry.
+        database
+            .remove_maybe_volunteer(user.id)
+            .await
+            .expect("Database died!");
+        let username = user_name_prettyprint(user, true, false);
+        log::info!("Former volunteer trying to access reviews: {username}");
     }
+
     Ok(control)
 }
 
 /// Convenience function over [`authenticate_control`].
 pub async fn authenticate_control_of_sender(
+    database: &Database,
     bot: &Bot,
     message: &Message,
 ) -> Result<bool, RequestError> {
@@ -69,7 +69,7 @@ pub async fn authenticate_control_of_sender(
         return Ok(false);
     };
 
-    authenticate_control(bot, sender).await
+    authenticate_control(database, bot, sender).await
 }
 
 /// Delete the message and maybe say in the chat that it was deleted, if they don't have

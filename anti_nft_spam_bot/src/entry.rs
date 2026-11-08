@@ -4,7 +4,7 @@ use teloxide::{dptree::deps, prelude::*};
 use crate::{
     actions::remind_about_reviews_spinloop,
     database::Database,
-    handlers::{generate_bot_commands, handle_callback_query},
+    handlers::{generate_bot_commands, handle_callback_query, handle_chat_member},
 };
 
 /// # Panics
@@ -39,13 +39,12 @@ pub async fn entry() {
     log::info!("Creating the handler...");
 
     let handler = dptree::entry()
-        .branch(Update::filter_message().branch(dptree::endpoint(
-            crate::handlers::handle_message_new_or_edit,
-        )))
-        .branch(Update::filter_edited_message().branch(dptree::endpoint(
-            crate::handlers::handle_message_new_or_edit,
-        )))
-        .branch(Update::filter_callback_query().endpoint(handle_callback_query));
+        .branch(Update::filter_message().endpoint(crate::handlers::handle_message_new_or_edit))
+        .branch(
+            Update::filter_edited_message().endpoint(crate::handlers::handle_message_new_or_edit),
+        )
+        .branch(Update::filter_callback_query().endpoint(handle_callback_query))
+        .branch(Update::filter_chat_member().endpoint(handle_chat_member));
 
     log::info!("Dispatching the dispatcher!");
 
