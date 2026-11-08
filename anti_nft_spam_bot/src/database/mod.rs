@@ -144,12 +144,16 @@ impl Database {
         // sanitized_url (text, full `SanitizedUrl`)
         // original_url (text, full original URL with no lowercasing)
         // last_sent_to_review (date+time in UTC timezone in ISO 8601 format)
+        // sender_id (i64, sender of the review; either a user ID or chat ID)
+        //        (should NOT be optional, but you can't add a nonnull column
+        //        without a default value in sqlite3, so this is better lmao)
         pool.execute(
             "CREATE TABLE IF NOT EXISTS review_queue (
                 id INTEGER PRIMARY KEY NOT NULL,
                 sanitized_url TEXT NOT NULL UNIQUE,
                 original_url TEXT NOT NULL,
                 last_sent_to_review TEXT NULL,
+                sender_id INTEGER NULL,
                 UNIQUE (sanitized_url)
             ) STRICT;",
         )
@@ -197,6 +201,11 @@ impl Database {
                 ) STRICT;",
         ))
         .await?;
+
+        // Some transparent database migration uwu
+        let _ = pool
+            .execute("ALTER TABLE review_queue ADD COLUMN sender_id INTEGER NULL;")
+            .await;
 
         // Two automated indices suggested by sqlite3_expert
         let _ = pool
@@ -884,13 +893,15 @@ impl Database {
     /// Send this URL into the review queue.
     pub async fn send_to_review(
         &self,
+        sender_user_or_chat_id: i64,
         sanitized_url: &SanitizedUrl,
         original_url: &Url,
     ) -> Result<SendToReviewResult, Error> {
         // A naive implementation of this method would be:
         //
-        // 1. Check if there's URL already in the database due to which this should be rejected.
-        // 2. If not, insert into review queue.
+        // 1. Check if the user has submitted too many reviews already.
+        // 2. Check if there's URL already in the database due to which this should be rejected.
+        // 3. If not, insert into review queue.
         //
         // But if other code inserts a new URL inbetween these two steps, a
         // time-of-check-time-of-use bug might occur. Not a big deal, but worth avoiding.
@@ -899,7 +910,8 @@ impl Database {
         // 1. Create a transaction.
         // 2. Insert into review queue in the transaction; on conflict, reject.
         //    This write-locks the database, so new URLs can be inserted.
-        // 3. Check if there's a conflicting URL in the database right now. If so, rollback and
+        // 3. Check if this user has submitted too many reviews now; if so, rollback and reject.
+        // 4. Check if there's a conflicting URL in the database right now. If so, rollback and
         //    reject.
         //
         // Shouldn't cause a TOCTOU in this case, I think.
@@ -908,19 +920,34 @@ impl Database {
 
         let result = sqlx::query(
             "INSERT INTO review_queue
-                (sanitized_url, original_url)
+                (sanitized_url, original_url, sender_id)
             VALUES
-                (?, ?)
+                (?, ?, ?)
             ON CONFLICT DO NOTHING;",
         )
         .bind(sanitized_url.as_str())
         .bind(original_url.as_str())
+        .bind(sender_user_or_chat_id)
         .execute(&mut *trans)
         .await?;
 
         if result.rows_affected() == 0 {
-            // Dropping a transaction rolls it back.
+            // Nothing was written; this is a conflict with an existing entry.
+            trans.rollback().await?;
             return Ok(SendToReviewResult::AlreadyOnReview);
+        }
+
+        // Check if it's too many reviews for this user.
+        let count: u32 = sqlx::query("SELECT COUNT(*) FROM review_queue WHERE sender_id=?")
+            .bind(sender_user_or_chat_id)
+            .fetch_one(&mut *trans)
+            .await?
+            .get(0);
+
+        if count > 5 {
+            // Too much!
+            trans.rollback().await?;
+            return Ok(SendToReviewResult::TooManySubmitted);
         }
 
         // Check for conflicting existing entries.
@@ -929,11 +956,13 @@ impl Database {
         if let Some(existing) = self.get_url_full(sanitized_url, false).await? {
             if existing.designation() == UrlDesignation::Spam {
                 // If this marks it as spam, reject.
+                trans.rollback().await?;
                 return Ok(SendToReviewResult::AlreadyInDatabase(existing));
             }
 
             if existing.manually_reviewed() && existing.sanitized_url() == sanitized_url {
                 // If it's a perfect match and manually reviewed, reject.
+                trans.rollback().await?;
                 return Ok(SendToReviewResult::AlreadyInDatabase(existing));
             }
         }
@@ -1876,18 +1905,18 @@ mod tests {
         let db = new_db().await;
 
         let urls = SanitizedUrl::from_str_with_original("amogus.com").unwrap();
-        let result = db.send_to_review(&urls.0, &urls.1).await.unwrap();
+        let result = db.send_to_review(69420, &urls.0, &urls.1).await.unwrap();
         assert!(matches!(result, SendToReviewResult::AlreadyInDatabase(_)));
 
         let urls = SanitizedUrl::from_str_with_original("somenewurl.com").unwrap();
 
-        let result = db.send_to_review(&urls.0, &urls.1).await.unwrap();
+        let result = db.send_to_review(69420, &urls.0, &urls.1).await.unwrap();
         assert!(matches!(
             result,
             SendToReviewResult::Sent { review_entry_id: 1 }
         ));
 
-        let result = db.send_to_review(&urls.0, &urls.1).await.unwrap();
+        let result = db.send_to_review(69420, &urls.0, &urls.1).await.unwrap();
         assert!(matches!(result, SendToReviewResult::AlreadyOnReview));
     }
 
@@ -1896,7 +1925,7 @@ mod tests {
         let db = new_db().await;
 
         let urls = SanitizedUrl::from_str_with_original("somenewurl.com").unwrap();
-        let send_result = db.send_to_review(&urls.0, &urls.1).await.unwrap();
+        let send_result = db.send_to_review(69420, &urls.0, &urls.1).await.unwrap();
         assert!(matches!(
             send_result,
             SendToReviewResult::Sent { review_entry_id: 1 }
@@ -1916,14 +1945,20 @@ mod tests {
         let db = new_db().await;
 
         let urls_a = SanitizedUrl::from_str_with_original("a.com").unwrap();
-        let send_result = db.send_to_review(&urls_a.0, &urls_a.1).await.unwrap();
+        let send_result = db
+            .send_to_review(69420, &urls_a.0, &urls_a.1)
+            .await
+            .unwrap();
         assert!(matches!(
             send_result,
             SendToReviewResult::Sent { review_entry_id: 1 }
         ));
 
         let urls_b = SanitizedUrl::from_str_with_original("b.com").unwrap();
-        let send_result = db.send_to_review(&urls_b.0, &urls_b.1).await.unwrap();
+        let send_result = db
+            .send_to_review(69420, &urls_b.0, &urls_b.1)
+            .await
+            .unwrap();
         assert!(matches!(
             send_result,
             SendToReviewResult::Sent { review_entry_id: 2 }
@@ -1953,7 +1988,7 @@ mod tests {
             .await
             .unwrap();
 
-        let send_result = db.send_to_review(&urls.0, &urls.1).await.unwrap();
+        let send_result = db.send_to_review(69420, &urls.0, &urls.1).await.unwrap();
         assert!(matches!(
             send_result,
             SendToReviewResult::Sent { review_entry_id: 1 }
@@ -2074,5 +2109,61 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn review_limit() {
+        let db = new_db().await;
+        let sender = 69420;
+        let other_sender = 67;
+
+        let urls = SanitizedUrl::from_str_with_original("example.com/1").unwrap();
+        let send_result = db.send_to_review(sender, &urls.0, &urls.1).await.unwrap();
+        assert!(matches!(
+            send_result,
+            SendToReviewResult::Sent { review_entry_id: 1 }
+        ));
+        let urls = SanitizedUrl::from_str_with_original("example.com/2").unwrap();
+        let send_result = db.send_to_review(sender, &urls.0, &urls.1).await.unwrap();
+        assert!(matches!(
+            send_result,
+            SendToReviewResult::Sent { review_entry_id: 2 }
+        ));
+        let urls = SanitizedUrl::from_str_with_original("example.com/3").unwrap();
+        let send_result = db.send_to_review(sender, &urls.0, &urls.1).await.unwrap();
+        assert!(matches!(
+            send_result,
+            SendToReviewResult::Sent { review_entry_id: 3 }
+        ));
+        let urls = SanitizedUrl::from_str_with_original("example.com/4").unwrap();
+        let send_result = db.send_to_review(sender, &urls.0, &urls.1).await.unwrap();
+        assert!(matches!(
+            send_result,
+            SendToReviewResult::Sent { review_entry_id: 4 }
+        ));
+        let urls = SanitizedUrl::from_str_with_original("example.com/5").unwrap();
+        let send_result = db.send_to_review(sender, &urls.0, &urls.1).await.unwrap();
+        assert!(matches!(
+            send_result,
+            SendToReviewResult::Sent { review_entry_id: 5 }
+        ));
+        let urls = SanitizedUrl::from_str_with_original("example.com/6").unwrap();
+        let send_result = db.send_to_review(sender, &urls.0, &urls.1).await.unwrap();
+        assert!(matches!(send_result, SendToReviewResult::TooManySubmitted,));
+
+        let urls = SanitizedUrl::from_str_with_original("example.com/7").unwrap();
+        let send_result = db.send_to_review(sender, &urls.0, &urls.1).await.unwrap();
+        assert!(matches!(send_result, SendToReviewResult::TooManySubmitted,));
+
+        // But someone else can!
+        let urls = SanitizedUrl::from_str_with_original("example.com/6").unwrap();
+        let send_result = db
+            .send_to_review(other_sender, &urls.0, &urls.1)
+            .await
+            .unwrap();
+        assert!(matches!(
+            send_result,
+            SendToReviewResult::Sent { review_entry_id: 6 }
+        ));
     }
 }

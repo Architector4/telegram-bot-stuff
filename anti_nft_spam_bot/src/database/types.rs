@@ -126,6 +126,8 @@ pub enum SendToReviewResult {
     AlreadyOnReview,
     /// This URL is already in the database.
     AlreadyInDatabase(UrlInfoFull),
+    /// This user has already submitted too many URLs.
+    TooManySubmitted,
 }
 
 /// Result of [`Database::insert_or_update_url`].

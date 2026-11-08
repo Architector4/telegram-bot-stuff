@@ -795,6 +795,7 @@ async fn handle_command_spam(
     let mut some_already_on_review = false;
     let mut some_already_marked_spam = false;
     let mut some_already_manually_reviewed_as_not_spam = false;
+    let mut some_rejected_too_many = false;
 
     // The big iterator over all links in this message as well as the message it's a reply to.
     // Additionally, for every link, it includes the message it's from, and which by_admin cache to
@@ -821,6 +822,14 @@ async fn handle_command_spam(
 
     let mut review_header_posted = false;
 
+    // ID of the user or chat that had sent in this review.
+    let sender_id: i64 = message
+        .from
+        .as_ref()
+        .and_then(|u| u.id.0.try_into().ok())
+        .or_else(|| message.sender_chat.as_ref().map(|c| c.id.0))
+        .expect("Message sent by the nebulous unknown who??");
+
     // Iterate over all the links ever.
     for (
         sanitized_url,
@@ -840,7 +849,7 @@ async fn handle_command_spam(
             is_sender_admin_with_cache(bot, reported_message, this_sent_by_admin_cache).await?;
 
         let result = database
-            .send_to_review(&sanitized_url, &original_url)
+            .send_to_review(sender_id, &sanitized_url, &original_url)
             .await
             .expect("Database died!");
 
@@ -883,6 +892,7 @@ async fn handle_command_spam(
                     some_already_manually_reviewed_as_not_spam = true;
                 }
             },
+            SendToReviewResult::TooManySubmitted => some_rejected_too_many = true,
         }
     }
 
@@ -895,6 +905,10 @@ async fn handle_command_spam(
         "Thank you, but links or sticker in this message are already marked as spam."
     } else if some_already_manually_reviewed_as_not_spam {
         "Thank you, but the links in this message were manually reviewed and were determined to be not spam."
+    } else if some_rejected_too_many {
+        concat!("Sorry, but you've submitted too many links to review at the moment.\n",
+            "Please wait until links you've already submitted are reviewed, or ask someone else to submit these."
+        )
     } else {
         // No links at all.
         concat!(
